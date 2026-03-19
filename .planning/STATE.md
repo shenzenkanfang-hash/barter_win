@@ -2,9 +2,16 @@
 
 ## Current Position
 
-Phase: Not started
-Plan: —
-Status: Ready to start v0.1
+Phase: 1 (Foundation) - COMPLETE
+Plan: 01-PLAN.md
+Status: v0.1 Foundation shipped
+
+## Completed
+
+- Workspace structure with 5 crates
+- Error types (TradingError)
+- Core data structures (Order, Position, FundPool)
+- Logging with tracing
 
 ## Blockers
 
@@ -12,4 +19,4 @@ Status: Ready to start v0.1
 
 ## Next Action
 
-Start Phase 1: Foundation
+Start Phase 2: Market Data Layer
