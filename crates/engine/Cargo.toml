@@ -8,3 +8,7 @@ rust_decimal = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 strategy = { path = "../strategy" }
+account = { path = "../account" }
+market = { path = "../market" }
+indicator = { path = "../indicator" }
+tracing = { workspace = true }

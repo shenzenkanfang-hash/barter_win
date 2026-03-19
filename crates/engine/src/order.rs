@@ -4,6 +4,10 @@ use strategy::types::{OrderRequest, OrderType, Side};
 pub struct OrderExecutor;
 
 impl OrderExecutor {
+    pub fn new() -> Self {
+        Self
+    }
+
     pub fn execute_market_order(
         &self,
         order: &OrderRequest,

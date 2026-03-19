@@ -8,4 +8,4 @@ pub mod websocket;
 pub use error::MarketError;
 pub use kline::KLineSynthesizer;
 pub use types::{KLine, Period, Tick};
-pub use websocket::{MarketConnector, MarketStream};
+pub use websocket::{MarketConnector, MarketStream, MockMarketConnector, MockMarketStream};
