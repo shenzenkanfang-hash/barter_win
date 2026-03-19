@@ -4,7 +4,6 @@
 
 **Goal**: Project scaffold and core infrastructure
 
-**Target features**:
 - Workspace structure
 - Error type definitions
 - Core data structures (Order, Position, Fund)
@@ -18,7 +17,6 @@
 
 **Goal**: WebSocket connection and K-line synthesis
 
-**Target features**:
 - Exchange WebSocket connector
 - K-line incremental synthesis
 - Market data trait abstraction
@@ -31,7 +29,6 @@
 
 **Goal**: Core indicators with O(1) incremental calculation
 
-**Target features**:
 - EMA incremental calculation
 - Pine color (MACD + EMA + RSI)
 - TR and price position
@@ -44,7 +41,6 @@
 
 **Goal**: Strategy trait and three strategy types
 
-**Target features**:
 - Strategy trait definition
 - Daily strategy
 - Minute strategy
@@ -58,7 +54,6 @@
 
 **Goal**: Core engine with risk check and order execution
 
-**Target features**:
 - Engine core
 - Risk pre-check (lock-free)
 - Order execution with global lock

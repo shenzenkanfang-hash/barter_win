@@ -2,13 +2,7 @@
 
 ## What This Is
 
-High-performance quantitative trading system rebuilt in Rust, inspired by Barter-rs architecture. Supports multi-period strategies (daily + minute + tick) with dynamic mode switching based on market volatility.
-
-Core goals:
-- Multi-period strategy parallel execution
-- Dynamic high/low frequency mode switching
-- Hybrid position mode: shared fund pool, strategy-private positions
-- Incremental indicator calculation for tick-level performance
+High-performance quantitative trading system in Rust. Supports multi-period strategies (daily + minute + tick) with dynamic mode switching based on market volatility.
 
 ## Core Value
 
@@ -16,33 +10,23 @@ Core goals:
 
 ## Requirements
 
-### Validated
-
-(None yet — initial build phase)
-
 ### Active
 
-- [ ] Project scaffold: workspace structure, error types, core data structures
-- [ ] Market data layer: WebSocket connector, K-line synthesis
-- [ ] Indicator layer: EMA, Pine color, TR/Price position
-- [ ] Strategy layer: Daily/Minute/Tick strategy traits and implementations
-- [ ] Engine layer: Core engine, risk pre-check, order execution
+- [ ] v0.1: Foundation — workspace, error types, core data structures, logging
+- [ ] v0.2: Market data — WebSocket, K-line synthesis
+- [ ] v0.3: Indicator layer — EMA, Pine color, TR/Price position
+- [ ] v0.4: Strategy layer — Strategy trait, 3 strategy types
+- [ ] v0.5: Engine layer — Core engine, risk check, order execution
 
 ### Out of Scope
 
-- Backtesting framework — Focus on live trading first
-- Multiple exchange support — Single exchange to start
-- Machine learning integration — Manual strategy only for v1
-
-## Context
-
-- **Source**: Migrating from Go quantitative trading system
-- **Architecture reference**: Barter-rs (ztNozdormu/barter-rs)
-- **Key design**: Three-tier indicators (TR/Pine/Price position) per brainstorming 2026-03-20
+- Backtesting — Focus on live trading first
+- Multiple exchanges — Single exchange to start
+- Machine learning — Manual strategy only for v1
 
 ## Constraints
 
-- **Tech stack**: Rust stable, Tokio async runtime
+- **Tech stack**: Rust stable, Tokio async
 - **Lock-free hot path**: Tick processing must never block on locks
 - **Financial precision**: Use rust_decimal for all calculations
 
@@ -50,10 +34,9 @@ Core goals:
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Three-tier indicators (TR/Pine/Price position) | Simplified from Barter-rs complex indicators | ✓ Good |
-| No-lock tick processing | High-frequency performance requirement | ✓ Good |
-| Strategy-private positions | Avoid contention between strategies | ✓ Good |
-| Lock-free pre-check, lock-order execution | Minimize lock hold time | ✓ Good |
+| Three-tier indicators | Simplified from complex alternatives | ✓ Good |
+| No-lock tick processing | High-frequency requirement | ✓ Good |
+| Strategy-private positions | Avoid contention | ✓ Good |
 
 ---
-*Last updated: 2026-03-20 after initial GSD setup*
+*Last updated: 2026-03-20*
