@@ -4,9 +4,8 @@ use engine::risk::RiskPreChecker;
 use indicator::{EMA, RSI};
 use market::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
-use std::sync::Arc;
-use strategy::types::{OrderRequest, Signal};
-use strategy::{Strategy, StrategyId};
+use strategy::types::OrderRequest;
+use strategy::StrategyId;
 use tracing::{info, warn};
 
 /// 交易引擎 - 串联所有层
