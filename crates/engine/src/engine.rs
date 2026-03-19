@@ -1,7 +1,7 @@
 use account::types::FundPool;
 use engine::order::OrderExecutor;
 use engine::risk::RiskPreChecker;
-use indicator::{EMA, PineColorDetector, PricePosition, RSI};
+use indicator::{EMA, RSI};
 use market::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
 use std::sync::Arc;
@@ -22,7 +22,6 @@ pub struct TradingEngine {
     ema_fast: EMA,
     ema_slow: EMA,
     rsi: RSI,
-    pine_color: PineColorDetector,
 
     // 风控
     risk_checker: RiskPreChecker,
@@ -50,7 +49,6 @@ impl TradingEngine {
             ema_fast: EMA::new(12),
             ema_slow: EMA::new(26),
             rsi: RSI::new(14),
-            pine_color: PineColorDetector::new(),
             risk_checker: RiskPreChecker::new(
                 Decimal::try_from(0.95).unwrap(), // 95% 最大仓位
                 Decimal::try_from(1000.0).unwrap(), // 最低保留 1000
@@ -80,14 +78,14 @@ impl TradingEngine {
     }
 
     fn update_indicators(&mut self, price: Decimal) {
-        // 更新 EMA
-        let ema_f = self.ema_fast.update(price);
-        let ema_s = self.ema_slow.update(price);
+        // 更新 EMA (使用 calculate 方法)
+        let _ema_f = self.ema_fast.calculate(price);
+        let _ema_s = self.ema_slow.calculate(price);
 
-        // 更新 RSI
-        if let (Some(f), Some(s)) = (ema_f, ema_s) {
-            let _ = self.rsi.update(f - s);
-        }
+        // 更新 RSI (使用 calculate 方法)
+        let _rsi_value = self.rsi.calculate(_ema_f - _ema_s);
+
+        // 后续可以在这里调用 PineColorDetector::detect() 进行颜色检测
     }
 
     fn on_kline_completed(&mut self, kline: &market::types::KLine) {
