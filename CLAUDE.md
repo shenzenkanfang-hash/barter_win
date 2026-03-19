@@ -139,9 +139,30 @@ GSD 开发流程
 Phase 1 (Foundation): 完成
 - TradingError 错误类型
 - Order、Position、FundPool 核心结构
-- lib.rs 基础设置
 
-Phase 2-5: 待实现
-- 见 .planning/phases/*/XX-PLAN.md
+Phase 2 (Market Data): 完成
+- Tick、KLine、Period 类型
+- KLineSynthesizer (O(1)增量合成)
+- MarketConnector、MarketStream traits
+
+Phase 3 (Indicator): 完成
+- EMA (O(1)增量计算)
+- RSI (相对强弱指数)
+- PineColor (趋势颜色检测)
+- PricePosition (价格位置)
+
+Phase 4 (Strategy): 完成
+- Strategy trait
+- Signal、TradingMode、OrderRequest 类型
+
+Phase 5 (Engine): 完成
+- RiskPreChecker (风控预检)
+- OrderExecutor (订单执行)
+- ModeSwitcher (模式切换)
+
+Phase 6: Integration (TODO)
+- WebSocket连接实现
+- 策略实例化
+- 完整交易流程串联
 
 ================================================================================
