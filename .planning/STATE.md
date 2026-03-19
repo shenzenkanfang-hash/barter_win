@@ -2,16 +2,17 @@
 
 ## Current Position
 
-Phase: 1 (Foundation) - COMPLETE
-Plan: 01-PLAN.md
-Status: v0.1 Foundation shipped
+Phase: 1-5 (Foundation + Market + Indicator + Strategy + Engine) - ALL COMPLETE
+Status: v0.2 Core layers shipped
 
 ## Completed
 
-- Workspace structure with 5 crates
-- Error types (TradingError)
-- Core data structures (Order, Position, FundPool)
-- Logging with tracing
+- Phase 1: Foundation - TradingError, Order, Position, FundPool
+- Phase 2: Market Data - Tick, KLine, KLineSynthesizer, MarketConnector, MarketStream
+- Phase 3: Indicator - EMA, RSI, PineColor, PricePosition
+- Phase 4: Strategy - Strategy trait, Signal, TradingMode, OrderRequest
+- Phase 5: Engine - RiskPreChecker, OrderExecutor, ModeSwitcher
+- Workspace dependencies updated (rust_decimal_macros, async-trait, fnv)
 
 ## Blockers
 
@@ -19,4 +20,4 @@ Status: v0.1 Foundation shipped
 
 ## Next Action
 
-Start Phase 2: Market Data Layer
+Phase 6: Integration and testing
