@@ -41,16 +41,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fund_pool,
     );
 
-    // 4. 运行引擎 (模拟数据，运行 10 秒后退出)
+    // 4. 运行引擎 (使用内部 run 方法，会在内部处理循环)
+    // 注意: 由于 run() 是无限循环，这里我们在 engine 内部设置超时退出
     tracing::info!("开始模拟交易...");
 
-    let start = std::time::Instant::now();
-    while start.elapsed().as_secs() < 10 {
-        if let Some(tick) = engine.market_stream.next_tick().await {
-            engine.on_tick(&tick).await;
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    }
+    // 使用 run_with_timeout 替代直接调用 run()
+    engine.run_with_timeout(10).await;
 
     tracing::info!("模拟交易结束");
 

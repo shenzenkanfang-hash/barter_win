@@ -142,4 +142,24 @@ impl TradingEngine {
             }
         }
     }
+
+    /// 带超时的运行 (用于测试模拟)
+    pub async fn run_with_timeout(&mut self, seconds: u64) {
+        info!("TradingEngine 启动 (超时: {}秒)", seconds);
+
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < seconds {
+            // 从市场获取 tick
+            if let Some(tick) = self.market_stream.next_tick().await {
+                self.on_tick(&tick).await;
+            } else {
+                warn!("市场数据流结束");
+                break;
+            }
+            // 小延迟避免过于密集
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        info!("TradingEngine 超时退出");
+    }
 }
