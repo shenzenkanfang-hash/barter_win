@@ -103,7 +103,7 @@ impl TradingEngine {
     }
 
     /// 执行订单
-    pub async fn execute_order(&self, order: OrderRequest) -> Result<(), engine::EngineError> {
+    pub async fn execute_order(&self, order: OrderRequest) -> Result<(), crate::EngineError> {
         // 1. 风控预检
         let order_value = order.qty * order.price.unwrap_or(order.qty);
         self.risk_checker.pre_check(
