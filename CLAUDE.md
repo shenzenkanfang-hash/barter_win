@@ -260,9 +260,11 @@ Phase 5 (Engine): 完成
 - OrderExecutor (订单执行)
 - ModeSwitcher (模式切换)
 
-Phase 6: Integration (TODO)
-- WebSocket连接实现
-- 策略实例化
+Phase 6: Integration (进行中)
+- TradingEngine 主引擎
+- MockMarketStream/MockMarketConnector
+- main.rs 程序入口
+- 类型转换模块 (Side, OrderType)
 - 完整交易流程串联
 
 ================================================================================
