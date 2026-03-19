@@ -9,7 +9,7 @@
 - Core data structures (Order, Position, Fund)
 - Logging setup
 
-**Status**: Not started
+**Status**: COMPLETE
 
 ---
 
@@ -17,11 +17,12 @@
 
 **Goal**: WebSocket connection and K-line synthesis
 
-- Exchange WebSocket connector
+- Exchange WebSocket connector (trait)
 - K-line incremental synthesis
 - Market data trait abstraction
+- MockMarketStream for testing
 
-**Status**: Not started
+**Status**: COMPLETE
 
 ---
 
@@ -32,8 +33,9 @@
 - EMA incremental calculation
 - Pine color (MACD + EMA + RSI)
 - TR and price position
+- RSI relative strength index
 
-**Status**: Not started
+**Status**: COMPLETE
 
 ---
 
@@ -42,11 +44,10 @@
 **Goal**: Strategy trait and three strategy types
 
 - Strategy trait definition
-- Daily strategy
-- Minute strategy
-- Tick strategy
+- Signal, TradingMode, OrderRequest types
+- Order side abstraction
 
-**Status**: Not started
+**Status**: COMPLETE
 
 ---
 
@@ -54,9 +55,23 @@
 
 **Goal**: Core engine with risk check and order execution
 
-- Engine core
+- Engine core (TradingEngine)
 - Risk pre-check (lock-free)
 - Order execution with global lock
-- Position management
+- Position management (types conversion)
+- ModeSwitcher for volatility detection
 
-**Status**: Not started
+**Status**: COMPLETE
+
+---
+
+## v0.6: Integration
+
+**Goal**: Full trading flow integration
+
+- main.rs entry point
+- Component wiring
+- Mock data flow
+- End-to-end compilation
+
+**Status**: IN PROGRESS
