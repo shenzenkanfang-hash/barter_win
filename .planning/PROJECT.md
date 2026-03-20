@@ -21,8 +21,12 @@ High-performance quantitative trading system in Rust. Supports multi-period stra
 
 ### Active
 
-- [ ] v1.1: Unit tests and integration tests
-- [ ] v1.2: Indicator calculation adjustment based on Python code
+- [ ] v1.1: MockBinanceGateway + Signal Synthesis Layer
+  - MockBinanceGateway: 模拟币安账户/持仓/订单/保证金，风控与币安一致
+  - Signal Synthesis Layer: tr_ratio<1退出 + 日线趋势平仓
+  - Complete test coverage
+  - Indicator comparison (Rust vs Python)
+  - Phase: `.planning/phases/08-v1.1-mock-binance/`
 
 ### Out of Scope
 

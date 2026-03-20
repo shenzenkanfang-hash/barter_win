@@ -151,3 +151,19 @@
 - All modules implemented and compilation verified
 - cargo check --all passes
 - Git tag v1.0.0 created
+
+---
+
+## v1.1: MockBinanceGateway + Signal Synthesis Layer
+
+**Goal**: 实现模拟币安网关和信号综合层
+
+**Deliverables:**
+- MockBinanceGateway: 模拟账户/持仓/订单/保证金，与币安风控一致
+- Signal Synthesis Layer: 通道退出逻辑 (tr_ratio < 1, ma5_close + PineColor)
+- Complete test coverage for all modules
+- Indicator comparison (Rust vs Python)
+
+**Status**: PLANNING
+
+**Phase Directory:** `.planning/phases/08-v1.1-mock-binance/`
