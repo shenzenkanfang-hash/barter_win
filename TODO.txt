@@ -125,8 +125,8 @@ RiskPreChecker (risk.rs):
 流水线架构相关:
 - Check 表 (CheckTable) - ✅ 已实现
 - 一轮编码机制 (RoundGuard) - ✅ 已实现
-- 高速通道驱动 - 待实现
-- 慢速通道时间驱动 - 待实现
+- 高速通道驱动 - ✅ 已实现 (VolatilityChannel)
+- 慢速通道时间驱动 - ✅ 已实现 (同一ChannelType区分)
 - PipelineForm 全流程表单 - ✅ 已实现
 
 SymbolRules 相关:

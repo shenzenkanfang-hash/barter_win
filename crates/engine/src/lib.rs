@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod channel;
 pub mod check_table;
 pub mod engine;
 pub mod error;
@@ -10,6 +11,7 @@ pub mod risk;
 pub mod round_guard;
 pub mod symbol_rules;
 
+pub use channel::{ChannelType, VolatilityChannel};
 pub use check_table::{CheckEntry, CheckTable};
 pub use engine::TradingEngine;
 pub use error::EngineError;
