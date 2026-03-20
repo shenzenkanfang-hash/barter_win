@@ -118,3 +118,154 @@ impl RiskPreChecker {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// E3.1 RiskPreChecker 测试 - 订单请求风控预检
+
+    #[test]
+    fn test_pre_check_normal_mode_pass() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        checker.register_symbol("BTCUSDT".to_string());
+
+        // 正常模式：品种已注册、资金充足、持仓比例未超限 -> 通过
+        let result = checker.pre_check(
+            "BTCUSDT",
+            dec!(50000),
+            dec!(5000),   // 5% 持仓比例
+            dec!(100000),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pre_check_unregistered_symbol() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        checker.register_symbol("BTCUSDT".to_string());
+
+        // 品种未注册 -> 拒绝
+        let result = checker.pre_check(
+            "ETHUSDT",
+            dec!(50000),
+            dec!(5000),
+            dec!(100000),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("未注册"));
+    }
+
+    #[test]
+    fn test_pre_check_insufficient_balance() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+
+        // 资金不足 -> 拒绝
+        let result = checker.pre_check(
+            "BTCUSDT",
+            dec!(500),    // 可用资金小于最低保留
+            dec!(5000),
+            dec!(100000),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("可用资金"));
+    }
+
+    #[test]
+    fn test_pre_check_position_ratio_exceeded() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+
+        // 持仓比例超限 (20% > 10%) -> 拒绝
+        let result = checker.pre_check(
+            "BTCUSDT",
+            dec!(50000),
+            dec!(20000),
+            dec!(100000),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("超过最大比例"));
+    }
+
+    #[test]
+    fn test_pre_check_high_volatility_mode_pass() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        checker.set_volatility_mode(VolatilityMode::High);
+        checker.register_symbol("BTCUSDT".to_string());
+
+        // 高波动模式：仓位减半后通过 (5% < 10%/2 = 5%)
+        let result = checker.pre_check(
+            "BTCUSDT",
+            dec!(50000),
+            dec!(5000),
+            dec!(100000),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pre_check_high_volatility_mode_rejected() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        checker.set_volatility_mode(VolatilityMode::High);
+        checker.register_symbol("BTCUSDT".to_string());
+
+        // 高波动模式：仓位减半后仍超限 (10% > 10%/2 = 5%) -> 拒绝
+        let result = checker.pre_check(
+            "BTCUSDT",
+            dec!(50000),
+            dec!(10000),
+            dec!(100000),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("高波动模式"));
+    }
+
+    #[test]
+    fn test_pre_check_extreme_volatility_mode_rejected() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        checker.set_volatility_mode(VolatilityMode::Extreme);
+        checker.register_symbol("BTCUSDT".to_string());
+
+        // 极端波动模式：任何交易都拒绝
+        let result = checker.pre_check(
+            "BTCUSDT",
+            dec!(50000),
+            dec!(1000),   // 很小的订单
+            dec!(100000),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("极端波动模式"));
+    }
+
+    #[test]
+    fn test_pre_check_empty_registration_allows_all() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        // 未注册任何品种（注册集合为空），允许所有品种交易
+
+        let result = checker.pre_check(
+            "ANYCOIN",
+            dec!(50000),
+            dec!(5000),
+            dec!(100000),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pre_check_boundary_position_ratio() {
+        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+
+        // 边界情况：正好 10% 持仓比例 -> 通过
+        let result = checker.pre_check(
+            "BTCUSDT",
+            dec!(50000),
+            dec!(10000),
+            dec!(100000),
+        );
+        assert!(result.is_ok());
+    }
+}
