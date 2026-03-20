@@ -49,6 +49,25 @@ Status: v0.8 Issue Fix Complete
 
 ## 设计决策记录
 
+### v0.8 设计文档整合: 旧代码逻辑归档
+
+新增文档: `docs/2026-03-20-trading-system-rust-design.md` 第十七章 (17.3.7-17.3.8)
+
+整合内容:
+- 17.3.7 风控引擎三层架构 (AccountPool/StrategyPool/OrderCheck)
+  - AccountPool: 账户保证金池，Redis熔断保护
+  - StrategyPool: 策略保证金池，分钟/小时级分配
+  - OrderCheck: 订单风控检查器，Lua脚本原子预占
+- 17.3.8 盈亏管理模块 (PnlManager)
+  - 低波动/高波动品种互斥机制
+  - rescue_low_volatility_symbols() 解救机制
+  - 浮盈/实盈区分，累计盈利
+
+设计决策:
+- 品种规则需要专门的 SymbolRules 小模块处理
+- 持仓管理简化: 只需记录价格/数量/多空，无需复杂状态机
+- 全流程表单 PipelineForm 贯穿所有层级
+
 ### v0.7 架构升级: 流水线并行架构
 
 新增文档: `docs/2026-03-20-trading-system-rust-design.md` 第十六章
@@ -66,3 +85,4 @@ Status: v0.8 Issue Fix Complete
 - 实现流水线架构代码
 - 实现 Check 表
 - 实现一轮编码机制
+- 实现 SymbolRules 小模块

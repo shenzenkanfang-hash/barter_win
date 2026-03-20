@@ -1574,4 +1574,259 @@ Short_INITIAL ──> Short_FIRST_OPEN ──> Short_DOUBLE_ADD ──> Short_DA
 任意 ──> HEDGE_ENTER ──> POS_LOCKED
 ```
 
+--------------------------------------------------------------------------------
+17.3.7 风控引擎三层架构
+--------------------------------------------------------------------------------
+
+本文档描述基于旧代码 `risk_engine.py` 的风控引擎三层架构设计。
+
+### 17.3.7.1 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        RiskEngine (顶级风控引擎)                          │
+│  - 整合所有组件提供统一接口                                                │
+│  - 自动从交易所API同步账户和仓位数据                                        │
+│  - 统一接口: check_minute_order(), check_hour_order()                    │
+└─────────────────────────────────────────────────────────────────────────┘
+          │                           │                        │
+          ▼                           ▼                        ▼
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────────┐
+│   AccountPool   │      │  StrategyPool   │      │     OrderCheck      │
+│  (账户保证金池)  │      │  (策略保证金池)  │      │   (订单风控检查器)   │
+│                 │      │                 │      │                     │
+│ - 账户数据同步   │◄──── │ - 策略保证金分配 │◄──── │ - 订单级别风控检查   │
+│ - Redis熔断保护 │      │ - 品种注册管理   │      │ - 保证金预占        │
+│ - 本地缓存      │      │ - 开仓计算      │      │ - Lua脚本原子操作    │
+└─────────────────┘      └─────────────────┘      └─────────────────────┘
+```
+
+### 17.3.7.2 AccountPool (账户保证金池)
+
+职责:
+1. 账户数据管理: 同步、缓存账户数据（总保证金、可用保证金等）
+2. Redis熔断保护: 当Redis连续失败时启用本地缓存兜底
+3. 数据一致性: 保证本地缓存与Redis数据的一致性
+
+关键方法:
+| 方法 | 说明 |
+|------|------|
+| update_account_data_from_redis() | 从Redis更新账户本地缓存 |
+| get_account_margin() | 获取账户保证金信息 |
+
+熔断机制:
+- Redis连续失败3次触发熔断
+- 熔断时有效保证金设为0，拒绝所有开仓
+- 兜底时使用最低有效保证金 MIN_EFFECTIVE_MARGIN
+
+AccountMargin 返回结构:
+| 字段 | 说明 |
+|------|------|
+| total_margin_balance | 总保证金 |
+| unrealized_pnl | 浮盈亏 |
+| effective_margin | 有效保证金 = 总保证金 + 浮盈亏 |
+| total_available_margin | 可用保证金 |
+| reserve_margin | 保留保证金 |
+| global_new_open_ceiling | 新开仓全局上限 |
+| global_double_open_ceiling | 翻倍仓全局上限 |
+
+### 17.3.7.3 StrategyPool (策略保证金池)
+
+职责:
+1. 策略保证金分配: 为不同时间级别的策略（分钟级、小时级）分配保证金
+2. 开仓计算: 根据策略配置计算可开仓名义价值
+3. 保证金占用: 管理策略实际占用的保证金和可用保证金
+4. 品种注册: 与SymbolManager集成，管理分钟级品种注册
+
+关键方法:
+| 方法 | 说明 |
+|------|------|
+| register_symbol(symbol, strategy_level) | 注册品种到策略池 |
+| calculate_strategy_margin(strategy_level) | 计算策略保证金分配 |
+| calculate_minute_open_notional(leverage) | 计算分钟级可开仓名义价值 |
+| calculate_hour_open_notional(leverage) | 计算小时级可开仓名义价值 |
+
+分钟级开仓配置 (MINUTE_OPEN_CONFIG):
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| min_notional_per_symbol | 最低单品种名义价值 | 10 USDT |
+| target_symbol_count | 目标品种数 | 5个 |
+| threshold_amount | 阈值金额 | 100 USDT |
+
+小时级开仓配置:
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| min_notional_per_symbol | 初始单品种名义价值 | 5 USDT |
+| target_symbol_count | 目标品种数 | 10个 |
+| add_times | 每品种加仓次数 | 10次 |
+| threshold_notional | 总名义价值阈值 | 500 USDT |
+
+### 17.3.7.4 OrderCheck (订单风控检查器)
+
+职责:
+1. 订单风控检查: 检查订单是否符合风控规则
+2. 保证金预占: 使用Lua脚本原子性预占保证金，避免并发超开
+3. 订单级别限制: 单品种最大开仓限制、策略级别限制等
+
+关键方法:
+| 方法 | 说明 |
+|------|------|
+| check_minute_order(symbol, notional, leverage, open_type) | 检查分钟级订单 |
+| check_hour_order(symbol, notional, leverage) | 检查小时级订单 |
+| _preoccupy_margin() | 原子预占保证金 |
+
+预占校验Lua脚本:
+```lua
+local strategy_used_key = KEYS[1]
+local required_margin = tonumber(ARGV[1])
+local global_used = tonumber(ARGV[2])
+local global_ceiling = tonumber(ARGV[3])
+local strategy_allocation = tonumber(ARGV[4])
+
+local current_used = tonumber(redis.call('get', strategy_used_key) or 0)
+if current_used + required_margin > strategy_allocation then
+    return 0 -- 策略额度不足
+end
+if global_used + required_margin > global_ceiling then
+    return 0 -- 全局额度不足
+end
+redis.call('incrbyfloat', strategy_used_key, required_margin)
+redis.call('expire', strategy_used_key, 30)
+return 1 -- 预占成功
+```
+
+### 17.3.7.5 保证金配置
+
+全局配置 (MARGIN_POOL_CONFIG["GLOBAL"]):
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| max_usage_ratio | 0.95 | 最大使用比例 |
+| reserve_ratio | 0.05 | 保留比例 |
+
+策略配置 (MARGIN_POOL_CONFIG["STRATEGY"]["MINUTE"]):
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| allocation_ratio | 0.60 | 分配比例(60%) |
+| new_open_ratio | 0.10 | 新开仓比例 |
+| double_open_ratio | 0.20 | 翻倍仓比例 |
+
+策略配置 (MARGIN_POOL_CONFIG["STRATEGY"]["HOUR"]):
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| allocation_ratio | 0.40 | 分配比例(40%) |
+| new_open_ratio | 0.15 | 新开仓比例 |
+
+--------------------------------------------------------------------------------
+17.3.8 盈亏管理模块
+--------------------------------------------------------------------------------
+
+本文档描述基于旧代码 `pnl_manager.py` 的盈亏管理模块设计。
+
+### 17.3.8.1 核心理念
+
+**低波动/高波动品种互斥机制**:
+- 低波动品种: 需要被拯救的，盈亏计入总体盈亏
+- 高波动品种: 拯救者，盈利用于覆盖低波动盈亏，但自己的盈亏不计入总盈亏
+- 一次成功的高波动翻倍仓盈利可以覆盖多个低波动小仓位盈亏
+
+### 17.3.8.2 核心数据结构
+
+StrategyPositionPnl 结构:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| symbol | String | 品种名称 |
+| long_avg_price | f64 | 多头平均价 |
+| long_qty | f64 | 多头数量 |
+| short_avg_price | f64 | 空头平均价 |
+| short_qty | f64 | 空头数量 |
+| last_price | f64 | 最新价格 |
+| unrealized_pnl | f64 | 浮盈亏 |
+| update_ts | i64 | 更新时间戳 |
+
+PnlCoverageResult 结构:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| can_cover | bool | 能否覆盖 |
+| total_unrealized_loss | f64 | 总浮亏金额 |
+| current_symbol_profit | f64 | 当前品种盈利 |
+| accumulated_profit | f64 | 累计盈利 |
+| net_profit | f64 | 净盈利 |
+| symbol_count | i32 | 低波动品种数 |
+
+RescueResult 结构:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| success | bool | 解救是否成功 |
+| strategy_level | String | 策略级别 |
+| can_rescue | bool | 能否解救 |
+| total_loss | f64 | 总亏损 |
+| rescued_symbols | Vec<String> | 已解救品种列表 |
+| remaining_profit | f64 | 剩余盈利 |
+
+### 17.3.8.3 核心方法
+
+**update_position_pnl()**: 更新品种盈亏数据
+- 输入: symbol, strategy_level, position_data
+- 存储到Redis Hash: {level}_position_pnl
+
+**mark_low_volatility_symbol()**: 标记低波动品种
+- 互斥逻辑: 自动删除该品种的高波动标记
+- 存储到Redis Set: {level}_low_volatility_symbols
+
+**mark_high_volatility_symbol()**: 标记高波动品种
+- 互斥逻辑: 自动删除该品种的低波动标记
+- 存储到Redis Set: {level}_high_volatility_symbols
+
+**check_pnl_coverage()**: 检查盈亏覆盖情况
+- 仅针对低波动品种
+- 高波动品种盈利用于覆盖低波动盈亏
+- 浮盈仅做参考，不执行实际扣减
+
+**rescue_low_volatility_symbols()**: 解救低波动品种
+- 检查高波动盈利（当前+累计）能否覆盖所有低波动浮亏
+- 如果能覆盖:
+  - 删除低波动品种的盈亏记录
+  - 清除低波动品种标记
+  - 扣除覆盖所需的盈利，剩余部分累加到累计盈利
+  - 记录已解救品种到历史
+- 如果不能覆盖: 返回失败
+
+**add_accumulated_profit()**: 添加累计盈利
+- 用于已实现盈利的累加
+
+**reset_strategy()**: 重置策略盈亏数据
+- 清除所有盈亏数据
+- 清除低/高波动品种标记
+- 清除解救历史记录
+
+### 17.3.8.4 Redis Key 设计
+
+| Key Pattern | 类型 | 说明 |
+|-------------|------|------|
+| {level}_position_pnl | Hash | 品种盈亏数据 |
+| {level}_low_volatility_symbols | Set | 低波动品种列表 |
+| {level}_high_volatility_symbols | Set | 高波动品种列表 |
+| {level}_accumulated_profit | String | 累计盈利 |
+| {level}_rescued_symbols | List | 已解救品种历史 |
+
+### 17.3.8.5 解救流程示例
+
+```
+1. 高波动品种 BTCUSDT 盈利 200 USDT (已实现)
+2. 低波动品种 ETHUSDT 浮亏 -80 USDT
+3. 低波动品种 SOLUSDT 浮亏 -50 USDT
+4. 总低波动浮亏 = -130 USDT
+
+检查盈亏覆盖:
+- total_loss = 130 USDT
+- total_available_profit = 200 + accumulated_profit
+- can_cover = total_available_profit >= total_loss
+
+如果可以覆盖:
+- 删除 ETHUSDT, SOLUSDT 盈亏记录
+- 清除低波动标记
+- remaining_profit = 200 - 130 = 70 USDT (累加到累计盈利)
+- 记录解救历史
+```
+
 ================================================================================
