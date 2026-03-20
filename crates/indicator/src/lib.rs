@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-pub mod day_cycle;
+pub mod min_cycle;
 pub mod indicator_1m;
 pub mod pine_indicator_full;
 
