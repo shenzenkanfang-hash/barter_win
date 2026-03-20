@@ -10,13 +10,19 @@ High-performance quantitative trading system in Rust. Supports multi-period stra
 
 ## Requirements
 
+### Validated
+
+- ✓ v0.1: Foundation — workspace, error types, core data structures, logging — v1.0
+- ✓ v0.2: Market data — WebSocket, K-line synthesis — v1.0
+- ✓ v0.3: Indicator layer — EMA, Pine color, TR/Price position — v1.0
+- ✓ v0.4: Strategy layer — Strategy trait, 3 strategy types — v1.0
+- ✓ v0.5: Engine layer — Core engine, risk check, order execution — v1.0
+- ✓ v0.6-v0.10: Enhancement phases — v1.0
+
 ### Active
 
-- [ ] v0.1: Foundation — workspace, error types, core data structures, logging
-- [ ] v0.2: Market data — WebSocket, K-line synthesis
-- [ ] v0.3: Indicator layer — EMA, Pine color, TR/Price position
-- [ ] v0.4: Strategy layer — Strategy trait, 3 strategy types
-- [ ] v0.5: Engine layer — Core engine, risk check, order execution
+- [ ] v1.1: Unit tests and integration tests
+- [ ] v1.2: Indicator calculation adjustment based on Python code
 
 ### Out of Scope
 
@@ -39,4 +45,4 @@ High-performance quantitative trading system in Rust. Supports multi-period stra
 | Strategy-private positions | Avoid contention | ✓ Good |
 
 ---
-*Last updated: 2026-03-20*
+*Last updated: 2026-03-20 after v1.0 milestone*
