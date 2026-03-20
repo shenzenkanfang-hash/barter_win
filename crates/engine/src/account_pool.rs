@@ -2,7 +2,6 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// 熔断状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,8 +58,8 @@ impl Default for AccountInfo {
 pub struct AccountPool {
     /// 账户信息 (使用 RwLock 保护，支持并发读)
     account: RwLock<AccountInfo>,
-    /// 初始资金 (用于计算熔断阈值)
-    initial_balance: Decimal,
+    /// 初始资金 (用于计算熔断阈值) (RwLock 保护)
+    initial_balance: RwLock<Decimal>,
     /// 熔断阈值 (累计亏损超过此比例触发熔断)
     circuit_threshold: Decimal,
     /// 部分熔断阈值
@@ -69,8 +68,8 @@ pub struct AccountPool {
     recovery_threshold: Decimal,
     /// 熔断冷却时间 (秒)
     circuit_cooldown_secs: i64,
-    /// 最后熔断时间
-    last_circuit_ts: i64,
+    /// 最后熔断时间 (RwLock 保护)
+    last_circuit_ts: RwLock<i64>,
 }
 
 impl Default for AccountPool {
@@ -84,12 +83,12 @@ impl AccountPool {
     pub fn new() -> Self {
         Self {
             account: RwLock::new(AccountInfo::default()),
-            initial_balance: dec!(100000.0), // 默认 10 万
+            initial_balance: RwLock::new(dec!(100000.0)), // 默认 10 万
             circuit_threshold: dec!(0.20),   // 20% 亏损触发完全熔断
             partial_circuit_threshold: dec!(0.10), // 10% 亏损触发部分熔断
             recovery_threshold: dec!(0.05),    // 5% 盈利恢复
             circuit_cooldown_secs: 300,        // 5 分钟冷却
-            last_circuit_ts: 0,
+            last_circuit_ts: RwLock::new(0),
         }
     }
 
@@ -109,12 +108,12 @@ impl AccountPool {
                 cumulative_profit: dec!(0),
                 circuit_state: CircuitBreakerState::Normal,
             }),
-            initial_balance,
+            initial_balance: RwLock::new(initial_balance),
             circuit_threshold,
             partial_circuit_threshold,
             recovery_threshold: circuit_threshold / dec!(4),
             circuit_cooldown_secs: 300,
-            last_circuit_ts: 0,
+            last_circuit_ts: RwLock::new(0),
         }
     }
 
@@ -207,28 +206,30 @@ impl AccountPool {
     /// 更新权益 (成交回报后) (写锁)
     pub fn update_equity(&self, realized_pnl: Decimal, current_ts: i64) {
         let mut account = self.account.write();
+        let initial_balance = *self.initial_balance.read();
         account.cumulative_profit += realized_pnl;
-        account.total_equity = self.initial_balance + account.cumulative_profit;
+        account.total_equity = initial_balance + account.cumulative_profit;
         account.available += realized_pnl;
 
         // 检查是否需要更新熔断状态 (在同一锁内)
-        let loss_ratio = if self.initial_balance > dec!(0) {
-            -account.cumulative_profit / self.initial_balance
+        let loss_ratio = if initial_balance > dec!(0) {
+            -account.cumulative_profit / initial_balance
         } else {
             dec!(0)
         };
 
-        if current_ts - self.last_circuit_ts >= self.circuit_cooldown_secs {
+        let last_circuit_ts = *self.last_circuit_ts.read();
+        if current_ts - last_circuit_ts >= self.circuit_cooldown_secs {
             let old_state = account.circuit_state;
             if loss_ratio >= self.circuit_threshold {
                 account.circuit_state = CircuitBreakerState::Full;
                 if old_state != CircuitBreakerState::Full {
-                    self.last_circuit_ts = current_ts;
+                    *self.last_circuit_ts.write() = current_ts;
                 }
             } else if loss_ratio >= self.partial_circuit_threshold {
                 account.circuit_state = CircuitBreakerState::Partial;
                 if old_state != CircuitBreakerState::Partial {
-                    self.last_circuit_ts = current_ts;
+                    *self.last_circuit_ts.write() = current_ts;
                 }
             } else if loss_ratio <= -self.recovery_threshold
                 && old_state != CircuitBreakerState::Normal
@@ -242,7 +243,7 @@ impl AccountPool {
     pub fn reset_circuit(&self) {
         let mut account = self.account.write();
         account.circuit_state = CircuitBreakerState::Normal;
-        self.last_circuit_ts = 0;
+        *self.last_circuit_ts.write() = 0;
     }
 
     /// 获取持仓占用保证金 (读锁)
@@ -258,8 +259,9 @@ impl AccountPool {
     /// 获取亏损比例 (读锁)
     pub fn loss_ratio(&self) -> Decimal {
         let account = self.account.read();
-        if self.initial_balance > dec!(0) {
-            -account.cumulative_profit / self.initial_balance
+        let initial_balance = *self.initial_balance.read();
+        if initial_balance > dec!(0) {
+            -account.cumulative_profit / initial_balance
         } else {
             dec!(0)
         }
@@ -268,10 +270,11 @@ impl AccountPool {
     /// 重置账户 (写锁)
     pub fn reset(&self) {
         let mut account = self.account.write();
+        let initial_balance = *self.initial_balance.read();
         *account = AccountInfo {
             account_id: "default".to_string(),
-            total_equity: self.initial_balance,
-            available: self.initial_balance,
+            total_equity: initial_balance,
+            available: initial_balance,
             margin_used: dec!(0),
             frozen: dec!(0),
             cumulative_profit: dec!(0),
@@ -285,7 +288,7 @@ impl AccountPool {
     /// 注入初始资金 (写锁)
     pub fn set_initial_balance(&self, amount: Decimal) {
         let mut account = self.account.write();
-        self.initial_balance = amount;
+        *self.initial_balance.write() = amount;
         account.total_equity = amount;
         account.available = amount;
     }

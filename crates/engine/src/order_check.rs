@@ -47,14 +47,14 @@ pub struct OrderReservation {
 ///
 /// 注: Lua 脚本功能需要集成 mlua crate，此处提供基础实现
 pub struct OrderCheck {
-    /// 最大持仓比例
-    max_position_ratio: Decimal,
-    /// 最低订单名义价值
-    min_order_notional: Decimal,
+    /// 最大持仓比例 (RwLock 保护)
+    max_position_ratio: RwLock<Decimal>,
+    /// 最低订单名义价值 (RwLock 保护)
+    min_order_notional: RwLock<Decimal>,
     /// 预占记录 (使用 RwLock 保护)
     reservations: RwLock<HashMap<String, OrderReservation>>,
-    /// 总冻结金额
-    total_frozen: Decimal,
+    /// 总冻结金额 (RwLock 保护)
+    total_frozen: RwLock<Decimal>,
 }
 
 impl Default for OrderCheck {
@@ -67,10 +67,10 @@ impl OrderCheck {
     /// 创建订单检查器
     pub fn new() -> Self {
         Self {
-            max_position_ratio: dec!(0.95),
-            min_order_notional: dec!(10.0),
+            max_position_ratio: RwLock::new(dec!(0.95)),
+            min_order_notional: RwLock::new(dec!(10.0)),
             reservations: RwLock::new(HashMap::new()),
-            total_frozen: dec!(0),
+            total_frozen: RwLock::new(dec!(0)),
         }
     }
 
@@ -80,28 +80,29 @@ impl OrderCheck {
     /// 如果通过，返回冻结金额。
     pub fn pre_check(
         &self,
-        order_id: &str,
-        symbol: &str,
-        strategy_id: &str,
+        _order_id: &str,
+        _symbol: &str,
+        _strategy_id: &str,
         order_value: Decimal,
         available_balance: Decimal,
         current_exposure: Decimal,
     ) -> OrderCheckResult {
         // 1. 检查名义价值
-        if order_value < self.min_order_notional {
+        let min_notional = *self.min_order_notional.read();
+        if order_value < min_notional {
             return OrderCheckResult {
                 passed: false,
                 frozen_amount: dec!(0),
                 reject_reason: Some(format!(
                     "订单名义价值 {} 小于最低要求 {}",
-                    order_value, self.min_order_notional
+                    order_value, min_notional
                 )),
                 timestamp: chrono::Utc::now().timestamp(),
             };
         }
 
         // 2. 检查资金是否足够
-        let total_frozen = self.total_frozen();
+        let total_frozen = *self.total_frozen.read();
         let total_needed = total_frozen + order_value;
         if total_needed > available_balance {
             return OrderCheckResult {
@@ -119,14 +120,15 @@ impl OrderCheck {
         let new_exposure = current_exposure + order_value;
         let total_equity = available_balance + current_exposure;
         let new_ratio = new_exposure / total_equity;
+        let max_ratio = *self.max_position_ratio.read();
 
-        if new_ratio > self.max_position_ratio {
+        if new_ratio > max_ratio {
             return OrderCheckResult {
                 passed: false,
                 frozen_amount: dec!(0),
                 reject_reason: Some(format!(
                     "持仓比例 {} 超过最大限制 {}",
-                    new_ratio, self.max_position_ratio
+                    new_ratio, max_ratio
                 )),
                 timestamp: chrono::Utc::now().timestamp(),
             };
@@ -175,7 +177,7 @@ impl OrderCheck {
             let mut reservations = self.reservations.write();
             reservations.insert(order_id.to_string(), reservation);
         }
-        self.total_frozen += frozen_amount;
+        *self.total_frozen.write() += frozen_amount;
 
         Ok(())
     }
@@ -196,7 +198,7 @@ impl OrderCheck {
             reservation.frozen_amount
         };
 
-        self.total_frozen -= frozen_amount;
+        *self.total_frozen.write() -= frozen_amount;
         Ok(frozen_amount)
     }
 
@@ -216,19 +218,19 @@ impl OrderCheck {
             reservation.frozen_amount
         };
 
-        self.total_frozen -= frozen_amount;
+        *self.total_frozen.write() -= frozen_amount;
         Ok(frozen_amount)
     }
 
     /// 释放所有预占 (用于系统重置) (写锁)
     pub fn release_all(&self) {
         self.reservations.write().clear();
-        self.total_frozen = dec!(0);
+        *self.total_frozen.write() = dec!(0);
     }
 
     /// 获取总冻结金额 (读锁)
     pub fn total_frozen(&self) -> Decimal {
-        self.total_frozen
+        *self.total_frozen.read()
     }
 
     /// 获取预占数量 (读锁)
@@ -248,14 +250,12 @@ impl OrderCheck {
 
     /// 设置最大持仓比例
     pub fn set_max_position_ratio(&self, ratio: Decimal) {
-        // 注意: 这个配置项可以在锁外设置，因为它只是读取
-        // 但为了安全起见，如果需要原子更新，可以在这里加锁
-        self.max_position_ratio = ratio;
+        *self.max_position_ratio.write() = ratio;
     }
 
     /// 设置最低订单名义价值
     pub fn set_min_order_notional(&self, notional: Decimal) {
-        self.min_order_notional = notional;
+        *self.min_order_notional.write() = notional;
     }
 
     /// 获取待确认的预占列表 (克隆)

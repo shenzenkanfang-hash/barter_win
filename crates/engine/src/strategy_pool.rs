@@ -35,12 +35,12 @@ pub struct StrategyAllocation {
 pub struct StrategyPool {
     /// 策略分配映射 (使用 RwLock 保护)
     allocations: RwLock<HashMap<String, StrategyAllocation>>,
-    /// 总分配资金
-    total_allocated: Decimal,
-    /// 最后更新时间戳
-    last_update_ts: i64,
-    /// 分配时间周期 (秒)
-    rebalance_interval_secs: i64,
+    /// 总分配资金 (RwLock 保护)
+    total_allocated: RwLock<Decimal>,
+    /// 最后更新时间戳 (RwLock 保护)
+    last_update_ts: RwLock<i64>,
+    /// 分配时间周期 (秒) (RwLock 保护)
+    rebalance_interval_secs: RwLock<i64>,
 }
 
 impl Default for StrategyPool {
@@ -54,9 +54,9 @@ impl StrategyPool {
     pub fn new() -> Self {
         Self {
             allocations: RwLock::new(HashMap::new()),
-            total_allocated: dec!(0),
-            last_update_ts: 0,
-            rebalance_interval_secs: 60, // 默认 1 分钟
+            total_allocated: RwLock::new(dec!(0)),
+            last_update_ts: RwLock::new(0),
+            rebalance_interval_secs: RwLock::new(60), // 默认 1 分钟
         }
     }
 
@@ -77,14 +77,14 @@ impl StrategyPool {
             priority,
             enabled: true,
         };
-        self.total_allocated += initial_allocation;
+        *self.total_allocated.write() += initial_allocation;
         self.allocations.write().insert(strategy_id.to_string(), allocation);
     }
 
     /// 注销策略
     pub fn unregister_strategy(&self, strategy_id: &str) {
         if let Some(allocation) = self.allocations.write().remove(strategy_id) {
-            self.total_allocated -= allocation.allocated;
+            *self.total_allocated.write() -= allocation.allocated;
         }
     }
 
@@ -152,8 +152,9 @@ impl StrategyPool {
             .ok_or_else(|| format!("策略 {} 未注册", strategy_id))?;
 
         // 调整总分配
-        self.total_allocated -= allocation.allocated;
-        self.total_allocated += amount;
+        let mut total_allocated = self.total_allocated.write();
+        *total_allocated -= allocation.allocated;
+        *total_allocated += amount;
 
         // 调整分配
         allocation.allocated = amount;
@@ -171,7 +172,7 @@ impl StrategyPool {
 
         allocation.allocated += amount;
         allocation.available += amount;
-        self.total_allocated += amount;
+        *self.total_allocated.write() += amount;
         Ok(())
     }
 
@@ -195,7 +196,9 @@ impl StrategyPool {
 
     /// 检查是否需要再平衡
     pub fn needs_rebalance(&self, current_ts: i64) -> bool {
-        current_ts - self.last_update_ts >= self.rebalance_interval_secs
+        let last_update = *self.last_update_ts.read();
+        let interval = *self.rebalance_interval_secs.read();
+        current_ts - last_update >= interval
     }
 
     /// 再平衡策略分配 (按优先级比例重新分配) (写锁)
@@ -248,13 +251,13 @@ impl StrategyPool {
             allocation.available = new_allocated - allocation.used;
         }
 
-        self.total_allocated = total_funds;
-        self.last_update_ts = current_ts;
+        *self.total_allocated.write() = total_funds;
+        *self.last_update_ts.write() = current_ts;
     }
 
     /// 设置再平衡间隔
     pub fn set_rebalance_interval(&self, secs: i64) {
-        self.rebalance_interval_secs = secs;
+        *self.rebalance_interval_secs.write() = secs;
     }
 
     // ========== 查询 ==========
@@ -266,7 +269,7 @@ impl StrategyPool {
 
     /// 获取总分配
     pub fn total_allocated(&self) -> Decimal {
-        self.total_allocated
+        *self.total_allocated.read()
     }
 
     /// 获取策略已使用资金 (读锁)
@@ -309,8 +312,8 @@ impl StrategyPool {
     /// 重置策略池 (写锁)
     pub fn reset(&self) {
         self.allocations.write().clear();
-        self.total_allocated = dec!(0);
-        self.last_update_ts = 0;
+        *self.total_allocated.write() = dec!(0);
+        *self.last_update_ts.write() = 0;
     }
 }
 

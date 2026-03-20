@@ -1,7 +1,6 @@
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// 盈亏管理器
@@ -12,7 +11,8 @@ use std::collections::{HashMap, HashSet};
 /// 线程安全: 使用 RwLock 保护所有字段
 ///
 /// 设计依据: 设计文档 17.3.8
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// 注: 不实现 Clone/Serialize/Deserialize，因为 RwLock 不支持这些 trait
 pub struct PnlManager {
     /// 累计盈利 (浮盈) (RwLock 保护)
     cumulative_profit: RwLock<Decimal>,
