@@ -831,18 +831,25 @@ PreCheck 通过
 |──────────────┼──────────────────────┼──────────────────────│
 | 触发条件     │ 1min波动率 >= 3%     │ 时间驱动（每分钟）    │
 │              │ 15min波动率 >= 13%   │                      │
-| 计算频率     │ Tick 级              │ K线收盘时             │
-| 判断方式     │ 异步                  │ 同步                  │
+| 计算频率     │ Tick 级，完全独立判断  │ K线收盘时             │
+| 判断方式     │ tick驱动，独立出结果   │ 统一时间点汇总        │
 | 汇入 Check 表│ 实时                  │ 统一时间点            │
-| 下单流程     │ 直接触发下单锁        │ 等待慢速判断完成      │
-| 通道隔离     │ 独立通道，不混入慢速   │ 统一汇合点            │
+| 轮次         │ 独立轮次，不混慢速    │ 统一轮次编号          │
+| 通道隔离     │ 独立通道              │ 统一汇合点            │
 
 波动率阈值（硬性标准）:
 
-| 周期  │ 进入高速阈值 │ 说明                    │
-|-------+-------------+------------------------│
-| 1分钟 │ >= 3%       │ K线幅度超过3%           │
-| 15分钟│ >= 13%      │ K线幅度超过13%          │
+
+| 周期  │ 进入高速阈值 │ 计算方式                |
+|-------+-------------+------------------------|
+| 1分钟 │ >= 3%       │ 1m K线 (O-C) 差值      |
+| 15分钟│ >= 13%      │ 15m K线 (O-C) 差值     |
+
+说明:
+- 1m波动率: 使用1分钟K线的收盘价-开盘价比率
+- 15m波动率: 使用15分钟K线的收盘价-开盘价比率
+- 达到阈值后，该品种进入高速通道，tick级别独立判断
+- 低于阈值后，退出高速通道，回归慢速通道
 
 --------------------------------------------------------------------------------
 16.4 Check 表结构
@@ -857,15 +864,19 @@ struct CheckEntry {
 
     // 指标信号
     ema_signal:     Signal,      // EMA 信号: Long/Short/Neutral
-    rsi_value:     Decimal,      // RSI 数值: 0-100
+    rsi_value:      Decimal,      // RSI 数值: 0-100
     pine_color:     PineColor,   // Pine颜色: Green/Red/Purple/Neutral
+    price_position: Decimal,      // 价格位置: 0-100 (close-low)/(high-low)
 
     // 最终判断
     final_signal:   Signal,      // 最终信号: Long/Short/Neutral/Watch
+    target_price:   Decimal,      // 目标价格（下单用）
+    quantity:       Decimal,      // 目标数量（下单用）
     risk_flag:      bool,        // 风险标记: true=需关注
 
     // 元数据
     timestamp:      DateTime<Utc>,
+    round_id:       u64,         // 轮次ID
     is_high_freq:   bool,        // 是否高速通道
 }
 
@@ -903,17 +914,20 @@ impl RoundGuard {
 
 流程:
 
-1. 时间触发器（慢速通道每分钟）:
-   - 生成新 round_id
+1. 慢速通道（时间触发，每分钟）:
+   - 生成新 round_id（慢速通道独立编号）
    - 所有品种流水线开始计算
-
-2. 流水线执行:
-   - 读取当前 round_id
    - 填入 Check 表（记录 round_id）
 
+2. 高速通道（tick触发，独立判断）:
+   - 每次tick触发后生成独立 round_id
+   - 不等待慢速通道，独立出结果
+   - 高速通道结果直接触发下单流程
+
 3. 汇合判断:
-   - 只处理同一 round_id 的条目
-   - 跨轮次的废弃
+   - 慢速通道: 等待所有流水线完成，统一判断
+   - 高速通道: 独立判断，直接触发风控和下单
+   - 两者互不干扰，通道隔离
 
 --------------------------------------------------------------------------------
 16.6 策略模块接入方式
@@ -998,13 +1012,10 @@ high_freq = true  // 高频通道
 16.8 仓位互斥判断
 --------------------------------------------------------------------------------
 
-同品种互斥:
-- 一个品种同时只能有一个方向持仓
-- LONG 和 SHORT 互斥
-
-跨品种互斥（可选配置）:
-- 有些策略可能要求跨品种互斥
-- 通过配置控制
+互斥原则:
+- 同品种 + 同策略: LONG 和 SHORT 互斥
+- 同品种 + 不同策略: 不互斥，各自独立持仓
+- 跨品种: 可选配置，通过配置文件控制
 
 判断逻辑:
 
@@ -1014,22 +1025,22 @@ fn check_position_mutual_exclusion(table: &CheckTable) -> Vec<OrderRequest> {
     for entry in table.entries.values() {
         match entry.final_signal {
             Signal::Long => {
-                // 检查是否有 SHORT
-                if has_short_position(&entry.symbol) {
-                    continue;  // 互斥，跳过
+                // 检查同一策略是否有 SHORT（按策略分开）
+                if has_short_position(&entry.symbol, &entry.strategy_id) {
+                    continue;  // 同策略互斥，跳过
                 }
                 orders.push(create_long_order(entry));
             }
             Signal::Short => {
-                // 检查是否有 LONG
-                if has_long_position(&entry.symbol) {
-                    continue;  // 互斥，跳过
+                // 检查同一策略是否有 LONG（按策略分开）
+                if has_long_position(&entry.symbol, &entry.strategy_id) {
+                    continue;  // 同策略互斥，跳过
                 }
                 orders.push(create_short_order(entry));
             }
             Signal::Neutral | Signal::Watch => {
-                // 平仓信号
-                if has_position(&entry.symbol) {
+                // 平仓信号（同策略的持仓）
+                if has_position(&entry.symbol, &entry.strategy_id) {
                     orders.push(create_close_order(entry));
                 }
             }
@@ -1173,5 +1184,144 @@ impl RiskReChecker {
 3. 新增一轮编码:
    - 保证计算周期一致性
    - 支持并行同时确保正确性
+
+--------------------------------------------------------------------------------
+16.11 全流程表单贯穿设计
+--------------------------------------------------------------------------------
+
+核心理念: 从价格数据开始，一张表单贯穿所有层级，每层携带计算结果进入下一层。
+
+表单设计 (PipelineForm):
+
+struct PipelineForm {
+    // 基础信息
+    symbol:     String,           // 品种
+    strategy_id: String,          // 策略ID
+    period:     Period,           // 周期
+    timestamp:  DateTime<Utc>,    // 时间戳
+    round_id:   u64,              // 轮次ID
+
+    // 价格数据层产出
+    tick_price:     Decimal,      // 当前价格
+    tick_volume:    Decimal,      // 当前成交量
+    open_price:     Decimal,      // K线开盘价
+    close_price:    Decimal,      // K线收盘价
+    high_price:     Decimal,      // K线最高价
+    low_price:      Decimal,      // K线最低价
+
+    // 指标层产出
+    ema_fast:       Decimal,      // EMA快线
+    ema_slow:       Decimal,      // EMA慢线
+    ema_signal:     Signal,       // EMA信号
+    rsi_value:      Decimal,      // RSI值
+    pine_color:     PineColor,    // Pine颜色
+    price_position: Decimal,      // 价格位置 0-100
+
+    // 策略层产出
+    final_signal:   Signal,       // 最终信号
+    confidence:     u8,           // 置信度 0-100
+    conditions_met: u8,           // 满足条件数
+    conditions_total: u8,         // 总条件数
+
+    // 下单信息
+    target_price:   Decimal,      // 目标价格
+    quantity:       Decimal,       // 目标数量
+
+    // 风控标记
+    risk_flag:      bool,         // 风险标记
+    reject_reason:  Option<RejectReason>,  // 拒绝原因
+
+    // 通道信息
+    is_high_freq:   bool,         // 是否高速通道
+}
+
+层级处理流程:
+
+1. 价格数据层 (MarketDataLayer)
+   输入: 原始Tick
+   产出: PipelineForm { tick_price, tick_volume, open/close/high/low }
+   操作: 解析Tick，更新当前K线
+
+2. 指标计算层 (IndicatorLayer)
+   输入: PipelineForm (价格数据填充)
+   产出: PipelineForm { ema_fast, ema_slow, rsi_value, pine_color, price_position }
+   操作: 增量计算EMA/RSI/PineColor
+
+3. 策略判断层 (StrategyLayer)
+   输入: PipelineForm (指标数据填充)
+   产出: PipelineForm { final_signal, confidence, target_price, quantity }
+   操作: 策略逻辑判断，生成信号和下单信息
+
+4. Check表汇总层 (CheckTableLayer)
+   输入: PipelineForm (策略数据填充)
+   产出: CheckTable.entries[Key] = CheckEntry
+   操作: 填入Check表
+
+5. 仓位决策层 (PositionDecisionLayer)
+   输入: CheckTable
+   产出: Vec<OrderRequest>
+   操作: 互斥判断，决定可执行订单
+
+6. 风控预检层 (RiskPreCheckLayer)
+   输入: OrderRequest
+   产出: OrderRequest 或 RejectReason
+   操作: 锁外风控检查
+
+7. 下单执行层 (OrderExecutionLayer)
+   输入: OrderRequest (通过风控)
+   产出: OrderResult
+   操作: 获锁 → 锁内复核 → 下单 → 释放锁
+
+全流程示意:
+
+Tick数据
+   │
+   ▼
+┌─────────────────────────────┐
+│ 价格数据层                   │
+│ 产出: price, volume, O/H/L/C │
+└─────────────────────────────┘
+   │ PipelineForm
+   ▼
+┌─────────────────────────────┐
+│ 指标计算层                   │
+│ 产出: EMA, RSI, Pine, Pos  │
+└─────────────────────────────┘
+   │ PipelineForm
+   ▼
+┌─────────────────────────────┐
+│ 策略判断层                   │
+│ 产出: Signal, Price, Qty   │
+└─────────────────────────────┘
+   │ PipelineForm
+   ▼
+┌─────────────────────────────┐
+│ Check表汇总                  │
+│ 产出: CheckEntry            │
+└─────────────────────────────┘
+   │ CheckTable
+   ▼
+┌─────────────────────────────┐
+│ 仓位决策层                   │
+│ 产出: Vec<OrderRequest>     │
+└─────────────────────────────┘
+   │ OrderRequest
+   ▼
+┌─────────────────────────────┐
+│ 风控预检层                   │
+│ 产出: 通过/拒绝              │
+└─────────────────────────────┘
+   │ OrderRequest
+   ▼
+┌─────────────────────────────┐
+│ 下单执行层                   │
+│ 产出: OrderResult           │
+└─────────────────────────────┘
+
+特点:
+- 每层都是增量计算，O(1)复杂度
+- 表单贯穿全程，携带所有中间结果
+- 高速通道和慢速通道各自独立表单流
+- 无需在不同模块间传递零散数据
 
 ================================================================================
