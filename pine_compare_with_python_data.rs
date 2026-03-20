@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut detector = pine_indicator_full::PineColorDetector::new();
 
-    println!("timestamp,close,macd,signal,hist,ema10,ema20,rsi,crsi,bar_color,bg_color");
+    println!("timestamp,close,macd,signal,hist,ema10,ema20,rsi,crsi,bar_color,bg_color,top3_avg_amplitude_pct,one_percent_amplitude_time_days");
 
     for line in python_csv.lines().skip(1) {  // 跳过标题行
         let parts: Vec<&str> = line.split(',').collect();
@@ -23,10 +23,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let close: Decimal = parts[1].parse().unwrap_or_default();
 
             let (bar_color, bg_color, macd, signal, hist, ema10, ema20, rsi, crsi) =
-                detector.update(close);
+                detector.update((close, close, close, close));
 
-            println!("{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{}",
-                date, close, macd, signal, hist, ema10, ema20, rsi, crsi, bar_color, bg_color);
+            let top3_avg = detector.calc_top3_avg_amplitude_pct();
+            let one_pct_days = detector.calc_one_percent_amplitude_time_days();
+
+            println!("{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{},{:.2},{:.2}",
+                date, close, macd, signal, hist, ema10, ema20, rsi, crsi, bar_color, bg_color, top3_avg, one_pct_days);
         }
     }
 

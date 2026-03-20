@@ -21,26 +21,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut detector = pine_indicator_full::PineColorDetector::new();
 
-    // CSV 输出格式: timestamp,close,macd,signal,hist,ema10,ema20,rsi,crsi,bar_color,bg_color
-    println!("timestamp,close,macd,signal,hist,ema10,ema20,rsi,crsi,bar_color,bg_color");
+    // CSV 输出格式: timestamp,close,macd,signal,hist,ema10,ema20,rsi,crsi,bar_color,bg_color,top3_avg_amplitude_pct,one_percent_amplitude_time_days
+    println!("timestamp,close,macd,signal,hist,ema10,ema20,rsi,crsi,bar_color,bg_color,top3_avg_amplitude_pct,one_percent_amplitude_time_days");
 
     let mut output = String::new();
 
     for kline in &klines {
         let open_time: i64 = kline[0].as_i64().unwrap_or(0);
+        let open: Decimal = kline[1].as_str().unwrap().parse().unwrap_or_default();
+        let high: Decimal = kline[2].as_str().unwrap().parse().unwrap_or_default();
+        let low: Decimal = kline[3].as_str().unwrap().parse().unwrap_or_default();
         let close: Decimal = kline[4].as_str().unwrap().parse().unwrap_or_default();
 
         let (bar_color, bg_color, macd, signal, hist, ema10, ema20, rsi, crsi) =
-            detector.update(close);
+            detector.update((open, high, low, close));
 
         let dt = Utc.timestamp_millis_opt(open_time)
             .single()
             .map(|dt| dt.format("%Y-%m-%d").to_string())
             .unwrap_or_default();
 
+        let top3_avg = detector.calc_top3_avg_amplitude_pct();
+        let one_pct_days = detector.calc_one_percent_amplitude_time_days();
+
         let line = format!(
-            "{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{}\n",
-            dt, close, macd, signal, hist, ema10, ema20, rsi, crsi, bar_color, bg_color
+            "{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{},{:.2},{:.2}\n",
+            dt, close, macd, signal, hist, ema10, ema20, rsi, crsi, bar_color, bg_color, top3_avg, one_pct_days
         );
         output.push_str(&line);
     }
