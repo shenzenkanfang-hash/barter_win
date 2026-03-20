@@ -502,7 +502,7 @@ impl Indicator1m {
             pos_norm_60,
             tr_base_10min: safe_div(high_10_val - low_10_val, prev + EPSILON),
             tr_ratio_10min_1h: safe_div(tr_10_avg, tr_60_avg + EPSILON),
-            tr_ratio_zscore_10min_1h: clamp(tr_ratio_zscore_10min_1m, -ZSCORE_MAX_LIMIT, ZSCORE_MAX_LIMIT),
+            tr_ratio_zscore_10min_1h: clamp(tr_ratio_zscore_10min_1h, -ZSCORE_MAX_LIMIT, ZSCORE_MAX_LIMIT),
             jerk: jerk_val,
             norm_jerk,
             market_force,
