@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_pipeline_with_noop_logger() {
-        let pipeline = Pipeline::new(
+        let mut pipeline = Pipeline::new(
             "BTCUSDT".to_string(),
             Box::new(NoOpLogger::new()),
             Box::new(DefaultIndicatorProcessor::new()),
