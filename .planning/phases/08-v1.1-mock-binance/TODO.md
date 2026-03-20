@@ -17,21 +17,24 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
 [x] 实现立即成交机制（Market Order）
 [x] 单元测试 (账户创建/持仓盈亏/通道切换/频率限制)
 
-## B. SQLite 持久化模块 (新增)
+## B. SQLite 持久化模块
 --------------------------------------------------------------------------------
-[ ] 创建 engine/src/persistence.rs
-[ ] 创建 database.sqlite 文件
-[ ] 表结构:
-    [ ] account_snapshots     # 账户快照 (最先记录)
-    [ ] exchange_positions   # 交易所持仓
-    [ ] local_positions      # 本地仓位记录
-    [ ] channel_events       # 通道切换事件
-    [ ] risk_events          # 风控拒绝/强平触发
-    [ ] indicator_events     # 指标重要变化
+[x] 创建 engine/src/sqlite_persistence.rs
+[x] SqliteRecordService 实现
+[x] 表结构:
+    [x] account_snapshots     # 账户快照
+    [x] exchange_positions   # 交易所持仓
+    [x] local_positions      # 本地仓位记录
+    [x] channel_events       # 通道切换事件
+    [x] risk_events          # 风控拒绝/强平触发
+    [x] indicator_events     # 指标重要变化
+[x] EventRecorder trait + NoOpEventRecorder + SqliteEventRecorder
+[ ] MockBinanceGateway 集成 EventRecorder (TODO)
 
 ## C. CSV 输出
 --------------------------------------------------------------------------------
-[ ] indicator_comparison.csv  # 指标对比输出
+[x] IndicatorCsvWriter 实现
+[x] indicator_comparison.csv 格式定义
 
 ## D. 信号综合层 - 通道退出逻辑
 --------------------------------------------------------------------------------
@@ -62,6 +65,9 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
     [x] 风控拒绝场景测试
     [x] 强制平仓场景测试
 [ ] SQLite 持久化测试
+    [ ] SqliteRecordService 单元测试
+    [ ] IndicatorCsvWriter 单元测试
+    [ ] EventRecorder 集成测试
 
 ## F. 指标对比验证
 --------------------------------------------------------------------------------
