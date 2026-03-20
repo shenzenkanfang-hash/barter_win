@@ -1,7 +1,8 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PineColor {
     PureGreen,
     LightGreen,
