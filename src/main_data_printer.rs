@@ -4,8 +4,7 @@
 
 use clap::Parser;
 use futures_util::StreamExt;
-use serde::Deserialize;
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -51,7 +50,7 @@ enum Args {
 }
 
 // Binance WebSocket K线数据格式
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BinanceKline {
     #[serde(rename = "t")]
     open_time: u64,
@@ -75,7 +74,7 @@ struct BinanceKline {
     is_closed: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BinanceDepth {
     #[serde(rename = "lastUpdateId")]
     last_update_id: u64,
@@ -345,7 +344,7 @@ async fn print_kline_both(symbol: &str) -> Result<(), Box<dyn std::error::Error>
     let mut last_1m: Option<(String, BinanceKline)> = None;
     let mut last_1d: Option<(String, BinanceKline)> = None;
 
-    while let Some((source, kline)) = rx.recv().await {
+    while let Ok((source, kline)) = rx.recv().await {
         match source {
             1 => {
                 let time_str = parse_timestamp_short(kline.open_time);
@@ -478,7 +477,7 @@ async fn print_all(symbol: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut last_1d = String::new();
     let mut last_depth = String::new();
 
-    while let Some((source, data)) = rx.recv().await {
+    while let Ok((source, data)) = rx.recv().await {
         match source {
             1 => last_1m = data,
             2 => last_1d = data,

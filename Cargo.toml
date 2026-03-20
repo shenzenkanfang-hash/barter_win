@@ -34,6 +34,7 @@ csv = "1.1"
 clap = { version = "4.4", features = ["derive"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+serde = { workspace = true }
 
 [workspace.dependencies]
 parking_lot = "0.12"
