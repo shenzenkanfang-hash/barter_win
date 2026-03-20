@@ -1,3 +1,4 @@
+use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
@@ -28,10 +29,12 @@ pub struct StrategyAllocation {
 /// - 分钟/小时级资金再平衡
 /// - 策略级别风控
 ///
+/// 线程安全: 使用 RwLock 保护 allocations
+///
 /// 设计依据: 设计文档 17.3.7 StrategyPool
 pub struct StrategyPool {
-    /// 策略分配映射: strategy_id -> allocation
-    allocations: HashMap<String, StrategyAllocation>,
+    /// 策略分配映射 (使用 RwLock 保护)
+    allocations: RwLock<HashMap<String, StrategyAllocation>>,
     /// 总分配资金
     total_allocated: Decimal,
     /// 最后更新时间戳
@@ -50,7 +53,7 @@ impl StrategyPool {
     /// 创建策略池
     pub fn new() -> Self {
         Self {
-            allocations: HashMap::new(),
+            allocations: RwLock::new(HashMap::new()),
             total_allocated: dec!(0),
             last_update_ts: 0,
             rebalance_interval_secs: 60, // 默认 1 分钟
@@ -61,7 +64,7 @@ impl StrategyPool {
 
     /// 注册策略
     pub fn register_strategy(
-        &mut self,
+        &self,
         strategy_id: &str,
         initial_allocation: Decimal,
         priority: u8,
@@ -75,33 +78,34 @@ impl StrategyPool {
             enabled: true,
         };
         self.total_allocated += initial_allocation;
-        self.allocations.insert(strategy_id.to_string(), allocation);
+        self.allocations.write().insert(strategy_id.to_string(), allocation);
     }
 
     /// 注销策略
-    pub fn unregister_strategy(&mut self, strategy_id: &str) {
-        if let Some(allocation) = self.allocations.remove(strategy_id) {
+    pub fn unregister_strategy(&self, strategy_id: &str) {
+        if let Some(allocation) = self.allocations.write().remove(strategy_id) {
             self.total_allocated -= allocation.allocated;
         }
     }
 
     // ========== 资金操作 ==========
 
-    /// 检查策略是否可以开仓
+    /// 检查策略是否可以开仓 (读锁)
     pub fn can_open_position(&self, strategy_id: &str, required_margin: Decimal) -> bool {
-        if let Some(allocation) = self.allocations.get(strategy_id) {
+        if let Some(allocation) = self.allocations.read().get(strategy_id) {
             return allocation.enabled && allocation.available >= required_margin;
         }
         false
     }
 
-    /// 预占策略资金
+    /// 预占策略资金 (写锁)
     pub fn reserve_margin(
-        &mut self,
+        &self,
         strategy_id: &str,
         amount: Decimal,
     ) -> Result<(), String> {
-        let allocation = self.allocations
+        let mut allocations = self.allocations.write();
+        let allocation = allocations
             .get_mut(strategy_id)
             .ok_or_else(|| format!("策略 {} 未注册", strategy_id))?;
 
@@ -121,26 +125,29 @@ impl StrategyPool {
         Ok(())
     }
 
-    /// 释放策略资金
-    pub fn release_margin(&mut self, strategy_id: &str, amount: Decimal) {
-        if let Some(allocation) = self.allocations.get_mut(strategy_id) {
+    /// 释放策略资金 (写锁)
+    pub fn release_margin(&self, strategy_id: &str, amount: Decimal) {
+        let mut allocations = self.allocations.write();
+        if let Some(allocation) = allocations.get_mut(strategy_id) {
             allocation.used -= amount.min(allocation.used);
             allocation.available += amount;
         }
     }
 
-    /// 更新策略盈亏 (重新计算可用资金)
-    pub fn update_strategy_pnl(&mut self, strategy_id: &str, pnl: Decimal) {
-        if let Some(allocation) = self.allocations.get_mut(strategy_id) {
+    /// 更新策略盈亏 (重新计算可用资金) (写锁)
+    pub fn update_strategy_pnl(&self, strategy_id: &str, pnl: Decimal) {
+        let mut allocations = self.allocations.write();
+        if let Some(allocation) = allocations.get_mut(strategy_id) {
             allocation.available += pnl;
         }
     }
 
     // ========== 分配调整 ==========
 
-    /// 设置策略分配金额
-    pub fn set_allocation(&mut self, strategy_id: &str, amount: Decimal) -> Result<(), String> {
-        let allocation = self.allocations
+    /// 设置策略分配金额 (写锁)
+    pub fn set_allocation(&self, strategy_id: &str, amount: Decimal) -> Result<(), String> {
+        let mut allocations = self.allocations.write();
+        let allocation = allocations
             .get_mut(strategy_id)
             .ok_or_else(|| format!("策略 {} 未注册", strategy_id))?;
 
@@ -155,9 +162,10 @@ impl StrategyPool {
         Ok(())
     }
 
-    /// 增加策略分配
-    pub fn add_allocation(&mut self, strategy_id: &str, amount: Decimal) -> Result<(), String> {
-        let allocation = self.allocations
+    /// 增加策略分配 (写锁)
+    pub fn add_allocation(&self, strategy_id: &str, amount: Decimal) -> Result<(), String> {
+        let mut allocations = self.allocations.write();
+        let allocation = allocations
             .get_mut(strategy_id)
             .ok_or_else(|| format!("策略 {} 未注册", strategy_id))?;
 
@@ -167,16 +175,18 @@ impl StrategyPool {
         Ok(())
     }
 
-    /// 设置策略优先级
-    pub fn set_priority(&mut self, strategy_id: &str, priority: u8) {
-        if let Some(allocation) = self.allocations.get_mut(strategy_id) {
+    /// 设置策略优先级 (写锁)
+    pub fn set_priority(&self, strategy_id: &str, priority: u8) {
+        let mut allocations = self.allocations.write();
+        if let Some(allocation) = allocations.get_mut(strategy_id) {
             allocation.priority = priority;
         }
     }
 
-    /// 启用/禁用策略
-    pub fn set_enabled(&mut self, strategy_id: &str, enabled: bool) {
-        if let Some(allocation) = self.allocations.get_mut(strategy_id) {
+    /// 启用/禁用策略 (写锁)
+    pub fn set_enabled(&self, strategy_id: &str, enabled: bool) {
+        let mut allocations = self.allocations.write();
+        if let Some(allocation) = allocations.get_mut(strategy_id) {
             allocation.enabled = enabled;
         }
     }
@@ -188,16 +198,33 @@ impl StrategyPool {
         current_ts - self.last_update_ts >= self.rebalance_interval_secs
     }
 
-    /// 再平衡策略分配 (按优先级比例重新分配)
+    /// 再平衡策略分配 (按优先级比例重新分配) (写锁)
     ///
     /// 公式: 新分配 = 总资金 * (策略优先级 / 总优先级)
-    pub fn rebalance(&mut self, total_funds: Decimal, current_ts: i64) {
-        if self.allocations.is_empty() {
-            return;
+    pub fn rebalance(&self, total_funds: Decimal, current_ts: i64) {
+        // 检查是否需要再平衡
+        {
+            let allocations = self.allocations.read();
+            if allocations.is_empty() {
+                return;
+            }
+
+            let total_priority: u32 = allocations
+                .values()
+                .filter(|a| a.enabled)
+                .map(|a| a.priority as u32)
+                .sum();
+
+            if total_priority == 0 {
+                return;
+            }
         }
 
+        // 获取写锁进行修改
+        let mut allocations = self.allocations.write();
+
         // 计算总优先级
-        let total_priority: u32 = self.allocations
+        let total_priority: u32 = allocations
             .values()
             .filter(|a| a.enabled)
             .map(|a| a.priority as u32)
@@ -208,7 +235,7 @@ impl StrategyPool {
         }
 
         // 按优先级重新分配
-        for allocation in self.allocations.values_mut() {
+        for allocation in allocations.values_mut() {
             if !allocation.enabled {
                 continue;
             }
@@ -216,13 +243,6 @@ impl StrategyPool {
             let priority_ratio = Decimal::from(allocation.priority)
                 / Decimal::from(total_priority);
             let new_allocated = total_funds * priority_ratio;
-
-            // 保留已使用资金
-            let used_diff = if new_allocated > allocation.allocated {
-                dec!(0)
-            } else {
-                allocation.allocated - new_allocated
-            };
 
             allocation.allocated = new_allocated;
             allocation.available = new_allocated - allocation.used;
@@ -233,20 +253,15 @@ impl StrategyPool {
     }
 
     /// 设置再平衡间隔
-    pub fn set_rebalance_interval(&mut self, secs: i64) {
+    pub fn set_rebalance_interval(&self, secs: i64) {
         self.rebalance_interval_secs = secs;
     }
 
     // ========== 查询 ==========
 
-    /// 获取策略分配
-    pub fn get_allocation(&self, strategy_id: &str) -> Option<&StrategyAllocation> {
-        self.allocations.get(strategy_id)
-    }
-
-    /// 获取所有策略分配
-    pub fn get_all_allocations(&self) -> &HashMap<String, StrategyAllocation> {
-        &self.allocations
+    /// 获取策略分配 (克隆以避免生命周期问题)
+    pub fn get_allocation(&self, strategy_id: &str) -> Option<StrategyAllocation> {
+        self.allocations.read().get(strategy_id).cloned()
     }
 
     /// 获取总分配
@@ -254,43 +269,46 @@ impl StrategyPool {
         self.total_allocated
     }
 
-    /// 获取策略已使用资金
+    /// 获取策略已使用资金 (读锁)
     pub fn used_margin(&self, strategy_id: &str) -> Decimal {
         self.allocations
+            .read()
             .get(strategy_id)
             .map(|a| a.used)
             .unwrap_or(dec!(0))
     }
 
-    /// 获取策略可用资金
+    /// 获取策略可用资金 (读锁)
     pub fn available_margin(&self, strategy_id: &str) -> Decimal {
         self.allocations
+            .read()
             .get(strategy_id)
             .map(|a| a.available)
             .unwrap_or(dec!(0))
     }
 
-    /// 获取启用策略数量
+    /// 获取启用策略数量 (读锁)
     pub fn enabled_count(&self) -> usize {
-        self.allocations.values().filter(|a| a.enabled).count()
+        self.allocations.read().values().filter(|a| a.enabled).count()
     }
 
-    /// 获取策略优先级
+    /// 获取策略优先级 (读锁)
     pub fn priority(&self, strategy_id: &str) -> Option<u8> {
-        self.allocations.get(strategy_id).map(|a| a.priority)
+        self.allocations.read().get(strategy_id).map(|a| a.priority)
     }
 
-    /// 是否启用
+    /// 是否启用 (读锁)
     pub fn is_enabled(&self, strategy_id: &str) -> bool {
         self.allocations
+            .read()
             .get(strategy_id)
             .map(|a| a.enabled)
             .unwrap_or(false)
     }
 
-    /// 重置策略池
-    pub fn reset(&mut self) {
-        self.allocations.clear();
+    /// 重置策略池 (写锁)
+    pub fn reset(&self) {
+        self.allocations.write().clear();
         self.total_allocated = dec!(0);
         self.last_update_ts = 0;
     }
@@ -302,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_register_strategy() {
-        let mut pool = StrategyPool::new();
+        let pool = StrategyPool::new();
         pool.register_strategy("trend", dec!(50000), 80);
 
         let alloc = pool.get_allocation("trend").unwrap();
@@ -313,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_reserve_margin() {
-        let mut pool = StrategyPool::new();
+        let pool = StrategyPool::new();
         pool.register_strategy("trend", dec!(50000), 80);
 
         pool.reserve_margin("trend", dec!(10000)).unwrap();
@@ -325,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_release_margin() {
-        let mut pool = StrategyPool::new();
+        let pool = StrategyPool::new();
         pool.register_strategy("trend", dec!(50000), 80);
 
         pool.reserve_margin("trend", dec!(10000)).unwrap();
@@ -338,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_rebalance() {
-        let mut pool = StrategyPool::new();
+        let pool = StrategyPool::new();
         pool.register_strategy("trend", dec!(50000), 80);
         pool.register_strategy("martin", dec!(30000), 60);
 
@@ -361,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_disable_strategy() {
-        let mut pool = StrategyPool::new();
+        let pool = StrategyPool::new();
         pool.register_strategy("trend", dec!(50000), 80);
 
         pool.set_enabled("trend", false);

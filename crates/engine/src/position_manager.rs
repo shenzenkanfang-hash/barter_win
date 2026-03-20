@@ -1,3 +1,4 @@
+use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
@@ -47,12 +48,15 @@ impl Default for LocalPosition {
 /// 本地持仓管理器
 ///
 /// 负责管理单个品种的持仓信息。
+///
+/// 线程安全: 使用 RwLock 保护 position
+///
 /// 设计依据: 设计文档 14.6 持仓/资金更新层
 pub struct LocalPositionManager {
-    /// 当前持仓
-    position: LocalPosition,
+    /// 当前持仓 (使用 RwLock 保护)
+    position: RwLock<LocalPosition>,
     /// 持仓统计
-    stats: PositionStats,
+    stats: RwLock<PositionStats>,
 }
 
 impl Default for LocalPositionManager {
@@ -65,113 +69,124 @@ impl LocalPositionManager {
     /// 创建新的持仓管理器
     pub fn new() -> Self {
         Self {
-            position: LocalPosition::default(),
-            stats: PositionStats::default(),
+            position: RwLock::new(LocalPosition::default()),
+            stats: RwLock::new(PositionStats::default()),
         }
     }
 
-    /// 开仓 (增加持仓)
+    /// 开仓 (增加持仓) (写锁)
     ///
     /// qty: 新开数量
     /// price: 开仓价格
     /// timestamp: 开仓时间戳
     pub fn open_position(
-        &mut self,
+        &self,
         direction: Direction,
         qty: Decimal,
         price: Decimal,
         timestamp: i64,
     ) {
-        let current_pos = &mut self.position;
+        let mut pos = self.position.write();
 
         if qty <= dec!(0) || price <= dec!(0) {
             return;
         }
 
-        if current_pos.qty <= dec!(0) {
+        if pos.qty <= dec!(0) {
             // 无持仓，直接开仓
-            current_pos.direction = direction;
-            current_pos.qty = qty;
-            current_pos.avg_price = price;
-            current_pos.open_time = timestamp;
-        } else if current_pos.direction == direction {
+            pos.direction = direction;
+            pos.qty = qty;
+            pos.avg_price = price;
+            pos.open_time = timestamp;
+        } else if pos.direction == direction {
             // 同方向加仓
-            let total_value = current_pos.qty * current_pos.avg_price + qty * price;
-            let total_qty = current_pos.qty + qty;
-            current_pos.avg_price = total_value / total_qty;
-            current_pos.qty = total_qty;
+            let total_value = pos.qty * pos.avg_price + qty * price;
+            let total_qty = pos.qty + qty;
+            pos.avg_price = total_value / total_qty;
+            pos.qty = total_qty;
         } else {
             // 反方向，先平后开
-            if qty >= current_pos.qty {
+            if qty >= pos.qty {
                 // 平完再开反向仓
-                let remaining_qty = qty - current_pos.qty;
-                current_pos.qty = remaining_qty;
-                current_pos.direction = direction;
-                current_pos.avg_price = price;
-                current_pos.open_time = timestamp;
+                let remaining_qty = qty - pos.qty;
+                pos.qty = remaining_qty;
+                pos.direction = direction;
+                pos.avg_price = price;
+                pos.open_time = timestamp;
             } else {
                 // 部分平仓
-                current_pos.qty = current_pos.qty - qty;
+                pos.qty = pos.qty - qty;
             }
         }
 
-        self.stats.update_on_trade();
+        drop(pos);
+        self.stats.write().update_on_trade();
     }
 
-    /// 平仓 (减少持仓)
+    /// 平仓 (减少持仓) (写锁)
     ///
     /// qty: 平仓数量
     /// price: 平仓价格
     /// 返回: 已实现盈亏
-    pub fn close_position(&mut self, qty: Decimal, price: Decimal) -> Decimal {
-        let current_pos = &mut self.position;
+    pub fn close_position(&self, qty: Decimal, price: Decimal) -> Decimal {
+        let mut pos = self.position.write();
 
-        if current_pos.qty <= dec!(0) || qty <= dec!(0) {
+        if pos.qty <= dec!(0) || qty <= dec!(0) {
             return dec!(0);
         }
 
         // 计算已实现盈亏
-        let pnl = match current_pos.direction {
-            Direction::Long => (price - current_pos.avg_price) * qty,
-            Direction::Short => (current_pos.avg_price - price) * qty,
+        let pnl = match pos.direction {
+            Direction::Long => (price - pos.avg_price) * qty,
+            Direction::Short => (pos.avg_price - price) * qty,
         };
 
         // 更新持仓
-        if qty >= current_pos.qty {
-            current_pos.qty = dec!(0);
-            current_pos.avg_price = dec!(0);
+        if qty >= pos.qty {
+            pos.qty = dec!(0);
+            pos.avg_price = dec!(0);
         } else {
-            current_pos.qty = current_pos.qty - qty;
+            pos.qty = pos.qty - qty;
         }
 
-        self.stats.update_on_trade();
-        self.stats.add_realized_pnl(pnl);
+        drop(pos);
+        let mut stats = self.stats.write();
+        stats.update_on_trade();
+        stats.add_realized_pnl(pnl);
 
         pnl
     }
 
-    /// 全平 (平掉所有持仓)
+    /// 全平 (平掉所有持仓) (写锁)
     ///
     /// price: 平仓价格
     /// 返回: 已实现盈亏
-    pub fn close_all(&mut self, price: Decimal) -> Decimal {
-        let qty = self.position.qty;
+    pub fn close_all(&self, price: Decimal) -> Decimal {
+        let qty = self.position.read().qty;
         self.close_position(qty, price)
     }
 
-    /// 更新持仓 (成交回报后调用)
+    /// 更新持仓 (成交回报后调用) (写锁)
     ///
     /// 持仓变动时调用，更新本地持仓状态。
     pub fn update_on_fill(
-        &mut self,
+        &self,
         direction: Direction,
         qty: Decimal,
         price: Decimal,
         timestamp: i64,
     ) {
         // 如果有反向持仓，先平后开
-        if self.position.qty > dec!(0) && self.position.direction != direction {
-            let close_qty = qty.min(self.position.qty);
+        let should_close_first = {
+            let pos = self.position.read();
+            pos.qty > dec!(0) && pos.direction != direction
+        };
+
+        if should_close_first {
+            let close_qty = {
+                let pos = self.position.read();
+                qty.min(pos.qty)
+            };
             if close_qty > dec!(0) {
                 self.close_position(close_qty, price);
             }
@@ -184,64 +199,65 @@ impl LocalPositionManager {
         }
     }
 
-    /// 获取当前持仓
-    pub fn get_position(&self) -> &LocalPosition {
-        &self.position
+    /// 获取当前持仓 (克隆以避免生命周期问题)
+    pub fn get_position(&self) -> LocalPosition {
+        self.position.read().clone()
     }
 
-    /// 获取持仓数量
+    /// 获取持仓数量 (读锁)
     pub fn qty(&self) -> Decimal {
-        self.position.qty
+        self.position.read().qty
     }
 
-    /// 获取持仓方向
+    /// 获取持仓方向 (读锁)
     pub fn direction(&self) -> Direction {
-        self.position.direction
+        self.position.read().direction
     }
 
-    /// 获取持仓均价
+    /// 获取持仓均价 (读锁)
     pub fn avg_price(&self) -> Decimal {
-        self.position.avg_price
+        self.position.read().avg_price
     }
 
-    /// 检查是否有持仓
+    /// 检查是否有持仓 (读锁)
     pub fn has_position(&self) -> bool {
-        self.position.qty > dec!(0)
+        self.position.read().qty > dec!(0)
     }
 
-    /// 计算未实现盈亏
+    /// 计算未实现盈亏 (读锁)
     ///
     /// current_price: 当前市场价格
     pub fn unrealized_pnl(&self, current_price: Decimal) -> Decimal {
-        if self.position.qty <= dec!(0) || current_price <= dec!(0) {
+        let pos = self.position.read();
+        if pos.qty <= dec!(0) || current_price <= dec!(0) {
             return dec!(0);
         }
 
-        match self.position.direction {
-            Direction::Long => (current_price - self.position.avg_price) * self.position.qty,
-            Direction::Short => (self.position.avg_price - current_price) * self.position.qty,
+        match pos.direction {
+            Direction::Long => (current_price - pos.avg_price) * pos.qty,
+            Direction::Short => (pos.avg_price - current_price) * pos.qty,
         }
     }
 
-    /// 计算名义价值
+    /// 计算名义价值 (读锁)
     pub fn notional_value(&self, price: Decimal) -> Decimal {
-        self.position.qty * price
+        self.position.read().qty * price
     }
 
     /// 获取统计信息
-    pub fn stats(&self) -> &PositionStats {
-        &self.stats
+    pub fn stats(&self) -> PositionStats {
+        self.stats.read().clone()
     }
 
-    /// 重置持仓
-    pub fn reset(&mut self) {
-        self.position = LocalPosition::default();
-        self.stats = PositionStats::default();
+    /// 重置持仓 (写锁)
+    pub fn reset(&self) {
+        *self.position.write() = LocalPosition::default();
+        *self.stats.write() = PositionStats::default();
     }
 }
 
 /// 持仓统计
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PositionStats {
     /// 交易次数
     pub trade_count: u64,
@@ -275,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_open_long() {
-        let mut mgr = LocalPositionManager::new();
+        let mgr = LocalPositionManager::new();
         mgr.open_position(Direction::Long, dec!(1), dec!(50000), 1000);
 
         assert_eq!(mgr.qty(), dec!(1));
@@ -285,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_add_to_position() {
-        let mut mgr = LocalPositionManager::new();
+        let mgr = LocalPositionManager::new();
         mgr.open_position(Direction::Long, dec!(1), dec!(50000), 1000);
         mgr.open_position(Direction::Long, dec!(1), dec!(51000), 1001);
 
@@ -296,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_close_position() {
-        let mut mgr = LocalPositionManager::new();
+        let mgr = LocalPositionManager::new();
         mgr.open_position(Direction::Long, dec!(1), dec!(50000), 1000);
 
         let pnl = mgr.close_position(dec!(0.5), dec!(51000));
@@ -306,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_unrealized_pnl_long() {
-        let mut mgr = LocalPositionManager::new();
+        let mgr = LocalPositionManager::new();
         mgr.open_position(Direction::Long, dec!(1), dec!(50000), 1000);
 
         let pnl = mgr.unrealized_pnl(dec!(51000));
@@ -315,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_unrealized_pnl_short() {
-        let mut mgr = LocalPositionManager::new();
+        let mgr = LocalPositionManager::new();
         mgr.open_position(Direction::Short, dec!(1), dec!(50000), 1000);
 
         let pnl = mgr.unrealized_pnl(dec!(49000));

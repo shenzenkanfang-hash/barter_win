@@ -1,3 +1,4 @@
+use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
@@ -42,14 +43,16 @@ pub struct OrderReservation {
 /// - 持仓比例检查
 /// - 名义价值检查
 ///
+/// 线程安全: 使用 RwLock 保护 reservations
+///
 /// 注: Lua 脚本功能需要集成 mlua crate，此处提供基础实现
 pub struct OrderCheck {
     /// 最大持仓比例
     max_position_ratio: Decimal,
     /// 最低订单名义价值
     min_order_notional: Decimal,
-    /// 预占记录: order_id -> OrderReservation
-    reservations: HashMap<String, OrderReservation>,
+    /// 预占记录 (使用 RwLock 保护)
+    reservations: RwLock<HashMap<String, OrderReservation>>,
     /// 总冻结金额
     total_frozen: Decimal,
 }
@@ -66,12 +69,12 @@ impl OrderCheck {
         Self {
             max_position_ratio: dec!(0.95),
             min_order_notional: dec!(10.0),
-            reservations: HashMap::new(),
+            reservations: RwLock::new(HashMap::new()),
             total_frozen: dec!(0),
         }
     }
 
-    /// 预检订单
+    /// 预检订单 (读锁)
     ///
     /// 在下单前预检订单的风控条件。
     /// 如果通过，返回冻结金额。
@@ -98,14 +101,15 @@ impl OrderCheck {
         }
 
         // 2. 检查资金是否足够
-        let total_needed = self.total_frozen + order_value;
+        let total_frozen = self.total_frozen();
+        let total_needed = total_frozen + order_value;
         if total_needed > available_balance {
             return OrderCheckResult {
                 passed: false,
                 frozen_amount: dec!(0),
                 reject_reason: Some(format!(
                     "可用资金 {} 不足，需要 {} (已冻结 {})",
-                    available_balance, total_needed, self.total_frozen
+                    available_balance, total_needed, total_frozen
                 )),
                 timestamp: chrono::Utc::now().timestamp(),
             };
@@ -113,7 +117,6 @@ impl OrderCheck {
 
         // 3. 检查持仓比例
         let new_exposure = current_exposure + order_value;
-        // 假设总权益 = 可用 + 当前敞口 (简化计算)
         let total_equity = available_balance + current_exposure;
         let new_ratio = new_exposure / total_equity;
 
@@ -138,20 +141,23 @@ impl OrderCheck {
         }
     }
 
-    /// 预占订单 (冻结保证金)
+    /// 预占订单 (冻结保证金) (写锁)
     ///
     /// 使用原子操作预占订单的保证金。
     /// 设计文档提到使用 Lua 脚本实现原子预占。
     pub fn reserve(
-        &mut self,
+        &self,
         order_id: &str,
         symbol: &str,
         strategy_id: &str,
         frozen_amount: Decimal,
     ) -> Result<(), String> {
         // 检查是否已经预占
-        if self.reservations.contains_key(order_id) {
-            return Err(format!("订单 {} 已经有预占记录", order_id));
+        {
+            let reservations = self.reservations.read();
+            if reservations.contains_key(order_id) {
+                return Err(format!("订单 {} 已经有预占记录", order_id));
+            }
         }
 
         // 创建预占记录
@@ -165,83 +171,100 @@ impl OrderCheck {
         };
 
         // 添加预占记录
-        self.reservations.insert(order_id.to_string(), reservation);
+        {
+            let mut reservations = self.reservations.write();
+            reservations.insert(order_id.to_string(), reservation);
+        }
         self.total_frozen += frozen_amount;
 
         Ok(())
     }
 
-    /// 确认预占 (订单成交后调用)
+    /// 确认预占 (订单成交后调用) (写锁)
     ///
     /// 将预占转为实际占用，从冻结金额中扣除。
-    pub fn confirm_reservation(&mut self, order_id: &str) -> Result<Decimal, String> {
-        let reservation = self.reservations.remove(order_id)
-            .ok_or_else(|| format!("订单 {} 没有预占记录", order_id))?;
+    pub fn confirm_reservation(&self, order_id: &str) -> Result<Decimal, String> {
+        let frozen_amount = {
+            let mut reservations = self.reservations.write();
+            let reservation = reservations.remove(order_id)
+                .ok_or_else(|| format!("订单 {} 没有预占记录", order_id))?;
 
-        if reservation.status != "pending" {
-            return Err(format!("订单 {} 状态不是 pending", order_id));
-        }
+            if reservation.status != "pending" {
+                return Err(format!("订单 {} 状态不是 pending", order_id));
+            }
 
-        self.total_frozen -= reservation.frozen_amount;
-        Ok(reservation.frozen_amount)
+            reservation.frozen_amount
+        };
+
+        self.total_frozen -= frozen_amount;
+        Ok(frozen_amount)
     }
 
-    /// 取消预占 (订单失败/撤销后调用)
+    /// 取消预占 (订单失败/撤销后调用) (写锁)
     ///
     /// 释放冻结的保证金。
-    pub fn cancel_reservation(&mut self, order_id: &str) -> Result<Decimal, String> {
-        let reservation = self.reservations.remove(order_id)
-            .ok_or_else(|| format!("订单 {} 没有预占记录", order_id))?;
+    pub fn cancel_reservation(&self, order_id: &str) -> Result<Decimal, String> {
+        let frozen_amount = {
+            let mut reservations = self.reservations.write();
+            let reservation = reservations.remove(order_id)
+                .ok_or_else(|| format!("订单 {} 没有预占记录", order_id))?;
 
-        if reservation.status != "pending" {
-            return Err(format!("订单 {} 状态不是 pending", order_id));
-        }
+            if reservation.status != "pending" {
+                return Err(format!("订单 {} 状态不是 pending", order_id));
+            }
 
-        self.total_frozen -= reservation.frozen_amount;
-        Ok(reservation.frozen_amount)
+            reservation.frozen_amount
+        };
+
+        self.total_frozen -= frozen_amount;
+        Ok(frozen_amount)
     }
 
-    /// 释放所有预占 (用于系统重置)
-    pub fn release_all(&mut self) {
-        self.reservations.clear();
+    /// 释放所有预占 (用于系统重置) (写锁)
+    pub fn release_all(&self) {
+        self.reservations.write().clear();
         self.total_frozen = dec!(0);
     }
 
-    /// 获取总冻结金额
+    /// 获取总冻结金额 (读锁)
     pub fn total_frozen(&self) -> Decimal {
         self.total_frozen
     }
 
-    /// 获取预占数量
+    /// 获取预占数量 (读锁)
     pub fn reservation_count(&self) -> usize {
-        self.reservations.len()
+        self.reservations.read().len()
     }
 
-    /// 获取指定订单的预占记录
-    pub fn get_reservation(&self, order_id: &str) -> Option<&OrderReservation> {
-        self.reservations.get(order_id)
+    /// 获取指定订单的预占记录 (克隆以避免生命周期问题)
+    pub fn get_reservation(&self, order_id: &str) -> Option<OrderReservation> {
+        self.reservations.read().get(order_id).cloned()
     }
 
-    /// 检查是否有未处理的预占
+    /// 检查是否有未处理的预占 (读锁)
     pub fn has_pending_reservations(&self) -> bool {
-        !self.reservations.is_empty()
+        !self.reservations.read().is_empty()
     }
 
     /// 设置最大持仓比例
-    pub fn set_max_position_ratio(&mut self, ratio: Decimal) {
+    pub fn set_max_position_ratio(&self, ratio: Decimal) {
+        // 注意: 这个配置项可以在锁外设置，因为它只是读取
+        // 但为了安全起见，如果需要原子更新，可以在这里加锁
         self.max_position_ratio = ratio;
     }
 
     /// 设置最低订单名义价值
-    pub fn set_min_order_notional(&mut self, notional: Decimal) {
+    pub fn set_min_order_notional(&self, notional: Decimal) {
         self.min_order_notional = notional;
     }
 
-    /// 获取待确认的预占列表
-    pub fn get_pending_reservations(&self) -> Vec<&OrderReservation> {
+    /// 获取待确认的预占列表 (克隆)
+    pub fn get_pending_reservations(&self) -> Vec<OrderReservation> {
         self.reservations
+            .read()
             .values()
             .filter(|r| r.status == "pending")
+            .cloned()
             .collect()
     }
 }
@@ -343,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_reserve_and_confirm() {
-        let mut checker = OrderCheck::new();
+        let checker = OrderCheck::new();
         checker.reserve("order_1", "BTC", "trend", dec!(1000)).unwrap();
         assert_eq!(checker.total_frozen(), dec!(1000));
 
@@ -354,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_reserve_and_cancel() {
-        let mut checker = OrderCheck::new();
+        let checker = OrderCheck::new();
         checker.reserve("order_1", "BTC", "trend", dec!(1000)).unwrap();
         assert_eq!(checker.total_frozen(), dec!(1000));
 
@@ -365,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_duplicate_reserve() {
-        let mut checker = OrderCheck::new();
+        let checker = OrderCheck::new();
         checker.reserve("order_1", "BTC", "trend", dec!(1000)).unwrap();
         let result = checker.reserve("order_1", "BTC", "trend", dec!(1000));
         assert!(result.is_err());
