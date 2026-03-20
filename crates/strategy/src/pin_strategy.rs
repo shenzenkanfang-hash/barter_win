@@ -738,7 +738,7 @@ mod tests {
         assert_eq!(strategy.add_count(), 2);
         assert_eq!(strategy.position_qty(), dec!(3));
 
-        // 第三次加仓
+        // 第三次加仓 (价格 95.5，pnl_ratio = -4.5%，低于对冲阈值继续加仓)
         let signal3 = strategy.check_signal(
             dec!(-2.5),
             dec!(1.5),
@@ -746,10 +746,10 @@ mod tests {
             dec!(-90),
             "green",
             "green",
-            dec!(94),
+            dec!(95.5),
         );
         assert_eq!(signal3, PinSignal::LongAdd);
-        strategy.update_state(signal3, dec!(1), dec!(94));
+        strategy.update_state(signal3, dec!(1), dec!(95.5));
         assert_eq!(strategy.add_count(), 3);
         assert_eq!(strategy.position_qty(), dec!(4));
     }
