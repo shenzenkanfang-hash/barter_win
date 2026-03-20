@@ -5,12 +5,7 @@ use rust_decimal_macros::dec;
 use crate::types::{PriceControlInput, PriceControlOutput, PositionSide};
 
 /// 分钟级价格控制器
-pub struct MinPriceControlGenerator {
-    default_profit_threshold: Decimal,
-    default_loss_threshold: Decimal,
-    default_add_threshold: Decimal,
-    default_move_stop_threshold: Decimal,
-}
+pub struct MinPriceControlGenerator;
 
 impl Default for MinPriceControlGenerator {
     fn default() -> Self {
@@ -20,12 +15,7 @@ impl Default for MinPriceControlGenerator {
 
 impl MinPriceControlGenerator {
     pub fn new() -> Self {
-        Self {
-            default_profit_threshold: dec!(0.01),   // 1%
-            default_loss_threshold: dec!(0.02),    // 2%
-            default_add_threshold: dec!(0.04),     // 4%
-            default_move_stop_threshold: dec!(0.02), // 2%
-        }
+        Self
     }
 
     /// 检查价格控制条件
@@ -57,6 +47,10 @@ impl MinPriceControlGenerator {
         let current = input.current_price;
 
         if entry <= Decimal::ZERO {
+            return (Decimal::ZERO, Decimal::ZERO);
+        }
+
+        if current <= Decimal::ZERO {
             return (Decimal::ZERO, Decimal::ZERO);
         }
 
