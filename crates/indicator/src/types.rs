@@ -48,7 +48,7 @@ pub enum PositionSide {
 // ==================== min/ 输入输出类型 ====================
 
 /// 分钟级市场状态输入
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MinMarketStatusInput {
     pub tr_ratio_10min: Decimal,
     pub tr_ratio_15min: Decimal,
@@ -76,7 +76,7 @@ impl Default for MinMarketStatusOutput {
 }
 
 /// 分钟级信号输入
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MinSignalInput {
     pub tr_base_60min: Decimal,
     pub tr_ratio_15min: Decimal,
@@ -128,7 +128,7 @@ pub struct MinSignalOutput {
 // ==================== day/ 输入输出类型 ====================
 
 /// 日线级市场状态输入
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DayMarketStatusInput {
     pub tr_ratio_5d_20d: Decimal,
     pub tr_ratio_20d_60d: Decimal,
@@ -181,7 +181,7 @@ pub struct DaySignalOutput {
 // ==================== PriceControl 类型 ====================
 
 /// 价格控制输入
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PriceControlInput {
     pub position_entry_price: Decimal,
     pub position_side: PositionSide,
@@ -194,7 +194,7 @@ pub struct PriceControlInput {
 }
 
 /// 价格控制输出
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PriceControlOutput {
     pub should_add: bool,
     pub should_stop: bool,
@@ -207,20 +207,20 @@ pub struct PriceControlOutput {
 // ==================== TradingTrigger 类型 ====================
 
 /// 仓位状态 (简化版 CheckList)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckList {
     pub long_positions: Vec<PositionRecord>,
     pub short_positions: Vec<PositionRecord>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PositionRecord {
     pub entry_price: Decimal,
     pub qty: Decimal,
 }
 
 /// 交易触发器输入
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingTriggerInput {
     pub symbol: String,
     pub current_price: Decimal,
@@ -233,7 +233,7 @@ pub struct TradingTriggerInput {
 }
 
 /// 交易决策
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingDecision {
     pub action: TradingAction,
     pub reason: String,
