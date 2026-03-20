@@ -352,36 +352,67 @@ impl PineColorDetector {
         // RSI
         let rsi_val = self.rsi.update(close);
 
-        // PineColor 判断逻辑
-        let color = self.detect_color(macd, signal, hist, rsi_val);
+        // Bar color (基于 Pine Script 买卖条件)
+        let bar_color = self.detect_bar_color(macd, signal, hist, rsi_val);
+
+        // BG color (基于 MACD vs Signal)
+        let bg_color = self.detect_bg_color(macd, signal);
 
         self.hist_prev = hist;
 
-        (color.clone(), color) // bar color 和 bg color
+        (bar_color, bg_color)
     }
 
-    fn detect_color(&self, macd: Decimal, signal: Decimal, hist: Decimal, rsi: Decimal) -> String {
+    // K线颜色 - 基于 Pine Script 买卖条件
+    fn detect_bar_color(&self, macd: Decimal, signal: Decimal, hist: Decimal, rsi: Decimal) -> String {
+        let hist_prev = self.hist_prev;
+
+        // selltimeS = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0 and rsi >= 70
+        // buytimeS = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0 and rsi <= 30
+        // selltimeT = macd <= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
+        // buytimeT = macd >= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
+        // selltime = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
+        // buytime = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
+
+        // 简化：基于 MACD 和 Signal 判断
         // RSI 极值优先
         if rsi >= dec!(70) {
-            return "紫色".to_string();
+            return "Purple".to_string();
         }
         if rsi <= dec!(30) {
-            return "紫色".to_string();
+            return "Purple".to_string();
         }
 
         // MACD 判断
-        let macd_positive = macd >= Decimal::ZERO;
-        let signal_positive = signal >= Decimal::ZERO;
         let macd_above_signal = macd >= signal;
 
-        if macd_positive && macd_above_signal {
-            "纯绿".to_string()
-        } else if !macd_positive && macd_above_signal {
-            "浅绿".to_string()
-        } else if !macd_positive && !macd_above_signal {
-            "纯红".to_string()
+        if macd >= Decimal::ZERO && macd_above_signal {
+            "PureGreen".to_string()
+        } else if macd < Decimal::ZERO && macd_above_signal {
+            "LightGreen".to_string()
+        } else if macd < Decimal::ZERO && !macd_above_signal {
+            "PureRed".to_string()
         } else {
-            "浅红".to_string()
+            "LightRed".to_string()
+        }
+    }
+
+    // 背景颜色 - 基于 MACD vs Signal
+    fn detect_bg_color(&self, macd: Decimal, signal: Decimal) -> String {
+        // Pine Script:
+        // upin = macd >= signal and macd >= 0
+        // downin = macd <= signal and macd <= 0
+        // upinH = macd <= signal and macd >= 0
+        // downinH = macd >= signal and macd <= 0
+
+        if macd >= signal && macd >= Decimal::ZERO {
+            "green".to_string()     // #4caf50 green
+        } else if macd <= signal && macd <= Decimal::ZERO {
+            "red".to_string()       // #f44336 red
+        } else if macd <= signal && macd >= Decimal::ZERO {
+            "lightgreen".to_string() // #cae8a6
+        } else {
+            "lightred".to_string()   // #f4dedc
         }
     }
 }
@@ -711,16 +742,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_path = format!("indicator_comparison_{}.csv", symbol.to_lowercase());
     let mut csv_content = String::new();
 
-    // 中文表头
-    csv_content.push_str("时间戳,Tick索引,开盘价,最高价,最低价,收盘价,成交量,");
-    csv_content.push_str("MACD快线,MACD慢线,MACD差值,信号线,Hist柱,");
-    csv_content.push_str("EMA10,EMA20,EMA50,EMA100,EMA200,");
-    csv_content.push_str("EMA10对比EMA20,EMA20对比EMA50,");
-    csv_content.push_str("RSI极值,松林颜色,");
-    csv_content.push_str("Jerk原始,加速度平滑,速度,归一化Jerk,");
-    csv_content.push_str("位置归一化,");
-    csv_content.push_str("TR5日均值,TR20日均值,TR比率5日20日,TR比率20日60日,");
-    csv_content.push_str("可读时间\n");
+    // 表头 (英文)
+    csv_content.push_str("timestamp,tick_index,open,high,low,close,volume,");
+    csv_content.push_str("macd_fast,macd_slow,macd_diff,signal,hist,");
+    csv_content.push_str("ema10,ema20,ema50,ema100,ema200,");
+    csv_content.push_str("ema10_vs_20,ema20_vs_50,");
+    csv_content.push_str("rsi_extreme,pine_bar_color,pine_bg_color,");
+    csv_content.push_str("jerk_raw,acc_smooth,velocity,norm_jerk,");
+    csv_content.push_str("pos_norm_20,");
+    csv_content.push_str("tr_5d_avg,tr_20d_avg,tr_ratio_5d_20d,tr_ratio_20d_60d,");
+    csv_content.push_str("readable_time\n");
 
     let mut prev_close = None;
     let mut tick_index = 0i64;
@@ -748,11 +779,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (macd_val, signal_val, hist_val) = macd.update(close);
 
         // PineColor
-        let (pine_bar, _pine_bg) = pine_color.update(close);
+        let (pine_bar, pine_bg) = pine_color.update(close);
 
         // RSI
-        let rsi_val = rsi.update(close);
-        let rsi_extreme = if rsi.get_rsi_70() { "超买" } else if rsi.get_rsi_30() { "超卖" } else { "正常" };
+        let _rsi_val = rsi.update(close);
+        let rsi_extreme = if rsi.get_rsi_70() { "Overbought" } else if rsi.get_rsi_30() { "Oversold" } else { "Normal" };
 
         // Jerk
         let (jerk_raw, acc_smooth, velocity, norm_jerk) = jerk.update(high, low, close);
@@ -769,8 +800,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         prev_close = Some(close);
 
         // EMA 比较
-        let ema10_vs_20 = if ema10_val > ema20_val { "多头" } else if ema10_val < ema20_val { "空头" } else { "中性" };
-        let ema20_vs_50 = if ema20_val > ema50_val { "多头" } else if ema20_val < ema50_val { "空头" } else { "中性" };
+        let ema10_vs_20 = if ema10_val > ema20_val { "Bullish" } else if ema10_val < ema20_val { "Bearish" } else { "Neutral" };
+        let ema20_vs_50 = if ema20_val > ema50_val { "Bullish" } else if ema20_val < ema50_val { "Bearish" } else { "Neutral" };
 
         // 写入 CSV
         csv_content.push_str(&format!(
@@ -789,7 +820,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{},{},", ema10_vs_20, ema20_vs_50,
         ));
         csv_content.push_str(&format!(
-            "{},{},", rsi_extreme, pine_bar,
+            "{},{},{},", rsi_extreme, pine_bar, pine_bg,
         ));
         csv_content.push_str(&format!(
             "{},{},{},{},",
