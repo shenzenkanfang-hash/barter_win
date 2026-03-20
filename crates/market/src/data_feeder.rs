@@ -485,20 +485,20 @@ impl Clone for DataFeeder {
             depth_conn: RwLock::new(None),
             // 广播通道 sender 可以 clone
             broadcaster: self.broadcaster.clone(),
-            // per-connection 状态需要重新创建
-            volatility_detectors: Arc::new(RwLock::new(FnvHashMap::default())),
-            orderbooks: Arc::new(RwLock::new(FnvHashMap::default())),
-            depth_subscribed: Arc::new(RwLock::new(FnvHashSet::default())),
+            // 使用 Arc::clone 共享状态，而非重新创建
+            volatility_detectors: Arc::clone(&self.volatility_detectors),
+            orderbooks: Arc::clone(&self.orderbooks),
+            depth_subscribed: Arc::clone(&self.depth_subscribed),
             default_depth_symbol: self.default_depth_symbol.clone(),
-            symbol_registry: self.symbol_registry.clone(),
-            is_initialized: self.is_initialized.clone(),
-            last_data_time: self.last_data_time.clone(),
-            // 新增字段
-            tick_callbacks: self.tick_callbacks.clone(),
-            kline_1m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
-            kline_15m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
-            kline_1d_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
-            kline_15m_counters: Arc::new(RwLock::new(FnvHashMap::default())),
+            symbol_registry: Arc::clone(&self.symbol_registry),
+            is_initialized: Arc::clone(&self.is_initialized),
+            last_data_time: Arc::clone(&self.last_data_time),
+            // 新增字段使用 Arc::clone 共享
+            tick_callbacks: Arc::clone(&self.tick_callbacks),
+            kline_1m_synthesizers: Arc::clone(&self.kline_1m_synthesizers),
+            kline_15m_synthesizers: Arc::clone(&self.kline_15m_synthesizers),
+            kline_1d_synthesizers: Arc::clone(&self.kline_1d_synthesizers),
+            kline_15m_counters: Arc::clone(&self.kline_15m_counters),
         }
     }
 }
@@ -552,65 +552,70 @@ impl DataFeeder {
     /// 1. 更新 K线合成器 (1m/15m/1d)
     /// 2. 计算波动率
     /// 3. 通知所有回调
+    ///
+    /// 使用单一锁保护整个处理流程，减少锁竞争
     pub fn process_tick(&self, mut tick: Tick) {
         let symbol = tick.symbol.clone();
         let timestamp = tick.timestamp;
 
-        // 1. 获取或创建 K线合成器
-        let kline_1m = {
-            let mut synthesizers = self.kline_1m_synthesizers.blocking_write();
-            let synthesizer = synthesizers
-                .entry(symbol.clone())
-                .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Minute(1)));
-            synthesizer.update(&tick)
-        };
-
-        // 2. 更新 15m K线 (每15根1m K线合成1根15m)
-        let kline_15m = {
+        // 合并所有锁操作为单一锁获取
+        let (kline_1m_opt, kline_15m_opt, kline_1d_opt, vol_stats) = {
+            let mut synthesizers_1m = self.kline_1m_synthesizers.blocking_write();
             let mut counters = self.kline_15m_counters.blocking_write();
-            let counter = counters.entry(symbol.clone()).or_insert(0);
-
-            if kline_1m.is_some() {
-                *counter += 1;
-            }
-
-            if *counter >= 15 {
-                *counter = 0;
-                let mut synthesizers = self.kline_15m_synthesizers.blocking_write();
-                let synthesizer = synthesizers
-                    .entry(symbol.clone())
-                    .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Minute(15)));
-                synthesizer.update(&tick)
-            } else {
-                None
-            }
-        };
-
-        // 3. 更新日K线
-        let kline_1d = {
-            let mut synthesizers = self.kline_1d_synthesizers.blocking_write();
-            let synthesizer = synthesizers
-                .entry(symbol.clone())
-                .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Day));
-            synthesizer.update(&tick)
-        };
-
-        // 4. 更新 tick 中的 K线信息
-        tick.kline_1m = {
-            let synthesizers = self.kline_1m_synthesizers.blocking_read();
-            synthesizers.get(&symbol).and_then(|s| s.current_kline().cloned())
-        };
-        tick.kline_15m = kline_15m;
-        tick.kline_1d = kline_1d;
-
-        // 5. 计算波动率
-        let vol_stats = {
+            let mut synthesizers_15m = self.kline_15m_synthesizers.blocking_write();
+            let mut synthesizers_1d = self.kline_1d_synthesizers.blocking_write();
             let mut detectors = self.volatility_detectors.blocking_write();
-            let detector = detectors
-                .entry(symbol.clone())
-                .or_insert_with(|| VolatilityDetector::new(symbol.clone()));
-            detector.update(tick.price, timestamp)
-        };
+
+            // 1. 获取或创建 1m K线合成器
+            let kline_1m_opt = {
+                let synthesizer = synthesizers_1m
+                    .entry(symbol.clone())
+                    .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Minute(1)));
+                synthesizer.update(&tick)
+            };
+
+            // 2. 更新 15m K线 (每15根1m K线合成1根15m)
+            let kline_15m_opt = {
+                let counter = counters.entry(symbol.clone()).or_insert(0);
+
+                if kline_1m_opt.is_some() {
+                    *counter += 1;
+                }
+
+                if *counter >= 15 {
+                    *counter = 0;
+                    let synthesizer = synthesizers_15m
+                        .entry(symbol.clone())
+                        .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Minute(15)));
+                    synthesizer.update(&tick)
+                } else {
+                    None
+                }
+            };
+
+            // 3. 更新日K线
+            let kline_1d_opt = {
+                let synthesizer = synthesizers_1d
+                    .entry(symbol.clone())
+                    .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Day));
+                synthesizer.update(&tick)
+            };
+
+            // 4. 计算波动率
+            let vol_stats = {
+                let detector = detectors
+                    .entry(symbol.clone())
+                    .or_insert_with(|| VolatilityDetector::new(symbol.clone()));
+                detector.update(tick.price, timestamp)
+            };
+
+            (kline_1m_opt, kline_15m_opt, kline_1d_opt, vol_stats)
+        }; // 锁在此释放
+
+        // 5. 更新 tick 中的 K线信息
+        tick.kline_1m = kline_1m_opt.clone();
+        tick.kline_15m = kline_15m_opt;
+        tick.kline_1d = kline_1d_opt;
 
         // 6. 检查是否需要调整 Depth 订阅
         if vol_stats.is_high_volatility {

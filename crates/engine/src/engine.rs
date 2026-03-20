@@ -21,6 +21,7 @@ use indicator::{EMA, RSI};
 use market::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use strategy::types::{OrderRequest, Side};
@@ -114,8 +115,8 @@ pub struct TradingEngine {
     // 当前市场价格
     current_price: Decimal,
 
-    // 是否正在运行
-    is_running: bool,
+    // 是否正在运行 (使用 AtomicBool 支持跨任务检查)
+    is_running: Arc<AtomicBool>,
 }
 
 impl TradingEngine {
@@ -186,7 +187,7 @@ impl TradingEngine {
             symbol,
             current_ts: 0,
             current_price: Decimal::ZERO,
-            is_running: false,
+            is_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -367,10 +368,13 @@ impl TradingEngine {
     }
 
     /// 主循环
-    pub async fn run(&mut self) {
+    ///
+    /// 注意：此方法需要在 start() 中通过 tokio::spawn 启动
+    /// 使用 Arc<AtomicBool> 共享 is_running 状态以支持 shutdown
+    pub async fn run(self: Arc<Self>) {
         info!("TradingEngine 启动");
 
-        loop {
+        while self.is_running.load(Ordering::SeqCst) {
             if let Some(tick) = self.market_stream.next_tick().await {
                 self.on_tick(&tick).await;
             } else {
@@ -378,6 +382,8 @@ impl TradingEngine {
                 break;
             }
         }
+
+        info!("TradingEngine 主循环退出");
     }
 
     /// 带超时的运行 (用于测试模拟)
@@ -419,18 +425,20 @@ impl TradingEngine {
     /// 1. 标记为运行状态
     /// 2. 启动后台任务（持仓监控、强平检查）
     /// 3. 注册 tick 回调
-    pub fn start(&mut self) -> Result<(), EngineError> {
-        if self.is_running {
+    pub fn start(self: &Arc<Self>) -> Result<(), EngineError> {
+        if self.is_running.load(Ordering::SeqCst) {
             warn!("TradingEngine 已经在运行中");
             return Ok(());
         }
 
         info!("TradingEngine 启动");
-        self.is_running = true;
+        self.is_running.store(true, Ordering::SeqCst);
 
-        // 启动后台监控任务
-        // 注意：在实际实现中，这里会启动持仓监控和强平检查任务
-        // 目前使用 run() 方法的同步循环处理
+        // 启动主循环任务
+        let engine = self.clone();
+        tokio::spawn(async move {
+            engine.run().await;
+        });
 
         Ok(())
     }
@@ -441,8 +449,8 @@ impl TradingEngine {
     /// 1. 标记为停止状态
     /// 2. 保存状态
     /// 3. 关闭所有连接
-    pub fn shutdown(&mut self) {
-        if !self.is_running {
+    pub fn shutdown(&self) {
+        if !self.is_running.load(Ordering::SeqCst) {
             warn!("TradingEngine 未在运行");
             return;
         }
@@ -450,7 +458,7 @@ impl TradingEngine {
         info!("TradingEngine 关闭中...");
 
         // 1. 标记为停止状态
-        self.is_running = false;
+        self.is_running.store(false, Ordering::SeqCst);
 
         // 2. 保存状态到持久化服务
         info!("保存交易状态...");
@@ -465,7 +473,7 @@ impl TradingEngine {
 
     /// 检查引擎是否正在运行
     pub fn is_running(&self) -> bool {
-        self.is_running
+        self.is_running.load(Ordering::SeqCst)
     }
 }
 

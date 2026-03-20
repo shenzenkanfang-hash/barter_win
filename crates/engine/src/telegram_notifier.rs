@@ -10,6 +10,7 @@
 use crate::error::EngineError;
 use reqwest::Client;
 use serde::Serialize;
+use std::time::Duration;
 
 /// Telegram 通知器配置
 #[derive(Debug, Clone)]
@@ -42,7 +43,10 @@ impl TelegramNotifier {
         Self {
             bot_token,
             chat_id,
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
