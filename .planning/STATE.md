@@ -53,9 +53,9 @@ Current: SQLite + CSV 模块实现完成，测试通过
 - [x] MockBinanceGateway 集成 EventRecorder
 - [x] 编译通过 (cargo check --all)
 - [x] 测试通过 (mock_binance_gateway 4/4)
+- [x] symbol_rules/thresholds 测试修复 (13 tests pass)
 
 ### 待完成
-- [ ] 其他测试 (symbol_rules, thresholds 老问题)
 - [ ] 指标对比验证 (Rust vs Python)
 
 ## Next Action
