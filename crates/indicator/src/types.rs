@@ -65,16 +65,6 @@ pub struct MinMarketStatusOutput {
     pub high_volatility_reason: Option<String>,
 }
 
-impl Default for MinMarketStatusOutput {
-    fn default() -> Self {
-        Self {
-            status: MarketStatus::TREND,
-            volatility_level: VolatilityLevel::NORMAL,
-            high_volatility_reason: None,
-        }
-    }
-}
-
 /// 分钟级信号输入
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MinSignalInput {
@@ -150,14 +140,14 @@ impl Default for DayMarketStatusInput {
 }
 
 /// 日线级市场状态输出
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DayMarketStatusOutput {
     pub status: MarketStatus,
     pub volatility_level: VolatilityLevel,
 }
 
 /// 日线级信号输入
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DaySignalInput {
     pub pine_color_100_200: String,
     pub pine_color_20_50: String,
