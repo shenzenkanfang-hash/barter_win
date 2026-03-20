@@ -322,6 +322,8 @@ struct PineColorDetector {
     macd_ema_fast: EMA,
     macd_ema_slow: EMA,
     signal_ema: EMA,
+    ema10: EMA,        // 独立的 EMA10 (基于 close)
+    ema20: EMA,        // 独立的 EMA20 (基于 close)
     hist_prev: Decimal,
     rsi: DominantCycleRSI,
 }
@@ -332,6 +334,8 @@ impl PineColorDetector {
             macd_ema_fast: EMA::new(20),  // Fast Length = 20
             macd_ema_slow: EMA::new(50),   // Slow Length = 50
             signal_ema: EMA::new(9),       // Signal Smoothing = 9
+            ema10: EMA::new(10),           // EMA 10 (基于 close)
+            ema20: EMA::new(20),           // EMA 20 (基于 close)
             hist_prev: Decimal::ZERO,
             rsi: DominantCycleRSI::new(20),
         }
@@ -349,11 +353,15 @@ impl PineColorDetector {
         // Hist
         let hist = macd - signal;
 
+        // EMA10/EMA20 (基于 close)
+        let ema10_val = self.ema10.update(close);
+        let ema20_val = self.ema20.update(close);
+
         // RSI
         let rsi_val = self.rsi.update(close);
 
         // Bar color (基于 Pine Script 买卖条件)
-        let bar_color = self.detect_bar_color(macd, signal, hist, rsi_val);
+        let bar_color = self.detect_bar_color(macd, signal, hist, rsi_val, ema10_val, ema20_val);
 
         // BG color (基于 MACD vs Signal)
         let bg_color = self.detect_bg_color(macd, signal);
@@ -363,38 +371,69 @@ impl PineColorDetector {
         (bar_color, bg_color)
     }
 
-    // K线颜色 - 基于 Pine Script 买卖条件
-    fn detect_bar_color(&self, macd: Decimal, signal: Decimal, hist: Decimal, rsi: Decimal) -> String {
+    // K线颜色 - 严格按照 Python pine_scripts.py 逻辑
+    // Python 优先级顺序: [st, bt, sl, by, up, dn, s, b]
+    // 颜色: [red, red, #f1e892, blue, green, #c83be0, #82cbf5, rgb(248,191,4)]
+    fn detect_bar_color(&self, macd: Decimal, signal: Decimal, hist: Decimal, rsi: Decimal, ema10_val: Decimal, ema20_val: Decimal) -> String {
         let hist_prev = self.hist_prev;
 
-        // selltimeS = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0 and rsi >= 70
-        // buytimeS = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0 and rsi <= 30
-        // selltimeT = macd <= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
-        // buytimeT = macd >= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
-        // selltime = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
-        // buytime = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
+        // 基础条件
+        let ema20_above_ema10 = ema20_val > ema10_val;  // ema20 > ema10 表示多头
+        let ema20_below_ema10 = ema20_val < ema10_val;  // ema20 < ema10 表示空头
 
-        // 简化：基于 MACD 和 Signal 判断
-        // RSI 极值优先
-        if rsi >= dec!(70) {
-            return "Purple".to_string();
-        }
-        if rsi <= dec!(30) {
-            return "Purple".to_string();
+        let is_up = rsi >= dec!(70);   // rsi >= 70
+        let is_down = rsi <= dec!(30);  // rsi <= 30
+
+        // 衍生条件
+        let selltime = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
+        let buytime = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
+        let selltimeT = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
+        let buytimeT = macd >= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
+        let selltimeS = selltime && is_up;   // 强卖信号
+        let buytimeS = buytime && is_down;   // 强买信号
+
+        // 按 Python 优先级顺序判断
+        // st (selltimeT) -> PureRed
+        if selltimeT {
+            return "PureRed".to_string();
         }
 
-        // MACD 判断
-        let macd_above_signal = macd >= signal;
-
-        if macd >= Decimal::ZERO && macd_above_signal {
-            "PureGreen".to_string()
-        } else if macd < Decimal::ZERO && macd_above_signal {
-            "LightGreen".to_string()
-        } else if macd < Decimal::ZERO && !macd_above_signal {
-            "PureRed".to_string()
-        } else {
-            "LightRed".to_string()
+        // bt (buytimeT) -> PureRed
+        if buytimeT {
+            return "PureRed".to_string();
         }
+
+        // sl (selltime) -> LightGreen (#f1e892)
+        if selltime {
+            return "LightGreen".to_string();
+        }
+
+        // by (buytime) -> LightBlue (blue)
+        if buytime {
+            return "LightBlue".to_string();
+        }
+
+        // up (isUp) -> PureGreen
+        if is_up {
+            return "PureGreen".to_string();
+        }
+
+        // dn (isDown) -> LightRed (#c83be6)
+        if is_down {
+            return "LightRed".to_string();
+        }
+
+        // s (selltimeS) -> #82cbf5 (用 LightGreen 表示)
+        if selltimeS {
+            return "LightGreen".to_string();
+        }
+
+        // b (buytimeS) -> rgb(248,191,4) (用 LightGreen 表示)
+        if buytimeS {
+            return "LightGreen".to_string();
+        }
+
+        "White".to_string()
     }
 
     // 背景颜色 - 基于 MACD vs Signal
