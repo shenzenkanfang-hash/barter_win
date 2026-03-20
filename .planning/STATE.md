@@ -4,7 +4,7 @@
 
 Milestone: v1.1 - MockBinanceGateway + SignalSynthesisLayer
 Status: Phase 08 In Progress
-Current: 执行中 (核心实现完成，待测试工程师验证)
+Current: SQLite + CSV 模块实现完成，测试通过
 
 ## Completed Milestones
 
@@ -34,7 +34,7 @@ Current: 执行中 (核心实现完成，待测试工程师验证)
   - ThresholdConstants: 阈值常量集中管理
   - OrderCheck: 订单风控检查器
   - 日线指标支持 (channel.rs)
-- Phase 8: v1.1 (执行中)
+- Phase 8: v1.1 (进行中)
   - MockBinanceGateway: 模拟账户/持仓/订单/保证金/风控
   - SignalSynthesisLayer: 通道退出逻辑 (tr_ratio<1/日线趋势平仓)
   - 单元测试: 账户创建/持仓盈亏/通道切换/频率限制
@@ -43,18 +43,24 @@ Current: 执行中 (核心实现完成，待测试工程师验证)
 
 (None)
 
-## v1.1 待完成清单 (更新: 2026-03-20)
+## v1.1 完成进度 (更新: 2026-03-20)
 
-| 模块 | 待完成项 | 优先级 |
-|------|----------|--------|
-| B. SQLite | account_snapshots, exchange_positions, local_positions, channel_events, risk_events, indicator_events | P0 |
-| C. CSV | indicator_comparison.csv | P0 |
-| E. 测试 | 指标层/策略层/风控层/引擎层测试 + SQLite测试 | P1 |
-| F. 指标对比 | Rust vs Python 指标验证 | P1 |
+### 已完成 ✓
+- [x] SQLite 持久化模块 (sqlite_persistence.rs)
+  - SqliteRecordService: 6张表
+  - EventRecorder trait + NoOpEventRecorder + SqliteEventRecorder
+- [x] CSV 输出 (IndicatorCsvWriter)
+- [x] MockBinanceGateway 集成 EventRecorder
+- [x] 编译通过 (cargo check --all)
+- [x] 测试通过 (mock_binance_gateway 4/4)
+
+### 待完成
+- [ ] 其他测试 (symbol_rules, thresholds 老问题)
+- [ ] 指标对比验证 (Rust vs Python)
 
 ## Next Action
 
-派发开发者实现 SQLite 持久化模块 (B) + CSV 输出 (C)
+继续完成剩余测试用例 + 指标对比验证
 
 ## v0.10 Enhancement 完成
 
