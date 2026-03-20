@@ -585,6 +585,96 @@ pub fn format_decimal(d: &Decimal) -> String {
     }
 }
 
+// ============================================================================
+// 事件记录器 trait - 用于集成到 MockBinanceGateway
+// ============================================================================
+
+/// 事件记录器 trait
+/// 实现此 trait 来定制事件记录行为
+pub trait EventRecorder: Send + Sync {
+    /// 记录账户快照
+    fn record_account_snapshot(&self, record: AccountSnapshotRecord);
+
+    /// 记录交易所持仓变化
+    fn record_exchange_position(&self, record: ExchangePositionRecord);
+
+    /// 记录本地仓位变化
+    fn record_local_position(&self, record: LocalPositionRecord);
+
+    /// 记录通道切换事件
+    fn record_channel_event(&self, record: ChannelEventRecord);
+
+    /// 记录风控事件
+    fn record_risk_event(&self, record: RiskEventRecord);
+
+    /// 记录指标事件
+    fn record_indicator_event(&self, record: IndicatorEventRecord);
+}
+
+/// 空记录器 - 不记录任何事件
+pub struct NoOpEventRecorder;
+
+impl EventRecorder for NoOpEventRecorder {
+    fn record_account_snapshot(&self, _record: AccountSnapshotRecord) {}
+    fn record_exchange_position(&self, _record: ExchangePositionRecord) {}
+    fn record_local_position(&self, _record: LocalPositionRecord) {}
+    fn record_channel_event(&self, _record: ChannelEventRecord) {}
+    fn record_risk_event(&self, _record: RiskEventRecord) {}
+    fn record_indicator_event(&self, _record: IndicatorEventRecord) {}
+}
+
+/// SQLite 事件记录器实现
+pub struct SqliteEventRecorder {
+    service: Arc<SqliteRecordService>,
+}
+
+impl SqliteEventRecorder {
+    /// 创建新的 SQLite 事件记录器
+    pub fn new(service: SqliteRecordService) -> Self {
+        Self {
+            service: Arc::new(service),
+        }
+    }
+}
+
+impl EventRecorder for SqliteEventRecorder {
+    fn record_account_snapshot(&self, record: AccountSnapshotRecord) {
+        if let Err(e) = self.service.save_account_snapshot(record) {
+            warn!("记录账户快照失败: {}", e);
+        }
+    }
+
+    fn record_exchange_position(&self, record: ExchangePositionRecord) {
+        if let Err(e) = self.service.save_exchange_position(record) {
+            warn!("记录交易所持仓失败: {}", e);
+        }
+    }
+
+    fn record_local_position(&self, record: LocalPositionRecord) {
+        if let Err(e) = self.service.save_local_position(record) {
+            warn!("记录本地仓位失败: {}", e);
+        }
+    }
+
+    fn record_channel_event(&self, record: ChannelEventRecord) {
+        if let Err(e) = self.service.save_channel_event(record) {
+            warn!("记录通道事件失败: {}", e);
+        }
+    }
+
+    fn record_risk_event(&self, record: RiskEventRecord) {
+        if let Err(e) = self.service.save_risk_event(record) {
+            warn!("记录风控事件失败: {}", e);
+        }
+    }
+
+    fn record_indicator_event(&self, record: IndicatorEventRecord) {
+        if let Err(e) = self.service.save_indicator_event(record) {
+            warn!("记录指标事件失败: {}", e);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

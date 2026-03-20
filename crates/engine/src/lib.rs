@@ -46,9 +46,10 @@ pub use risk::{RiskPreChecker, VolatilityMode};
 pub use risk_rechecker::RiskReChecker;
 pub use round_guard::{RoundGuard, RoundGuardScope};
 pub use sqlite_persistence::{
-    AccountSnapshotRecord, ChannelEventRecord, ExchangePositionRecord,
+    AccountSnapshotRecord, ChannelEventRecord, EventRecorder, ExchangePositionRecord,
     IndicatorCsvWriter, IndicatorComparisonRow, IndicatorEventRecord,
-    LocalPositionRecord, RiskEventRecord, SqliteRecordService, format_decimal,
+    LocalPositionRecord, NoOpEventRecorder, RiskEventRecord, SqliteEventRecorder,
+    SqliteRecordService, format_decimal,
 };
 pub use strategy_pool::{StrategyAllocation, StrategyPool};
 pub use symbol_rules::SymbolRules;
