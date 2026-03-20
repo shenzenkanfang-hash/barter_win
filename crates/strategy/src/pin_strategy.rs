@@ -502,4 +502,327 @@ mod tests {
 
         assert_eq!(signal, PinSignal::LongAdd);
     }
+
+    // ============================================
+    // E2.2 PinStrategy 状态机测试
+    // ============================================
+
+    /// 测试完整的多头马丁周期: Idle -> LongOpening -> LongHolding -> Closing -> Idle
+    #[test]
+    fn test_pin_state_machine_long_martin_cycle() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 初始状态: Idle
+        assert_eq!(strategy.state(), PinState::Idle);
+        assert_eq!(strategy.add_count(), 0);
+
+        // 场景1: Idle -> LongOpening (做多入场)
+        let entry_signal = strategy.check_signal(
+            dec!(-2.5),   // zscore 极端
+            dec!(1.5),     // tr_ratio 极端
+            dec!(15),      // price_position 底部
+            dec!(-95),     // velocity 极端
+            "green",       // pine_bar_color
+            "green",       // pine_bg_color
+            dec!(100),     // current_price
+        );
+        assert_eq!(entry_signal, PinSignal::LongEntry);
+        strategy.update_state(entry_signal, dec!(1), dec!(100));
+        assert_eq!(strategy.state(), PinState::LongOpening);
+        assert_eq!(strategy.entry_price(), dec!(100));
+        assert_eq!(strategy.position_qty(), dec!(1));
+
+        // 场景2: LongOpening -> LongHolding (加仓后转入持仓)
+        let add_signal = strategy.check_signal(
+            dec!(-2.5),   // zscore 极端
+            dec!(1.5),     // tr_ratio 极端
+            dec!(10),      // price_position 底部
+            dec!(-90),     // velocity 极端
+            "green",       // pine_bar_color
+            "green",       // pine_bg_color
+            dec!(98),      // 价格下跌，触发加仓
+        );
+        assert_eq!(add_signal, PinSignal::LongAdd);
+        strategy.update_state(add_signal, dec!(1), dec!(98));
+        assert_eq!(strategy.state(), PinState::LongHolding);
+        assert_eq!(strategy.add_count(), 1);
+        assert_eq!(strategy.position_qty(), dec!(2)); // 1 + 1
+
+        // 场景3: LongHolding -> Closing (盈利平仓)
+        let close_signal = strategy.check_signal(
+            dec!(0),
+            dec!(0.5),
+            dec!(50),
+            dec!(0),
+            "green",
+            "green",
+            dec!(101),  // 上涨 1%，达到盈利阈值
+        );
+        assert_eq!(close_signal, PinSignal::Close);
+        strategy.update_state(close_signal, dec!(0), dec!(0));
+        assert_eq!(strategy.state(), PinState::Closing);
+
+        // 场景4: Closing 状态下收到 Watch (等待最后确认)
+        let watch_signal = strategy.check_signal(
+            dec!(0),
+            dec!(0.5),
+            dec!(50),
+            dec!(0),
+            "neutral",
+            "neutral",
+            dec!(101),
+        );
+        assert_eq!(watch_signal, PinSignal::Watch);
+    }
+
+    /// 测试完整的空头马丁周期: Idle -> ShortOpening -> ShortHolding -> Closing -> Idle
+    #[test]
+    fn test_pin_state_machine_short_martin_cycle() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 初始状态: Idle
+        assert_eq!(strategy.state(), PinState::Idle);
+
+        // 场景1: Idle -> ShortOpening (做空入场)
+        let entry_signal = strategy.check_signal(
+            dec!(2.5),     // zscore 极端
+            dec!(1.5),     // tr_ratio 极端
+            dec!(95),      // price_position 顶部
+            dec!(95),      // velocity 极端
+            "red",         // pine_bar_color
+            "red",         // pine_bg_color
+            dec!(100),     // current_price
+        );
+        assert_eq!(entry_signal, PinSignal::ShortEntry);
+        strategy.update_state(entry_signal, dec!(1), dec!(100));
+        assert_eq!(strategy.state(), PinState::ShortOpening);
+        assert_eq!(strategy.entry_price(), dec!(100));
+
+        // 场景2: ShortOpening -> ShortHolding (加仓后转入持仓)
+        let add_signal = strategy.check_signal(
+            dec!(2.5),     // zscore 极端
+            dec!(1.5),     // tr_ratio 极端
+            dec!(90),      // price_position 顶部
+            dec!(90),     // velocity 极端
+            "red",         // pine_bar_color
+            "red",         // pine_bg_color
+            dec!(102),     // 价格上涨，触发加仓
+        );
+        assert_eq!(add_signal, PinSignal::ShortAdd);
+        strategy.update_state(add_signal, dec!(1), dec!(102));
+        assert_eq!(strategy.state(), PinState::ShortHolding);
+        assert_eq!(strategy.add_count(), 1);
+
+        // 场景3: ShortHolding -> Closing (盈利平仓)
+        let close_signal = strategy.check_signal(
+            dec!(0),
+            dec!(0.5),
+            dec!(50),
+            dec!(0),
+            "red",
+            "red",
+            dec!(99),  // 下跌 1%，达到盈利阈值
+        );
+        assert_eq!(close_signal, PinSignal::Close);
+        strategy.update_state(close_signal, dec!(0), dec!(0));
+        assert_eq!(strategy.state(), PinState::Closing);
+    }
+
+    /// 测试对冲状态转换: LongHolding -> Hedging
+    #[test]
+    fn test_pin_state_machine_hedging() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 入场 Long
+        strategy.update_state(PinSignal::LongEntry, dec!(1), dec!(100));
+        assert_eq!(strategy.state(), PinState::LongOpening);
+
+        // 转入持仓
+        strategy.update_state(PinSignal::LongAdd, dec!(1), dec!(95));
+        assert_eq!(strategy.state(), PinState::LongHolding);
+
+        // 场景: 亏损超过对冲阈值，触发对冲
+        let hedge_signal = strategy.check_signal(
+            dec!(-2.0),
+            dec!(1.5),
+            dec!(20),
+            dec!(-80),
+            "green",
+            "green",
+            dec!(93),  // 亏损 7%，超过 5% 对冲阈值
+        );
+        assert_eq!(hedge_signal, PinSignal::Hedge);
+        strategy.update_state(hedge_signal, dec!(0), dec!(0));
+        assert_eq!(strategy.state(), PinState::Hedging);
+    }
+
+    /// 测试 CloseAll 全平重置状态
+    #[test]
+    fn test_pin_state_machine_close_all_reset() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 入场 Long 并加仓
+        strategy.update_state(PinSignal::LongEntry, dec!(1), dec!(100));
+        strategy.update_state(PinSignal::LongAdd, dec!(1), dec!(95));
+        assert_eq!(strategy.state(), PinState::LongHolding);
+        assert_eq!(strategy.add_count(), 1);
+        assert!(strategy.entry_price() > dec!(0));
+
+        // 全平 -> 重置到 Idle
+        strategy.update_state(PinSignal::CloseAll, dec!(0), dec!(0));
+        assert_eq!(strategy.state(), PinState::Idle);
+        assert_eq!(strategy.add_count(), 0);
+        assert_eq!(strategy.entry_price(), dec!(0));
+        assert_eq!(strategy.position_qty(), dec!(0));
+    }
+
+    /// 测试止损触发 CloseAll
+    #[test]
+    fn test_pin_state_machine_stop_loss() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 入场 Long
+        strategy.update_state(PinSignal::LongEntry, dec!(1), dec!(100));
+        assert_eq!(strategy.state(), PinState::LongOpening);
+
+        // 转入持仓
+        strategy.update_state(PinSignal::LongAdd, dec!(1), dec!(98));
+        assert_eq!(strategy.state(), PinState::LongHolding);
+
+        // 触发止损 (亏损 10%)
+        let stop_loss_signal = strategy.check_signal(
+            dec!(0),
+            dec!(0.5),
+            dec!(50),
+            dec!(0),
+            "red",
+            "green",
+            dec!(88),  // 亏损 12%，超过 10% 止损
+        );
+        assert_eq!(stop_loss_signal, PinSignal::CloseAll);
+
+        // CloseAll 直接重置
+        strategy.update_state(stop_loss_signal, dec!(0), dec!(0));
+        assert_eq!(strategy.state(), PinState::Idle);
+    }
+
+    /// 测试连续加仓逻辑
+    #[test]
+    fn test_pin_state_machine_multiple_adds() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 入场
+        strategy.update_state(PinSignal::LongEntry, dec!(1), dec!(100));
+        assert_eq!(strategy.state(), PinState::LongOpening);
+        assert_eq!(strategy.add_count(), 0);
+
+        // 第一次加仓 -> LongHolding
+        strategy.update_state(PinSignal::LongAdd, dec!(1), dec!(98));
+        assert_eq!(strategy.state(), PinState::LongHolding);
+        assert_eq!(strategy.add_count(), 1);
+        assert_eq!(strategy.position_qty(), dec!(2));
+
+        // 第二次加仓 (继续持仓状态)
+        let signal2 = strategy.check_signal(
+            dec!(-2.5),
+            dec!(1.5),
+            dec!(10),
+            dec!(-90),
+            "green",
+            "green",
+            dec!(96),
+        );
+        assert_eq!(signal2, PinSignal::LongAdd);
+        strategy.update_state(signal2, dec!(1), dec!(96));
+        assert_eq!(strategy.state(), PinState::LongHolding);
+        assert_eq!(strategy.add_count(), 2);
+        assert_eq!(strategy.position_qty(), dec!(3));
+
+        // 第三次加仓
+        let signal3 = strategy.check_signal(
+            dec!(-2.5),
+            dec!(1.5),
+            dec!(10),
+            dec!(-90),
+            "green",
+            "green",
+            dec!(94),
+        );
+        assert_eq!(signal3, PinSignal::LongAdd);
+        strategy.update_state(signal3, dec!(1), dec!(94));
+        assert_eq!(strategy.add_count(), 3);
+        assert_eq!(strategy.position_qty(), dec!(4));
+    }
+
+    /// 测试 Short 连续加仓
+    #[test]
+    fn test_pin_state_machine_short_multiple_adds() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 入场 Short
+        strategy.update_state(PinSignal::ShortEntry, dec!(1), dec!(100));
+        assert_eq!(strategy.state(), PinState::ShortOpening);
+
+        // 第一次加仓 -> ShortHolding
+        strategy.update_state(PinSignal::ShortAdd, dec!(1), dec!(102));
+        assert_eq!(strategy.state(), PinState::ShortHolding);
+        assert_eq!(strategy.add_count(), 1);
+
+        // 第二次加仓
+        let signal2 = strategy.check_signal(
+            dec!(2.5),
+            dec!(1.5),
+            dec!(90),
+            dec!(90),
+            "red",
+            "red",
+            dec!(104),
+        );
+        assert_eq!(signal2, PinSignal::ShortAdd);
+        strategy.update_state(signal2, dec!(1), dec!(104));
+        assert_eq!(strategy.state(), PinState::ShortHolding);
+        assert_eq!(strategy.add_count(), 2);
+    }
+
+    /// 测试状态机非法转换被忽略
+    #[test]
+    fn test_pin_state_machine_invalid_transition() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // Idle 状态下，收到 Hedge 信号应被忽略
+        strategy.update_state(PinSignal::Hedge, dec!(0), dec!(0));
+        assert_eq!(strategy.state(), PinState::Idle);
+
+        // Idle 状态下，收到 Close 信号应被忽略
+        strategy.update_state(PinSignal::Close, dec!(0), dec!(0));
+        assert_eq!(strategy.state(), PinState::Idle);
+
+        // 入场 Long
+        strategy.update_state(PinSignal::LongEntry, dec!(1), dec!(100));
+        assert_eq!(strategy.state(), PinState::LongOpening);
+
+        // 收到 ShortAdd 不应改变状态
+        strategy.update_state(PinSignal::ShortAdd, dec!(1), dec!(98));
+        assert_eq!(strategy.state(), PinState::LongOpening); // 状态不变
+    }
+
+    /// 测试 reset 方法
+    #[test]
+    fn test_pin_state_machine_reset() {
+        let mut strategy = PinStrategy::new("pin_sol");
+
+        // 设置一些状态
+        strategy.update_state(PinSignal::LongEntry, dec!(1), dec!(100));
+        strategy.update_state(PinSignal::LongAdd, dec!(1), dec!(98));
+        assert_eq!(strategy.state(), PinState::LongHolding);
+        assert_eq!(strategy.add_count(), 1);
+
+        // reset
+        strategy.reset();
+        assert_eq!(strategy.state(), PinState::Idle);
+        assert_eq!(strategy.add_count(), 0);
+        assert_eq!(strategy.hedge_count(), 0);
+        assert_eq!(strategy.entry_price(), dec!(0));
+        assert_eq!(strategy.position_qty(), dec!(0));
+    }
 }

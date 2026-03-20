@@ -309,4 +309,165 @@ mod tests {
 
         assert_eq!(signal, TrendSignal::Watch);
     }
+
+    // ============================================
+    // E2.1 TrendStrategy 状态机测试
+    // ============================================
+
+    /// 测试完整的多头状态周期: Idle -> Long -> Idle
+    #[test]
+    fn test_trend_state_machine_long_cycle() {
+        let mut strategy = TrendStrategy::new("trend_btc");
+
+        // 初始状态: Idle
+        assert_eq!(strategy.state(), TrendState::Idle);
+
+        // 场景1: Idle -> Long (做多入场)
+        let entry_signal = strategy.check_signal(
+            "green",      // pine_color
+            dec!(35),     // rsi (超卖)
+            dec!(25),     // price_position (底部)
+            dec!(50500),  // ema_fast
+            dec!(50000),  // ema_slow (金叉)
+            75,          // confidence (超过70阈值)
+        );
+        assert_eq!(entry_signal, TrendSignal::LongEntry);
+        strategy.update_state(entry_signal);
+        assert_eq!(strategy.state(), TrendState::Long);
+
+        // 场景2: Long -> Idle (平多出场)
+        let exit_signal = strategy.check_signal(
+            "red",        // pine_color 变红
+            dec!(75),     // rsi 超买
+            dec!(70),     // price_position
+            dec!(49500),  // ema_fast (死叉)
+            dec!(50000),  // ema_slow
+            50,
+        );
+        assert_eq!(exit_signal, TrendSignal::LongExit);
+        strategy.update_state(exit_signal);
+        assert_eq!(strategy.state(), TrendState::Idle);
+    }
+
+    /// 测试完整的空头状态周期: Idle -> Short -> Idle
+    #[test]
+    fn test_trend_state_machine_short_cycle() {
+        let mut strategy = TrendStrategy::new("trend_btc");
+
+        // 初始状态: Idle
+        assert_eq!(strategy.state(), TrendState::Idle);
+
+        // 场景1: Idle -> Short (做空入场)
+        let entry_signal = strategy.check_signal(
+            "red",        // pine_color
+            dec!(75),     // rsi (超买)
+            dec!(80),     // price_position (顶部)
+            dec!(49500),  // ema_fast (死叉)
+            dec!(50000),  // ema_slow
+            75,          // confidence
+        );
+        assert_eq!(entry_signal, TrendSignal::ShortEntry);
+        strategy.update_state(entry_signal);
+        assert_eq!(strategy.state(), TrendState::Short);
+
+        // 场景2: Short -> Idle (平空出场)
+        let exit_signal = strategy.check_signal(
+            "green",      // pine_color 变绿
+            dec!(35),     // rsi 超卖
+            dec!(30),     // price_position
+            dec!(50500),  // ema_fast (金叉)
+            dec!(50000),  // ema_slow
+            50,
+        );
+        assert_eq!(exit_signal, TrendSignal::ShortExit);
+        strategy.update_state(exit_signal);
+        assert_eq!(strategy.state(), TrendState::Idle);
+    }
+
+    /// 测试状态机非法转换被忽略
+    #[test]
+    fn test_trend_state_machine_invalid_transition() {
+        let mut strategy = TrendStrategy::new("trend_btc");
+
+        // 初始 Idle 状态
+        assert_eq!(strategy.state(), TrendState::Idle);
+
+        // 尝试发送非法的 LongExit 信号 (Idle 状态下不应有 LongExit)
+        strategy.update_state(TrendSignal::LongExit);
+        assert_eq!(strategy.state(), TrendState::Idle); // 状态不应改变
+
+        // 发送 ShortExit 也应被忽略
+        strategy.update_state(TrendSignal::ShortExit);
+        assert_eq!(strategy.state(), TrendState::Idle); // 状态不应改变
+    }
+
+    /// 测试 Long 持仓期间持续发出 Watch (满足条件但未触发退出)
+    #[test]
+    fn test_trend_state_machine_long_holding_watch() {
+        let mut strategy = TrendStrategy::new("trend_btc");
+
+        // 入场 Long
+        strategy.update_state(TrendSignal::LongEntry);
+        assert_eq!(strategy.state(), TrendState::Long);
+
+        // 场景: Pine 仍然绿色，RSI 正常，EMA 未死叉 -> Watch
+        let signal = strategy.check_signal(
+            "green",        // pine_color 保持绿色
+            dec!(50),      // rsi 中性
+            dec!(55),      // price_position 中间偏上
+            dec!(50500),  // ema_fast > ema_slow (未死叉)
+            dec!(50000),  // ema_slow
+            50,
+        );
+
+        assert_eq!(signal, TrendSignal::Watch);
+        // 状态不变
+        assert_eq!(strategy.state(), TrendState::Long);
+    }
+
+    /// 测试 Short 持仓期间持续发出 Watch
+    #[test]
+    fn test_trend_state_machine_short_holding_watch() {
+        let mut strategy = TrendStrategy::new("trend_btc");
+
+        // 入场 Short
+        strategy.update_state(TrendSignal::ShortEntry);
+        assert_eq!(strategy.state(), TrendState::Short);
+
+        // 场景: Pine 仍然红色，RSI 正常，EMA 未金叉 -> Watch
+        let signal = strategy.check_signal(
+            "red",          // pine_color 保持红色
+            dec!(55),      // rsi 中性偏高
+            dec!(45),      // price_position 中间偏下
+            dec!(49500),  // ema_fast < ema_slow (未金叉)
+            dec!(50000),  // ema_slow
+            50,
+        );
+
+        assert_eq!(signal, TrendSignal::Watch);
+        // 状态不变
+        assert_eq!(strategy.state(), TrendState::Short);
+    }
+
+    /// 测试 reset 重置到 Idle
+    #[test]
+    fn test_trend_state_machine_reset() {
+        let mut strategy = TrendStrategy::new("trend_btc");
+
+        // 入场 Long
+        strategy.update_state(TrendSignal::LongEntry);
+        assert_eq!(strategy.state(), TrendState::Long);
+
+        // reset
+        strategy.reset();
+        assert_eq!(strategy.state(), TrendState::Idle);
+
+        // 入场 Short
+        strategy.update_state(TrendSignal::ShortEntry);
+        assert_eq!(strategy.state(), TrendState::Short);
+
+        // reset
+        strategy.reset();
+        assert_eq!(strategy.state(), TrendState::Idle);
+    }
 }
