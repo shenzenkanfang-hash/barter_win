@@ -56,6 +56,9 @@ impl MarketStream for MockMarketStream {
             price: self.current_price,
             qty: Decimal::try_from(1.0).unwrap(),
             timestamp: Utc::now(),
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
         })
     }
 }

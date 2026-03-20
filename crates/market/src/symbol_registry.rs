@@ -5,13 +5,27 @@ use redis::AsyncCommands;
 use tokio::sync::RwLock;
 
 pub struct SymbolRegistry {
-    redis: redis::aio::ConnectionManager,
+    /// Redis 连接（mock 模式下为 None）
+    redis: Option<redis::aio::ConnectionManager>,
     trading_symbols: RwLock<FnvHashSet<String>>,
     last_update: std::time::Instant,
     update_interval: std::time::Duration,
+    /// 是否为 mock 模式
+    is_mock: bool,
 }
 
 impl SymbolRegistry {
+    /// 创建测试用的 Mock SymbolRegistry（不依赖 Redis）
+    pub fn new_mock() -> Self {
+        Self {
+            redis: None,
+            trading_symbols: RwLock::new(FnvHashSet::default()),
+            last_update: std::time::Instant::now(),
+            update_interval: std::time::Duration::from_secs(120),
+            is_mock: true,
+        }
+    }
+
     pub async fn new(redis_url: &str) -> Result<Self, crate::error::MarketError> {
         let client = redis::Client::open(redis_url)
             .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
@@ -21,15 +35,22 @@ impl SymbolRegistry {
             .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
 
         Ok(Self {
-            redis: conn,
+            redis: Some(conn),
             trading_symbols: RwLock::new(FnvHashSet::default()),
             last_update: std::time::Instant::now(),
             update_interval: std::time::Duration::from_secs(120), // 2分钟
+            is_mock: false,
         })
     }
 
     /// 从 Binance 获取交易对信息并更新 Redis
     pub async fn update_symbols(&mut self) -> Result<(), crate::error::MarketError> {
+        // Mock 模式下跳过更新
+        if self.is_mock {
+            tracing::debug!("[SymbolRegistry] Mock 模式，跳过品种更新");
+            return Ok(());
+        }
+
         let client = reqwest::Client::new();
         let resp = client
             .get("https://fapi.binance.com/fapi/v1/exchangeInfo")
@@ -51,13 +72,14 @@ impl SymbolRegistry {
                     symbol_info.get("status").and_then(|s| s.as_str()),
                 ) {
                     if status == "TRADING" {
-                        let json = symbol_info.to_string();
-                        let _: () = self
-                            .redis
-                            .hset("exchangeInfo", symbol, &json)
-                            .await
-                            .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
-
+                        // 只在非 mock 模式下写入 Redis
+                        if let Some(ref mut redis_conn) = self.redis {
+                            let json = symbol_info.to_string();
+                            let _: () = redis_conn
+                                .hset("exchangeInfo", symbol, &json)
+                                .await
+                                .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
+                        }
                         new_symbols.insert(symbol.to_string());
                     }
                 }
@@ -80,7 +102,11 @@ impl SymbolRegistry {
     }
 
     pub async fn get_symbol_info(&mut self, symbol: &str) -> Option<String> {
-        let info: Option<String> = self.redis.hget("exchangeInfo", symbol).await.ok()?;
-        info
+        if let Some(ref mut redis_conn) = self.redis {
+            let info: Option<String> = redis_conn.hget("exchangeInfo", symbol).await.ok()?;
+            info
+        } else {
+            None
+        }
     }
 }

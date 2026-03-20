@@ -12,7 +12,7 @@ pub mod volatility;
 pub mod websocket;
 
 pub use binance_ws::{BinanceTradeStream, BinanceWsConnector};
-pub use data_feeder::{DataFeeder, DataMessage};
+pub use data_feeder::{DataFeeder, DataMessage, MarketDataFeeder};
 pub use error::MarketError;
 pub use kline::KLineSynthesizer;
 pub use kline_persistence::KlinePersistence;

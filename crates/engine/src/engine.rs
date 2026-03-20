@@ -376,6 +376,9 @@ mod tests {
             price,
             qty,
             timestamp: chrono::DateTime::from_timestamp(timestamp, 0).unwrap(),
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
         }
     }
 

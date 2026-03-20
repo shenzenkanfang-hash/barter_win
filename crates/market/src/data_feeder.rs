@@ -10,13 +10,16 @@
 //! - 每批 50 streams, 间隔 500ms
 
 use crate::binance_ws::BinanceWsConnector;
+use crate::error::MarketError;
+use crate::kline::KLineSynthesizer;
 use crate::orderbook::OrderBook;
 use crate::volatility::VolatilityDetector;
 use crate::symbol_registry::SymbolRegistry;
-use crate::types::KLine;
+use crate::types::{KLine, Period, Tick};
 use fnv::FnvHashMap;
-use fnv::FnvHashSet;
+use fnv::FnvSet;
 use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{sleep, Duration};
 
@@ -51,6 +54,19 @@ pub struct DataFeeder {
     /// 状态 - 使用 Arc 包装以支持 clone
     is_initialized: Arc<RwLock<bool>>,
     last_data_time: Arc<RwLock<std::time::Instant>>,
+
+    /// Tick 回调列表
+    tick_callbacks: Arc<Mutex<Vec<Box<dyn Fn(Tick) + Send + 'static>>>>,
+
+    /// 1m K线合成器 (按品种)
+    kline_1m_synthesizers: Arc<RwLock<FnvHashMap<String, KLineSynthesizer>>>,
+    /// 15m K线合成器 (按品种)
+    kline_15m_synthesizers: Arc<RwLock<FnvHashMap<String, KLineSynthesizer>>>,
+    /// 日K线合成器 (按品种)
+    kline_1d_synthesizers: Arc<RwLock<FnvHashMap<String, KLineSynthesizer>>>,
+
+    /// 15m K线计数器 (用于判断是否满15根)
+    kline_15m_counters: Arc<RwLock<FnvHashMap<String, u32>>>,
 }
 
 /// DataFeeder 输出的数据消息
@@ -86,6 +102,11 @@ impl DataFeeder {
             symbol_registry,
             is_initialized: Arc::new(RwLock::new(false)),
             last_data_time: Arc::new(RwLock::new(std::time::Instant::now())),
+            tick_callbacks: Arc::new(Mutex::new(Vec::new())),
+            kline_1m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_15m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_1d_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_15m_counters: Arc::new(RwLock::new(FnvHashMap::default())),
         })
     }
 
@@ -472,6 +493,296 @@ impl Clone for DataFeeder {
             symbol_registry: self.symbol_registry.clone(),
             is_initialized: self.is_initialized.clone(),
             last_data_time: self.last_data_time.clone(),
+            // 新增字段
+            tick_callbacks: self.tick_callbacks.clone(),
+            kline_1m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_15m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_1d_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_15m_counters: Arc::new(RwLock::new(FnvHashMap::default())),
         }
+    }
+}
+
+/// MarketDataFeeder trait - 市场数据提供者接口
+///
+/// 提供统一的 Tick 数据流接口，用于连接指标层和策略层。
+pub trait MarketDataFeeder: Send + Sync {
+    /// 启动数据接收
+    fn start(&self) -> Result<(), MarketError>;
+
+    /// 订阅品种
+    fn subscribe(&self, symbols: &[String]) -> Result<(), MarketError>;
+
+    /// 注册 Tick 回调
+    fn on_tick<F>(&self, callback: F)
+    where F: Fn(Tick) + Send + 'static;
+
+    /// 获取当前 Tick（如果可用）
+    fn get_tick(&self, symbol: &str) -> Option<Tick>;
+}
+
+impl MarketDataFeeder for DataFeeder {
+    fn start(&self) -> Result<(), MarketError> {
+        tracing::info!("[DataFeeder] MarketDataFeeder trait start() 调用");
+        Ok(())
+    }
+
+    fn subscribe(&self, symbols: &[String]) -> Result<(), MarketError> {
+        tracing::info!("[DataFeeder] 订阅品种: {:?}", symbols);
+        Ok(())
+    }
+
+    fn on_tick<F>(&self, callback: F)
+    where F: Fn(Tick) + Send + 'static
+    {
+        let mut callbacks = self.tick_callbacks.lock().unwrap();
+        callbacks.push(Box::new(callback));
+        tracing::debug!("[DataFeeder] 注册 Tick 回调, 当前回调数: {}", callbacks.len());
+    }
+
+    fn get_tick(&self, _symbol: &str) -> Option<Tick> {
+        // DataFeeder 不存储单个 Tick，通过回调分发
+        None
+    }
+}
+
+impl DataFeeder {
+    /// 处理接收到的 Tick 并分发到各模块
+    ///
+    /// 1. 更新 K线合成器 (1m/15m/1d)
+    /// 2. 计算波动率
+    /// 3. 通知所有回调
+    pub fn process_tick(&self, mut tick: Tick) {
+        let symbol = tick.symbol.clone();
+        let timestamp = tick.timestamp;
+
+        // 1. 获取或创建 K线合成器
+        let kline_1m = {
+            let mut synthesizers = self.kline_1m_synthesizers.blocking_write();
+            let synthesizer = synthesizers
+                .entry(symbol.clone())
+                .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Minute(1)));
+            synthesizer.update(&tick)
+        };
+
+        // 2. 更新 15m K线 (每15根1m K线合成1根15m)
+        let kline_15m = {
+            let mut counters = self.kline_15m_counters.blocking_write();
+            let counter = counters.entry(symbol.clone()).or_insert(0);
+
+            if kline_1m.is_some() {
+                *counter += 1;
+            }
+
+            if *counter >= 15 {
+                *counter = 0;
+                let mut synthesizers = self.kline_15m_synthesizers.blocking_write();
+                let synthesizer = synthesizers
+                    .entry(symbol.clone())
+                    .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Minute(15)));
+                synthesizer.update(&tick)
+            } else {
+                None
+            }
+        };
+
+        // 3. 更新日K线
+        let kline_1d = {
+            let mut synthesizers = self.kline_1d_synthesizers.blocking_write();
+            let synthesizer = synthesizers
+                .entry(symbol.clone())
+                .or_insert_with(|| KLineSynthesizer::new(symbol.clone(), Period::Day));
+            synthesizer.update(&tick)
+        };
+
+        // 4. 更新 tick 中的 K线信息
+        tick.kline_1m = {
+            let synthesizers = self.kline_1m_synthesizers.blocking_read();
+            synthesizers.get(&symbol).and_then(|s| s.current_kline().cloned())
+        };
+        tick.kline_15m = kline_15m;
+        tick.kline_1d = kline_1d;
+
+        // 5. 计算波动率
+        let vol_stats = {
+            let mut detectors = self.volatility_detectors.blocking_write();
+            let detector = detectors
+                .entry(symbol.clone())
+                .or_insert_with(|| VolatilityDetector::new(symbol.clone()));
+            detector.update(tick.price, timestamp)
+        };
+
+        // 6. 检查是否需要调整 Depth 订阅
+        if vol_stats.is_high_volatility {
+            let _ = self.add_depth_subscription(&symbol);
+        }
+
+        // 7. 更新最后数据时间
+        {
+            let mut last_time = self.last_data_time.blocking_write();
+            *last_time = std::time::Instant::now();
+        }
+
+        // 8. 广播数据消息
+        if let Some(kline_1m) = &tick.kline_1m {
+            let _ = self.broadcaster.send(DataMessage::KLine1m {
+                symbol: symbol.clone(),
+                kline: kline_1m.clone(),
+            });
+        }
+        if let Some(kline_1d) = &tick.kline_1d {
+            let _ = self.broadcaster.send(DataMessage::KLine1d {
+                symbol: symbol.clone(),
+                kline: kline_1d.clone(),
+            });
+        }
+
+        // 9. 调用所有 Tick 回调
+        let callbacks = self.tick_callbacks.lock().unwrap();
+        for callback in callbacks.iter() {
+            callback(tick.clone());
+        }
+    }
+
+    /// 创建带 Tick 分发功能的 DataFeeder（用于测试）
+    /// 注意：此方法创建的是最小化版本，不依赖 Redis
+    pub fn new_test_dispatcher() -> Self {
+        let (broadcaster, _) = broadcast::channel(10000);
+        Self {
+            kline_1m_conn_1: RwLock::new(None),
+            kline_1m_conn_2: RwLock::new(None),
+            kline_1d_conn: RwLock::new(None),
+            depth_conn: RwLock::new(None),
+            broadcaster,
+            volatility_detectors: Arc::new(RwLock::new(FnvHashMap::default())),
+            orderbooks: Arc::new(RwLock::new(FnvHashMap::default())),
+            depth_subscribed: Arc::new(RwLock::new(FnvHashSet::default())),
+            default_depth_symbol: "BTCUSDT".to_string(),
+            symbol_registry: Arc::new(RwLock::new(SymbolRegistry::new_mock())),
+            is_initialized: Arc::new(RwLock::new(false)),
+            last_data_time: Arc::new(RwLock::new(std::time::Instant::now())),
+            tick_callbacks: Arc::new(Mutex::new(Vec::new())),
+            kline_1m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_15m_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_1d_synthesizers: Arc::new(RwLock::new(FnvHashMap::default())),
+            kline_15m_counters: Arc::new(RwLock::new(FnvHashMap::default())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn test_tick_callback_registration() {
+        let feeder = DataFeeder::new_test_dispatcher();
+
+        let mut received_ticks: Vec<Tick> = Vec::new();
+
+        // 注册回调
+        feeder.on_tick(move |tick| {
+            received_ticks.push(tick);
+        });
+
+        // 创建测试 Tick
+        let tick = Tick {
+            symbol: "BTCUSDT".to_string(),
+            price: dec!(50000),
+            qty: dec!(1.0),
+            timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
+        };
+
+        // 处理 Tick
+        feeder.process_tick(tick.clone());
+
+        // 验证回调被调用
+        assert_eq!(received_ticks.len(), 1);
+        assert_eq!(received_ticks[0].symbol, "BTCUSDT");
+        assert_eq!(received_ticks[0].price, dec!(50000));
+    }
+
+    #[test]
+    fn test_tick_kline_synthesis() {
+        let feeder = DataFeeder::new_test_dispatcher();
+
+        // 发送连续的 Tick
+        let base_time = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+
+        for i in 0..5 {
+            let tick = Tick {
+                symbol: "ETHUSDT".to_string(),
+                price: dec!(2000 + i as i64 * 10),
+                qty: dec!(1.0),
+                timestamp: base_time,
+                kline_1m: None,
+                kline_15m: None,
+                kline_1d: None,
+            };
+            feeder.process_tick(tick);
+        }
+
+        // 验证 1m K线被创建
+        let synthesizers = feeder.kline_1m_synthesizers.blocking_read();
+        assert!(synthesizers.contains_key("ETHUSDT"));
+        let synthesizer = synthesizers.get("ETHUSDT").unwrap();
+        assert!(synthesizer.current_kline().is_some());
+
+        let kline = synthesizer.current_kline().unwrap();
+        assert_eq!(kline.open, dec!(2000));
+        assert_eq!(kline.close, dec!(2040)); // 5th tick price
+        assert_eq!(kline.high, dec!(2040));
+        assert_eq!(kline.low, dec!(2000));
+    }
+
+    #[test]
+    fn test_market_data_feeder_trait() {
+        let feeder = DataFeeder::new_test_dispatcher();
+
+        // 测试 trait 方法
+        assert!(feeder.start().is_ok());
+
+        let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
+        assert!(feeder.subscribe(&symbols).is_ok());
+
+        // get_tick 返回 None（因为 DataFeeder 通过回调分发）
+        assert!(feeder.get_tick("BTCUSDT").is_none());
+    }
+
+    #[test]
+    fn test_multiple_callbacks() {
+        let feeder = DataFeeder::new_test_dispatcher();
+
+        let mut count1 = 0;
+        let mut count2 = 0;
+
+        feeder.on_tick(move |_| {
+            count1 += 1;
+        });
+
+        feeder.on_tick(move |_| {
+            count2 += 1;
+        });
+
+        let tick = Tick {
+            symbol: "BTCUSDT".to_string(),
+            price: dec!(50000),
+            qty: dec!(1.0),
+            timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
+        };
+
+        feeder.process_tick(tick);
+
+        // 两个回调都被调用
+        assert_eq!(count1, 1);
+        assert_eq!(count2, 1);
     }
 }

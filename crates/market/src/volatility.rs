@@ -40,6 +40,9 @@ impl VolatilityDetector {
             price,
             qty: dec!(1),
             timestamp,
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
         };
 
         // 2. 更新 1m K线

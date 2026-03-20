@@ -174,6 +174,9 @@ impl BinanceTradeStream {
                             price: Decimal::from_str(&trade.price).ok()?,
                             qty: Decimal::from_str(&trade.quantity).ok()?,
                             timestamp: Utc.timestamp_millis_opt(trade.trade_time).unwrap(),
+                            kline_1m: None,
+                            kline_15m: None,
+                            kline_1d: None,
                         });
                     }
                 }

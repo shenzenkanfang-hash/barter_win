@@ -360,6 +360,9 @@ mod tests {
             price,
             qty: dec!(1.0),
             timestamp,
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
         }
     }
 
