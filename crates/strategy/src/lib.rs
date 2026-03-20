@@ -10,4 +10,4 @@ pub use error::StrategyError;
 pub use pin_strategy::{PinSignal, PinState, PinStrategy, PinStrategyConfig};
 pub use traits::Strategy;
 pub use trend_strategy::{TrendSignal, TrendState, TrendStrategy, TrendStrategyConfig};
-pub use types::{OrderRequest, OrderType, Side, Signal, StrategyId, TradingMode};
+pub use types::{OrderRequest, OrderType, Side, Signal, StrategyId, TradingMode, TradingAction, TradingDecision};

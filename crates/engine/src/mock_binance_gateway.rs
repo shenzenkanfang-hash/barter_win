@@ -1055,6 +1055,114 @@ impl SignalSynthesisLayer {
             None
         }
     }
+
+    /// 合成最终交易决策
+    ///
+    /// 根据信号和持仓状态，合成最终的交易决策
+    pub fn synthesize(
+        &self,
+        signal: strategy::types::Signal,
+        position_side: Option<strategy::types::Side>,
+        current_price: Decimal,
+        symbol: &str,
+    ) -> strategy::types::TradingDecision {
+        use strategy::types::{Side, TradingDecision, TradingAction};
+
+        let state = self.channel_state.read();
+        let channel_type = state.channel_type;
+
+        match signal {
+            strategy::types::Signal::LongEntry => {
+                // 做多入场信号
+                if position_side == Some(Side::Short) {
+                    // 当前持有空头，先平空再开多
+                    TradingDecision::close_short(
+                        symbol.to_string(),
+                        current_price,
+                        format!("通道 {:?} 平空入场做多", channel_type),
+                    )
+                } else {
+                    TradingDecision::open_long(
+                        symbol.to_string(),
+                        current_price,
+                        dec!(0.001), // TODO: 按风控计算数量
+                        format!("通道 {:?} 做多入场", channel_type),
+                    )
+                }
+            }
+            strategy::types::Signal::ShortEntry => {
+                // 做空入场信号
+                if position_side == Some(Side::Long) {
+                    // 当前持有多头，先平多再开空
+                    TradingDecision::close_long(
+                        symbol.to_string(),
+                        current_price,
+                        format!("通道 {:?} 平多入场做空", channel_type),
+                    )
+                } else {
+                    TradingDecision::open_short(
+                        symbol.to_string(),
+                        current_price,
+                        dec!(0.001), // TODO: 按风控计算数量
+                        format!("通道 {:?} 做空入场", channel_type),
+                    )
+                }
+            }
+            strategy::types::Signal::LongExit => {
+                // 平多信号
+                TradingDecision::close_long(
+                    symbol.to_string(),
+                    current_price,
+                    format!("通道 {:?} 平多", channel_type),
+                )
+            }
+            strategy::types::Signal::ShortExit => {
+                // 平空信号
+                TradingDecision::close_short(
+                    symbol.to_string(),
+                    current_price,
+                    format!("通道 {:?} 平空", channel_type),
+                )
+            }
+            strategy::types::Signal::ExitHighVol => {
+                // 高波动退出信号 - 全部平仓
+                match position_side {
+                    Some(Side::Long) => {
+                        TradingDecision::close_long(
+                            symbol.to_string(),
+                            current_price,
+                            format!("高波动退出 通道 {:?} 平多", channel_type),
+                        )
+                    }
+                    Some(Side::Short) => {
+                        TradingDecision::close_short(
+                            symbol.to_string(),
+                            current_price,
+                            format!("高波动退出 通道 {:?} 平空", channel_type),
+                        )
+                    }
+                    None => TradingDecision::no_action(
+                        symbol.to_string(),
+                        "高波动退出 无持仓".to_string(),
+                    ),
+                }
+            }
+            strategy::types::Signal::LongHedge => {
+                // 多头对冲信号 (保持多头，但可能需要减仓)
+                TradingDecision::no_action(
+                    symbol.to_string(),
+                    format!("通道 {:?} 多头对冲观望", channel_type),
+                )
+            }
+            strategy::types::Signal::ShortHedge => {
+                // 空头对冲信号
+                TradingDecision::no_action(
+                    symbol.to_string(),
+                    format!("通道 {:?} 空头对冲观望", channel_type),
+                )
+            }
+        }
+    }
 }
 
 impl Default for SignalSynthesisLayer {
