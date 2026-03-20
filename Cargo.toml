@@ -19,6 +19,10 @@ path = "binance_test.rs"
 name = "indicator_compare"
 path = "indicator_compare.rs"
 
+[[bin]]
+name = "pine_debug"
+path = "pine_debug.rs"
+
 [dependencies]
 account = { path = "crates/account" }
 market = { path = "crates/market" }
@@ -33,6 +37,7 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
+csv = "1.1"
 
 [workspace.dependencies]
 parking_lot = "0.12"
