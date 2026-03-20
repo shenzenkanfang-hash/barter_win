@@ -182,6 +182,9 @@ impl STDEV {
 }
 
 // ==================== Dominant Cycle RSI ====================
+// 严格按照 Pine Script v5:
+// crsi := torque * (2 * rsi - rsi[phasingLag]) + (1 - torque) * nz(crsi[1])
+// 其中 phasingLag = 4 (vibration=10 时)
 
 #[derive(Debug, Clone)]
 pub struct DominantCycleRSI {
@@ -191,7 +194,7 @@ pub struct DominantCycleRSI {
     leveling: Decimal,
     cyclicmemory: usize,
     torque: Decimal,
-    phasinglag: Decimal,
+    phasinglag: usize,       // Pine Script: (vibration - 1) / 2 = 4.5 -> 4
     rma_up: RMA,
     rma_down: RMA,
     crsi: Decimal,
@@ -199,6 +202,7 @@ pub struct DominantCycleRSI {
     last_price: Decimal,
     lmax_history: VecDeque<Decimal>,
     lmin_history: VecDeque<Decimal>,
+    rsi_history: VecDeque<Decimal>,  // 存储 RSI 历史，用于 rsi[phasingLag]
 }
 
 impl DominantCycleRSI {
@@ -208,7 +212,7 @@ impl DominantCycleRSI {
         let leveling = dec!(10.0);
         let cyclicmemory = period * 2;
         let torque = dec!(2) / Decimal::from(vibration + 1);
-        let phasinglag = Decimal::from(vibration - 1) / dec!(2);
+        let phasinglag = (vibration - 1) / 2;  // 4
 
         Self {
             period,
@@ -225,6 +229,7 @@ impl DominantCycleRSI {
             last_price: Decimal::ZERO,
             lmax_history: VecDeque::new(),
             lmin_history: VecDeque::new(),
+            rsi_history: VecDeque::new(),
         }
     }
 
@@ -261,9 +266,21 @@ impl DominantCycleRSI {
             dec!(100) - dec!(100) / (dec!(1) + rma_up_val / rma_down_val)
         };
 
-        // CRSI
-        let crsi_calc = self.torque * (dec!(2) * rsi_rma - self.get_prev_crsi()) +
-                        (dec!(1) - self.torque) * self.crsi;
+        // 存储 RSI 历史
+        self.rsi_history.push_back(rsi_rma);
+
+        // 计算 CRSi: crsi = torque * (2 * rsi - rsi[phasingLag]) + (1 - torque) * crsi[1]
+        // Pine Script: rsi[phasingLag] 表示 phasinglag 个周期前的 RSI
+        let rsi_lagged = self.get_rsi_lagged();
+
+        let crsi_calc = if rsi_lagged.is_some() {
+            self.torque * (dec!(2) * rsi_rma - rsi_lagged.unwrap()) +
+            (dec!(1) - self.torque) * self.crsi
+        } else {
+            // 前 phasinglag 个周期，rsi[phasingLag] 返回 na，Pine Script 用 nz(crsi[1]) = 0
+            self.torque * (dec!(2) * rsi_rma) +
+            (dec!(1) - self.torque) * self.crsi
+        };
 
         self.prev_crsi = self.crsi;
         self.crsi = crsi_calc;
@@ -280,13 +297,13 @@ impl DominantCycleRSI {
         self.crsi
     }
 
-    fn get_prev_crsi(&self) -> Decimal {
-        let lag = self.phasinglag.to_string().parse::<usize>().unwrap_or(0);
-        let idx = self.cyclicmemory.saturating_sub(lag);
-        if idx < self.lmax_history.len() {
-            self.lmax_history[idx]
+    // 获取 lagged RSI 值 (phasinglag 个周期前的 RSI)
+    fn get_rsi_lagged(&self) -> Option<Decimal> {
+        let len = self.rsi_history.len();
+        if len > self.phasinglag {
+            self.rsi_history.get(len - 1 - self.phasinglag).copied()
         } else {
-            self.crsi
+            None  // 前 phasinglag 个周期，返回 None
         }
     }
 
@@ -404,8 +421,8 @@ pub struct PineColorDetector {
     ema20: EMA,
     // RSI (Dominant Cycle)
     rsi: DominantCycleRSI,
-    // 前一个 hist 值
-    hist_prev: Decimal,
+    // 前一个 hist 值 (Option 因为首个 bar 无 hist[1])
+    hist_prev: Option<Decimal>,
 }
 
 impl PineColorDetector {
@@ -417,7 +434,7 @@ impl PineColorDetector {
             ema10: EMA::new(10),       // EMA 10 (基于 close)
             ema20: EMA::new(20),       // EMA 20 (基于 close)
             rsi: DominantCycleRSI::new(20),
-            hist_prev: Decimal::ZERO,
+            hist_prev: None,           // 首个 bar，hist[1] 不可用
         }
     }
 
@@ -441,51 +458,71 @@ impl PineColorDetector {
         // RSI
         let rsi_val = self.rsi.update(close);
 
+        // 获取 hist[1] 用于比较
+        // Pine Script: hist[1] 表示前一个周期的 hist，首个 bar 返回 na
+        let hist_prev = self.hist_prev;
+        self.hist_prev = Some(hist);  // 更新为当前的 hist
+
         // Bar color (基于 Pine Script barcolor 逻辑)
-        let bar_color = self.detect_bar_color(close, macd, signal, hist, rsi_val, ema10_val, ema20_val);
+        let bar_color = self.detect_bar_color(close, macd, signal, hist_prev, hist, rsi_val, ema10_val, ema20_val);
 
         // BG color (基于 MACD vs Signal)
         let bg_color = self.detect_bg_color(macd, signal);
 
-        self.hist_prev = hist;
-
         (bar_color, bg_color)
     }
 
-    /// K线颜色检测 - 严格按照 Pine Script barcolor 逻辑
+    /// K线颜色检测 - 严格按照 Pine Script v5 barcolor 逻辑
     ///
-    /// Python 原始条件 (按优先级从低到高):
-    /// - st (selltimeT) = macd<=0 and ema20<ema10 and hist_prev>hist and hist>=0       -> PureRed (color.red)
-    /// - bt (buytimeT) = macd>=0 and ema20>ema10 and hist_prev<hist and hist<=0       -> PureRed (color.red)
-    /// - sl (selltime) = macd>=0 and ema20<ema10 and hist_prev>hist and hist>=0       -> LightGreen (#f1e892)
-    /// - by (buytime) = macd<=0 and ema20>ema10 and hist_prev<hist and hist<=0        -> LightBlue (blue)
-    /// - up (isUp) = rsi >= 70                                                           -> PureGreen (color.green)
-    /// - dn (isDown) = rsi <= 30                                                         -> LightRed (#c83be6)
-    /// - s (selltimeS) = selltime and is_up  (macd>=0 and ema20<ema10 and hist>=0 and rsi>=70) -> LightGreen (#82cbf5)
-    /// - b (buytimeS) = buytime and is_down (macd<=0 and ema20>ema10 and hist<=0 and rsi<=30)  -> LightGreen (rgb(248,191,4))
-    ///
-    /// 注意: Python 中 selltimeS 和 buytimeS 覆盖前面的 isUp/isDown
-    fn detect_bar_color(&self, close: Decimal, macd: Decimal, signal: Decimal, hist: Decimal, rsi: Decimal, ema10_val: Decimal, ema20_val: Decimal) -> PineBarColor {
-        let hist_prev = self.hist_prev;
+    /// Pine Script 优先级顺序:
+    /// - selltimeS: #82cbf5 (浅蓝)
+    /// - buytimeS: color.rgb(248, 191, 4) (黄色)
+    /// - selltimeT/buytimeT: color.red (红色)
+    /// - selltime: #f1e892 (浅黄)
+    /// - buytime: color.blue (蓝色)
+    /// - isUp: color.green (绿色)
+    /// - isDown: #c83be0 (紫色)
+    fn detect_bar_color(&self, close: Decimal, macd: Decimal, signal: Decimal, hist_prev: Option<Decimal>, hist: Decimal, rsi: Decimal, ema10_val: Decimal, ema20_val: Decimal) -> PineBarColor {
+        // Pine Script 中 hist[1] 首个 bar 返回 na，比较操作返回 false
+        let hist_prev_val = match hist_prev {
+            Some(v) => v,
+            None => return PineBarColor::White,  // 首个 bar，无 hist[1]
+        };
 
-        // 基础条件 (来自 Python calculate_trade_conditions)
+        // 基础条件
         let ema20_above_ema10 = ema20_val > ema10_val;  // ema20 > ema10 表示多头趋势
         let ema20_below_ema10 = ema20_val < ema10_val;  // ema20 < ema10 表示空头趋势
 
         let is_up = rsi >= dec!(70);   // rsi >= 70
         let is_down = rsi <= dec!(30);  // rsi <= 30
 
-        // 衍生条件
-        let selltime = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
-        let buytime = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
-        let selltimeT = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
-        let buytimeT = macd >= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
-        let selltimeS = selltime && is_up;   // 强卖信号
-        let buytimeS = buytime && is_down;   // 强买信号
+        // Pine Script 条件
+        // selltimeS = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0 and rsi >= 70
+        // buytimeS = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0 and rsi <= 30
+        // selltimeT = macd <= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
+        // buytimeT = macd >= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
+        // selltime = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
+        // buytime = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
 
-        // 按 Python 优先级顺序判断 (从 st/bt 低优先级到 s/b 高优先级)
-        // Python 顺序: [st, bt, sl, by, up, dn, s, b]
-        // 颜色顺序: [red, red, #f1e892, blue, green, #c83be0, #82cbf5, rgb(248,191,4)]
+        let selltimeS = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO && is_up;
+        let buytimeS = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev_val < hist && hist <= Decimal::ZERO && is_down;
+        let selltimeT = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO;
+        let buytimeT = macd >= Decimal::ZERO && ema20_above_ema10 && hist_prev_val < hist && hist <= Decimal::ZERO;
+        let selltime = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO;
+        let buytime = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev_val < hist && hist <= Decimal::ZERO;
+
+        // 按 Pine Script 优先级顺序判断
+        // selltimeS > buytimeS > selltimeT/buytimeT > selltime/buytime > isUp/isDown
+
+        // s (selltimeS) -> #82cbf5 (浅蓝)
+        if selltimeS {
+            return PineBarColor::LightGreen; // #82cbf5
+        }
+
+        // b (buytimeS) -> rgb(248, 191, 4) (黄色)
+        if buytimeS {
+            return PineBarColor::LightGreen; // rgb(248,191,4)
+        }
 
         // st (selltimeT) -> PureRed
         if selltimeT {
@@ -499,7 +536,7 @@ impl PineColorDetector {
 
         // sl (selltime) -> LightGreen (#f1e892)
         if selltime {
-            return PineBarColor::LightGreen;
+            return PineBarColor::LightGreen; // #f1e892
         }
 
         // by (buytime) -> LightBlue (blue)
@@ -515,16 +552,6 @@ impl PineColorDetector {
         // dn (isDown) -> LightRed (#c83be6)
         if is_down {
             return PineBarColor::LightRed;
-        }
-
-        // s (selltimeS) -> LightGreen (#82cbf5) - 注意这是浅蓝
-        if selltimeS {
-            return PineBarColor::LightGreen; // #82cbf5 在 Rust 端用 LightGreen 表示
-        }
-
-        // b (buytimeS) -> LightGreen (rgb(248,191,4)) - 注意这是黄色
-        if buytimeS {
-            return PineBarColor::LightGreen; // rgb(248,191,4) 在 Rust 端用 LightGreen 表示
         }
 
         PineBarColor::White

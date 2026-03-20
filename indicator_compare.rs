@@ -194,6 +194,9 @@ impl STDEV {
 }
 
 // ==================== RSI (Dominant Cycle RSI) ====================
+// 严格按照 Pine Script v5:
+// crsi := torque * (2 * rsi - rsi[phasingLag]) + (1 - torque) * nz(crsi[1])
+// 其中 phasingLag = 4 (vibration=10 时)
 
 struct DominantCycleRSI {
     period: usize,
@@ -202,7 +205,7 @@ struct DominantCycleRSI {
     leveling: Decimal,
     cyclicmemory: usize,
     torque: Decimal,
-    phasinglag: Decimal,
+    phasinglag: usize,       // Pine Script: (vibration - 1) / 2 = 4.5 -> 4
     rma_up: RMA,
     rma_down: RMA,
     crsi: Decimal,
@@ -212,6 +215,7 @@ struct DominantCycleRSI {
     lmin: Decimal,
     lmax_history: VecDeque<Decimal>,
     lmin_history: VecDeque<Decimal>,
+    rsi_history: VecDeque<Decimal>,  // 存储 RSI 历史，用于 rsi[phasingLag]
 }
 
 impl DominantCycleRSI {
@@ -221,7 +225,7 @@ impl DominantCycleRSI {
         let leveling = dec!(10.0);
         let cyclicmemory = period * 2;
         let torque = dec!(2) / Decimal::from(vibration + 1);
-        let phasinglag = Decimal::from(vibration - 1) / dec!(2);
+        let phasinglag = (vibration - 1) / 2;  // 4
 
         Self {
             period,
@@ -240,6 +244,7 @@ impl DominantCycleRSI {
             lmin: dec!(999999),
             lmax_history: VecDeque::new(),
             lmin_history: VecDeque::new(),
+            rsi_history: VecDeque::new(),
         }
     }
 
@@ -260,8 +265,7 @@ impl DominantCycleRSI {
         } else if up == Decimal::ZERO {
             dec!(0)
         } else {
-            let rsi = dec!(100) - dec!(100) / (dec!(1) + up / down);
-            rsi
+            dec!(100) - dec!(100) / (dec!(1) + up / down)
         };
 
         // RMA 平滑
@@ -276,9 +280,21 @@ impl DominantCycleRSI {
             dec!(100) - dec!(100) / (dec!(1) + rma_up_val / rma_down_val)
         };
 
-        // 计算 CRSI
-        let crsi_calc = self.torque * (dec!(2) * rsi_rma - self.get_prev_crsi(self.phasinglag)) +
-                        (dec!(1) - self.torque) * self.crsi;
+        // 存储 RSI 历史
+        self.rsi_history.push_back(rsi_rma);
+
+        // 计算 CRSi: crsi = torque * (2 * rsi - rsi[phasingLag]) + (1 - torque) * crsi[1]
+        // Pine Script: rsi[phasingLag] 表示 phasinglag 个周期前的 RSI
+        let rsi_lagged = self.get_rsi_lagged();
+
+        let crsi_calc = if rsi_lagged.is_some() {
+            self.torque * (dec!(2) * rsi_rma - rsi_lagged.unwrap()) +
+            (dec!(1) - self.torque) * self.crsi
+        } else {
+            // 前 phasinglag 个周期，rsi[phasingLag] 返回 na，Pine Script 用 nz(crsi[1]) = 0
+            self.torque * (dec!(2) * rsi_rma) +
+            (dec!(1) - self.torque) * self.crsi
+        };
 
         self.prev_crsi = self.crsi;
         self.crsi = crsi_calc;
@@ -298,12 +314,13 @@ impl DominantCycleRSI {
         self.crsi
     }
 
-    fn get_prev_crsi(&self, lag: Decimal) -> Decimal {
-        let idx = self.cyclicmemory - (lag.to_string().parse::<usize>().unwrap_or(0));
-        if idx < self.lmax_history.len() {
-            self.lmax_history[idx]
+    // 获取 lagged RSI 值 (phasinglag 个周期前的 RSI)
+    fn get_rsi_lagged(&self) -> Option<Decimal> {
+        let len = self.rsi_history.len();
+        if len > self.phasinglag {
+            self.rsi_history.get(len - 1 - self.phasinglag).copied()
         } else {
-            self.crsi
+            None  // 前 phasinglag 个周期，返回 None
         }
     }
 
@@ -324,7 +341,7 @@ struct PineColorDetector {
     signal_ema: EMA,
     ema10: EMA,        // 独立的 EMA10 (基于 close)
     ema20: EMA,        // 独立的 EMA20 (基于 close)
-    hist_prev: Decimal,
+    hist_prev: Option<Decimal>,  // None 表示 hist[1] 不可用 (首个 bar)
     rsi: DominantCycleRSI,
 }
 
@@ -336,7 +353,7 @@ impl PineColorDetector {
             signal_ema: EMA::new(9),       // Signal Smoothing = 9
             ema10: EMA::new(10),           // EMA 10 (基于 close)
             ema20: EMA::new(20),           // EMA 20 (基于 close)
-            hist_prev: Decimal::ZERO,
+            hist_prev: None,               // 首个 bar，hist[1] 不可用
             rsi: DominantCycleRSI::new(20),
         }
     }
@@ -360,22 +377,36 @@ impl PineColorDetector {
         // RSI
         let rsi_val = self.rsi.update(close);
 
+        // 获取 hist[1] 用于比较
+        // Pine Script: hist[1] 表示前一个周期的 hist，首个 bar 返回 na
+        let hist_prev = self.hist_prev;
+        self.hist_prev = Some(hist);  // 更新为当前的 hist
+
         // Bar color (基于 Pine Script 买卖条件)
-        let bar_color = self.detect_bar_color(macd, signal, hist, rsi_val, ema10_val, ema20_val);
+        let bar_color = self.detect_bar_color(macd, signal, hist_prev, hist, rsi_val, ema10_val, ema20_val);
 
         // BG color (基于 MACD vs Signal)
         let bg_color = self.detect_bg_color(macd, signal);
 
-        self.hist_prev = hist;
-
         (bar_color, bg_color)
     }
 
-    // K线颜色 - 严格按照 Python pine_scripts.py 逻辑
-    // Python 优先级顺序: [st, bt, sl, by, up, dn, s, b]
-    // 颜色: [red, red, #f1e892, blue, green, #c83be0, #82cbf5, rgb(248,191,4)]
-    fn detect_bar_color(&self, macd: Decimal, signal: Decimal, hist: Decimal, rsi: Decimal, ema10_val: Decimal, ema20_val: Decimal) -> String {
-        let hist_prev = self.hist_prev;
+    // K线颜色 - 严格按照 Pine Script v5 逻辑
+    // Pine Script 优先级顺序: selltimeS > buytimeS > selltimeT/buytimeT > selltime/buytime > isUp/isDown
+    // Pine Script 颜色:
+    //   selltimeS: #82cbf5 (浅蓝)
+    //   buytimeS: color.rgb(248, 191, 4) (黄色)
+    //   selltimeT/buytimeT: color.red (红色)
+    //   selltime: #f1e892 (浅黄)
+    //   buytime: color.blue (蓝色)
+    //   isUp: color.green (绿色)
+    //   isDown: #c83be0 (紫色)
+    fn detect_bar_color(&self, macd: Decimal, signal: Decimal, hist_prev: Option<Decimal>, hist: Decimal, rsi: Decimal, ema10_val: Decimal, ema20_val: Decimal) -> String {
+        // Pine Script 中 hist[1] 首个 bar 返回 na，比较操作返回 false
+        let hist_prev_val = match hist_prev {
+            Some(v) => v,
+            None => return "White".to_string(),  // 首个 bar，无 hist[1]
+        };
 
         // 基础条件
         let ema20_above_ema10 = ema20_val > ema10_val;  // ema20 > ema10 表示多头
@@ -384,13 +415,20 @@ impl PineColorDetector {
         let is_up = rsi >= dec!(70);   // rsi >= 70
         let is_down = rsi <= dec!(30);  // rsi <= 30
 
-        // 衍生条件
-        let selltime = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
-        let buytime = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
-        let selltimeT = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
-        let buytimeT = macd >= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
-        let selltimeS = selltime && is_up;   // 强卖信号
-        let buytimeS = buytime && is_down;   // 强买信号
+        // Pine Script 条件
+        // selltimeS = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0 and rsi >= 70
+        // buytimeS = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0 and rsi <= 30
+        // selltimeT = macd <= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
+        // buytimeT = macd >= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
+        // selltime = macd >= 0 and ema20 < ema10 and hist[1] > hist and hist >= 0
+        // buytime = macd <= 0 and ema20 > ema10 and hist[1] < hist and hist <= 0
+
+        let selltimeS = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO && is_up;
+        let buytimeS = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev_val < hist && hist <= Decimal::ZERO && is_down;
+        let selltimeT = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO;
+        let buytimeT = macd >= Decimal::ZERO && ema20_above_ema10 && hist_prev_val < hist && hist <= Decimal::ZERO;
+        let selltime = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO;
+        let buytime = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev_val < hist && hist <= Decimal::ZERO;
 
         // 按 Python 优先级顺序判断
         // st (selltimeT) -> PureRed
