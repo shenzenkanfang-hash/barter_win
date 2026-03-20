@@ -86,7 +86,10 @@ Status: v0.8 Issue Fix Complete
 - 仓位互斥判断
 
 待办:
-- 实现流水线架构代码
-- 实现 Check 表
-- 实现一轮编码机制
-- 实现 SymbolRules 小模块
+- 实现流水线架构代码 (进行中)
+  - ✅ Check 表 (CheckTable)
+  - ✅ 一轮编码机制 (RoundGuard)
+  - ✅ PipelineForm 全流程表单
+  - ✅ SymbolRules 模块
+  - ⏳ 高速通道驱动
+  - ⏳ 慢速通道时间驱动
