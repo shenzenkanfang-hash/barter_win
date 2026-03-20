@@ -1,0 +1,642 @@
+#![forbid(unsafe_code)]
+
+//! SQLite 持久化模块
+//!
+//! 记录重要事件快照：
+//! - 账户快照 (account_snapshots)
+//! - 交易所持仓 (exchange_positions)
+//! - 本地仓位记录 (local_positions)
+//! - 通道切换事件 (channel_events)
+//! - 风控事件 (risk_events)
+//! - 指标事件 (indicator_events)
+
+use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
+use rusqlite::{params, Connection, Result as SqliteResult};
+use serde::{Deserialize, Serialize};
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Arc;
+use parking_lot::Mutex;
+use tracing::{info, warn};
+
+use crate::EngineError;
+
+// ============================================================================
+// 数据结构
+// ============================================================================
+
+/// 账户快照
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountSnapshotRecord {
+    pub id: Option<i64>,
+    pub ts: i64,
+    pub account_id: String,
+    pub total_equity: String,      // Decimal -> String 存储
+    pub available: String,
+    pub frozen_margin: String,
+    pub unrealized_pnl: String,
+    pub margin_ratio: String,
+}
+
+/// 交易所持仓记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExchangePositionRecord {
+    pub id: Option<i64>,
+    pub ts: i64,
+    pub symbol: String,
+    pub side: String,              // "long" or "short"
+    pub qty: String,
+    pub avg_price: String,
+    pub unrealized_pnl: String,
+    pub margin_used: String,
+}
+
+/// 本地仓位记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalPositionRecord {
+    pub id: Option<i64>,
+    pub ts: i64,
+    pub symbol: String,
+    pub strategy_id: String,
+    pub direction: String,          // "long" or "short"
+    pub qty: String,
+    pub avg_price: String,
+    pub entry_ts: i64,
+    pub remark: String,
+}
+
+/// 通道切换事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelEventRecord {
+    pub id: Option<i64>,
+    pub ts: i64,
+    pub event: String,            // "SLOW_TO_FAST" / "FAST_TO_SLOW" / "ENTER_FAST" / "EXIT_FAST"
+    pub from_channel: String,
+    pub to_channel: String,
+    pub tr_ratio: String,
+    pub ma5_in_20d_pos: String,
+    pub pine_color: String,
+    pub details: String,
+}
+
+/// 风控事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RiskEventRecord {
+    pub id: Option<i64>,
+    pub ts: i64,
+    pub event_type: String,       // "REJECT" / "LIQUIDATION" / "MARGIN_CALL"
+    pub symbol: String,
+    pub order_id: String,
+    pub reason: String,
+    pub available_before: String,
+    pub margin_ratio_before: String,
+    pub action_taken: String,
+    pub details: String,
+}
+
+/// 指标重要变化事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndicatorEventRecord {
+    pub id: Option<i64>,
+    pub ts: i64,
+    pub symbol: String,
+    pub event: String,            // "TR_RATIO_BREAK" / "PINE_COLOR_CHANGE" / "ENTER_HIGH_VOL" / "EXIT_HIGH_VOL"
+    pub tr_ratio_5d_20d: String,
+    pub tr_ratio_20d_60d: String,
+    pub pos_norm_20: String,
+    pub ma5_in_20d_pos: String,
+    pub ma20_in_60d_pos: String,
+    pub pine_color_20_50: String,
+    pub pine_color_100_200: String,
+    pub pine_color_12_26: String,
+    pub channel_type: String,
+    pub details: String,
+}
+
+/// 指标对比 CSV 行
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndicatorComparisonRow {
+    pub timestamp: i64,
+    pub symbol: String,
+    pub tr_ratio_5d_20d: String,
+    pub tr_ratio_20d_60d: String,
+    pub pos_norm_20: String,
+    pub ma5_in_20d_pos: String,
+    pub ma20_in_60d_pos: String,
+    pub pine_color_20_50: String,
+    pub pine_color_100_200: String,
+    pub pine_color_12_26: String,
+    pub vel_percentile: String,
+    pub acc_percentile: String,
+    pub power: String,
+    pub channel_type: String,
+}
+
+// ============================================================================
+// SQLite 记录服务
+// ============================================================================
+
+/// SQLite 记录服务
+pub struct SqliteRecordService {
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl SqliteRecordService {
+    /// 创建 SQLite 记录服务
+    pub fn new(db_path: PathBuf) -> Result<Self, EngineError> {
+        // 确保目录存在
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| EngineError::Other(format!("创建目录失败: {}", e)))?;
+        }
+
+        let conn = Connection::open(&db_path)
+            .map_err(|e| EngineError::Other(format!("打开数据库失败: {}", e)))?;
+
+        let service = Self {
+            conn: Arc::new(Mutex::new(conn)),
+        };
+
+        service.init_tables()?;
+        info!("SQLite 记录服务初始化完成: {:?}", db_path);
+
+        Ok(service)
+    }
+
+    /// 初始化表结构
+    fn init_tables(&self) -> Result<(), EngineError> {
+        let conn = self.conn.lock();
+
+        conn.execute_batch(r#"
+            -- 账户快照表
+            CREATE TABLE IF NOT EXISTS account_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                account_id TEXT NOT NULL,
+                total_equity TEXT NOT NULL,
+                available TEXT NOT NULL,
+                frozen_margin TEXT NOT NULL,
+                unrealized_pnl TEXT NOT NULL,
+                margin_ratio TEXT NOT NULL
+            );
+
+            -- 交易所持仓表
+            CREATE TABLE IF NOT EXISTS exchange_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                qty TEXT NOT NULL,
+                avg_price TEXT NOT NULL,
+                unrealized_pnl TEXT NOT NULL,
+                margin_used TEXT NOT NULL
+            );
+
+            -- 本地仓位记录表
+            CREATE TABLE IF NOT EXISTS local_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                strategy_id TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                qty TEXT NOT NULL,
+                avg_price TEXT NOT NULL,
+                entry_ts INTEGER NOT NULL,
+                remark TEXT NOT NULL DEFAULT ''
+            );
+
+            -- 通道切换事件表
+            CREATE TABLE IF NOT EXISTS channel_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                event TEXT NOT NULL,
+                from_channel TEXT NOT NULL,
+                to_channel TEXT NOT NULL,
+                tr_ratio TEXT NOT NULL,
+                ma5_in_20d_pos TEXT NOT NULL,
+                pine_color TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT ''
+            );
+
+            -- 风控事件表
+            CREATE TABLE IF NOT EXISTS risk_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                order_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                available_before TEXT NOT NULL,
+                margin_ratio_before TEXT NOT NULL,
+                action_taken TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT ''
+            );
+
+            -- 指标事件表
+            CREATE TABLE IF NOT EXISTS indicator_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                event TEXT NOT NULL,
+                tr_ratio_5d_20d TEXT NOT NULL,
+                tr_ratio_20d_60d TEXT NOT NULL,
+                pos_norm_20 TEXT NOT NULL,
+                ma5_in_20d_pos TEXT NOT NULL,
+                ma20_in_60d_pos TEXT NOT NULL,
+                pine_color_20_50 TEXT NOT NULL,
+                pine_color_100_200 TEXT NOT NULL,
+                pine_color_12_26 TEXT NOT NULL,
+                channel_type TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT ''
+            );
+
+            -- 创建索引
+            CREATE INDEX IF NOT EXISTS idx_account_snapshots_ts ON account_snapshots(ts);
+            CREATE INDEX IF NOT EXISTS idx_exchange_positions_ts ON exchange_positions(ts);
+            CREATE INDEX IF NOT EXISTS idx_local_positions_ts ON local_positions(ts);
+            CREATE INDEX IF NOT EXISTS idx_channel_events_ts ON channel_events(ts);
+            CREATE INDEX IF NOT EXISTS idx_risk_events_ts ON risk_events(ts);
+            CREATE INDEX IF NOT EXISTS idx_indicator_events_ts ON indicator_events(ts);
+        "#).map_err(|e| EngineError::Other(format!("初始化表失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    // ========== 账户快照 ==========
+
+    /// 记录账户快照
+    pub fn save_account_snapshot(&self, record: AccountSnapshotRecord) -> Result<i64, EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO account_snapshots (ts, account_id, total_equity, available, frozen_margin, unrealized_pnl, margin_ratio) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                record.ts,
+                record.account_id,
+                record.total_equity,
+                record.available,
+                record.frozen_margin,
+                record.unrealized_pnl,
+                record.margin_ratio
+            ],
+        ).map_err(|e| EngineError::Other(format!("插入账户快照失败: {}", e)))?;
+
+        Ok(conn.last_insert_rowid())
+    }
+
+    // ========== 交易所持仓 ==========
+
+    /// 记录交易所持仓变化
+    pub fn save_exchange_position(&self, record: ExchangePositionRecord) -> Result<i64, EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO exchange_positions (ts, symbol, side, qty, avg_price, unrealized_pnl, margin_used) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                record.ts,
+                record.symbol,
+                record.side,
+                record.qty,
+                record.avg_price,
+                record.unrealized_pnl,
+                record.margin_used
+            ],
+        ).map_err(|e| EngineError::Other(format!("插入交易所持仓失败: {}", e)))?;
+
+        Ok(conn.last_insert_rowid())
+    }
+
+    // ========== 本地仓位记录 ==========
+
+    /// 记录本地仓位变化
+    pub fn save_local_position(&self, record: LocalPositionRecord) -> Result<i64, EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO local_positions (ts, symbol, strategy_id, direction, qty, avg_price, entry_ts, remark) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                record.ts,
+                record.symbol,
+                record.strategy_id,
+                record.direction,
+                record.qty,
+                record.avg_price,
+                record.entry_ts,
+                record.remark
+            ],
+        ).map_err(|e| EngineError::Other(format!("插入本地仓位失败: {}", e)))?;
+
+        Ok(conn.last_insert_rowid())
+    }
+
+    // ========== 通道事件 ==========
+
+    /// 记录通道切换事件
+    pub fn save_channel_event(&self, record: ChannelEventRecord) -> Result<i64, EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO channel_events (ts, event, from_channel, to_channel, tr_ratio, ma5_in_20d_pos, pine_color, details) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                record.ts,
+                record.event,
+                record.from_channel,
+                record.to_channel,
+                record.tr_ratio,
+                record.ma5_in_20d_pos,
+                record.pine_color,
+                record.details
+            ],
+        ).map_err(|e| EngineError::Other(format!("插入通道事件失败: {}", e)))?;
+
+        info!("通道事件记录: {} {} -> {}", record.event, record.from_channel, record.to_channel);
+        Ok(conn.last_insert_rowid())
+    }
+
+    // ========== 风控事件 ==========
+
+    /// 记录风控事件
+    pub fn save_risk_event(&self, record: RiskEventRecord) -> Result<i64, EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO risk_events (ts, event_type, symbol, order_id, reason, available_before, margin_ratio_before, action_taken, details) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                record.ts,
+                record.event_type,
+                record.symbol,
+                record.order_id,
+                record.reason,
+                record.available_before,
+                record.margin_ratio_before,
+                record.action_taken,
+                record.details
+            ],
+        ).map_err(|e| EngineError::Other(format!("插入风控事件失败: {}", e)))?;
+
+        warn!("风控事件记录: {} - {}", record.event_type, record.reason);
+        Ok(conn.last_insert_rowid())
+    }
+
+    // ========== 指标事件 ==========
+
+    /// 记录指标事件
+    pub fn save_indicator_event(&self, record: IndicatorEventRecord) -> Result<i64, EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO indicator_events (ts, symbol, event, tr_ratio_5d_20d, tr_ratio_20d_60d, pos_norm_20, ma5_in_20d_pos, ma20_in_60d_pos, pine_color_20_50, pine_color_100_200, pine_color_12_26, channel_type, details) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                record.ts,
+                record.symbol,
+                record.event,
+                record.tr_ratio_5d_20d,
+                record.tr_ratio_20d_60d,
+                record.pos_norm_20,
+                record.ma5_in_20d_pos,
+                record.ma20_in_60d_pos,
+                record.pine_color_20_50,
+                record.pine_color_100_200,
+                record.pine_color_12_26,
+                record.channel_type,
+                record.details
+            ],
+        ).map_err(|e| EngineError::Other(format!("插入指标事件失败: {}", e)))?;
+
+        info!("指标事件记录: {} - {}", record.symbol, record.event);
+        Ok(conn.last_insert_rowid())
+    }
+
+    // ========== 查询方法 ==========
+
+    /// 获取最近的账户快照
+    pub fn get_latest_account_snapshot(&self, account_id: &str) -> Result<Option<AccountSnapshotRecord>, EngineError> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, account_id, total_equity, available, frozen_margin, unrealized_pnl, margin_ratio FROM account_snapshots WHERE account_id = ?1 ORDER BY ts DESC LIMIT 1"
+        ).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        let result = stmt.query_row(params![account_id], |row| {
+            Ok(AccountSnapshotRecord {
+                id: Some(row.get(0)?),
+                ts: row.get(1)?,
+                account_id: row.get(2)?,
+                total_equity: row.get(3)?,
+                available: row.get(4)?,
+                frozen_margin: row.get(5)?,
+                unrealized_pnl: row.get(6)?,
+                margin_ratio: row.get(7)?,
+            })
+        });
+
+        match result {
+            Ok(record) => Ok(Some(record)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(EngineError::Other(format!("查询失败: {}", e))),
+        }
+    }
+
+    /// 获取最近的通道事件
+    pub fn get_latest_channel_event(&self) -> Result<Option<ChannelEventRecord>, EngineError> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, event, from_channel, to_channel, tr_ratio, ma5_in_20d_pos, pine_color, details FROM channel_events ORDER BY ts DESC LIMIT 1"
+        ).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        let result = stmt.query_row([], |row| {
+            Ok(ChannelEventRecord {
+                id: Some(row.get(0)?),
+                ts: row.get(1)?,
+                event: row.get(2)?,
+                from_channel: row.get(3)?,
+                to_channel: row.get(4)?,
+                tr_ratio: row.get(5)?,
+                ma5_in_20d_pos: row.get(6)?,
+                pine_color: row.get(7)?,
+                details: row.get(8)?,
+            })
+        });
+
+        match result {
+            Ok(record) => Ok(Some(record)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(EngineError::Other(format!("查询失败: {}", e))),
+        }
+    }
+
+    /// 获取所有风控事件
+    pub fn get_all_risk_events(&self) -> Result<Vec<RiskEventRecord>, EngineError> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, event_type, symbol, order_id, reason, available_before, margin_ratio_before, action_taken, details FROM risk_events ORDER BY ts DESC"
+        ).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        let records = stmt.query_map([], |row| {
+            Ok(RiskEventRecord {
+                id: Some(row.get(0)?),
+                ts: row.get(1)?,
+                event_type: row.get(2)?,
+                symbol: row.get(3)?,
+                order_id: row.get(4)?,
+                reason: row.get(5)?,
+                available_before: row.get(6)?,
+                margin_ratio_before: row.get(7)?,
+                action_taken: row.get(8)?,
+                details: row.get(9)?,
+            })
+        }).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        records.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))
+    }
+}
+
+// ============================================================================
+// CSV 输出服务
+// ============================================================================
+
+/// 指标对比 CSV 写入器
+pub struct IndicatorCsvWriter {
+    file_path: PathBuf,
+}
+
+impl IndicatorCsvWriter {
+    /// 创建新的 CSV 写入器
+    pub fn new(file_path: PathBuf) -> Result<Self, EngineError> {
+        // 确保目录存在
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| EngineError::Other(format!("创建目录失败: {}", e)))?;
+        }
+
+        // 写入 CSV 头部
+        let header = "timestamp,symbol,tr_ratio_5d_20d,tr_ratio_20d_60d,pos_norm_20,ma5_in_20d_pos,ma20_in_60d_pos,pine_color_20_50,pine_color_100_200,pine_color_12_26,vel_percentile,acc_percentile,power,channel_type\n";
+        std::fs::write(&file_path, header)
+            .map_err(|e| EngineError::Other(format!("创建CSV文件失败: {}", e)))?;
+
+        info!("指标对比 CSV 写入器初始化: {:?}", file_path);
+        Ok(Self { file_path })
+    }
+
+    /// 写入一行指标数据
+    pub fn write_row(&self, row: &IndicatorComparisonRow) -> Result<(), EngineError> {
+        let line = format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            row.timestamp,
+            row.symbol,
+            row.tr_ratio_5d_20d,
+            row.tr_ratio_20d_60d,
+            row.pos_norm_20,
+            row.ma5_in_20d_pos,
+            row.ma20_in_60d_pos,
+            row.pine_color_20_50,
+            row.pine_color_100_200,
+            row.pine_color_12_26,
+            row.vel_percentile,
+            row.acc_percentile,
+            row.power,
+            row.channel_type
+        );
+
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&self.file_path)
+            .map_err(|e| EngineError::Other(format!("打开CSV失败: {}", e)))?
+            .write_all(line.as_bytes())
+            .map_err(|e| EngineError::Other(format!("写入CSV失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 获取文件路径
+    pub fn file_path(&self) -> &PathBuf {
+        &self.file_path
+    }
+}
+
+// ============================================================================
+// 便捷构造函数
+// ============================================================================
+
+impl SqliteRecordService {
+    /// 使用默认路径创建服务
+    pub fn with_default_path() -> Result<Self, EngineError> {
+        let db_path = PathBuf::from("data/trading_events.db");
+        Self::new(db_path)
+    }
+}
+
+impl IndicatorCsvWriter {
+    /// 使用默认路径创建写入器
+    pub fn with_default_path() -> Result<Self, EngineError> {
+        let file_path = PathBuf::from("output/indicator_comparison.csv");
+        Self::new(file_path)
+    }
+}
+
+// ============================================================================
+// 辅助函数：将 Decimal 转换为 String
+// ============================================================================
+
+/// 将 Decimal 格式化为字符串，保留合理精度
+pub fn format_decimal(d: &Decimal) -> String {
+    // 保留8位小数，避免精度丢失
+    let s = format!("{}", d);
+    // 如果字符串过长，截断
+    if s.len() > 20 {
+        format!("{:.8}", d)
+    } else {
+        s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn test_account_snapshot_record() {
+        let record = AccountSnapshotRecord {
+            id: None,
+            ts: 1710931200,
+            account_id: "test_account".to_string(),
+            total_equity: "100000.0".to_string(),
+            available: "95000.0".to_string(),
+            frozen_margin: "5000.0".to_string(),
+            unrealized_pnl: "0.0".to_string(),
+            margin_ratio: "0.05".to_string(),
+        };
+
+        assert_eq!(record.account_id, "test_account");
+    }
+
+    #[test]
+    fn test_indicator_event_record() {
+        let record = IndicatorEventRecord {
+            id: None,
+            ts: 1710931200,
+            symbol: "BTCUSDT".to_string(),
+            event: "TR_RATIO_BREAK".to_string(),
+            tr_ratio_5d_20d: "1.5".to_string(),
+            tr_ratio_20d_60d: "1.2".to_string(),
+            pos_norm_20: "0.6".to_string(),
+            ma5_in_20d_pos: "0.7".to_string(),
+            ma20_in_60d_pos: "0.5".to_string(),
+            pine_color_20_50: "Green".to_string(),
+            pine_color_100_200: "Green".to_string(),
+            pine_color_12_26: "Red".to_string(),
+            channel_type: "Fast".to_string(),
+            details: "".to_string(),
+        };
+
+        assert_eq!(record.symbol, "BTCUSDT");
+        assert_eq!(record.event, "TR_RATIO_BREAK");
+    }
+
+    #[test]
+    fn test_format_decimal() {
+        use rust_decimal_macros::dec;
+
+        let d = dec!(123.456789012345);
+        assert_eq!(format_decimal(&d), "123.456789012345");
+
+        let d2 = dec!(123.4567890123456789);
+        assert!(format_decimal(&d2).len() <= 20);
+    }
+}

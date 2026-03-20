@@ -18,3 +18,4 @@ tokio = { workspace = true }
 fnv = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
+rusqlite = { workspace = true }

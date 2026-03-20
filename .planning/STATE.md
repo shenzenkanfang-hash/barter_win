@@ -43,9 +43,18 @@ Current: 执行中 (核心实现完成，待测试工程师验证)
 
 (None)
 
+## v1.1 待完成清单 (更新: 2026-03-20)
+
+| 模块 | 待完成项 | 优先级 |
+|------|----------|--------|
+| B. SQLite | account_snapshots, exchange_positions, local_positions, channel_events, risk_events, indicator_events | P0 |
+| C. CSV | indicator_comparison.csv | P0 |
+| E. 测试 | 指标层/策略层/风控层/引擎层测试 + SQLite测试 | P1 |
+| F. 指标对比 | Rust vs Python 指标验证 | P1 |
+
 ## Next Action
 
-v1.1 核心实现完成，待测试工程师执行: /gsd:verify-phase 08
+派发开发者实现 SQLite 持久化模块 (B) + CSV 输出 (C)
 
 ## v0.10 Enhancement 完成
 

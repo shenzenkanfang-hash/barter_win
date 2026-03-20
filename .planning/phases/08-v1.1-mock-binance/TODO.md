@@ -15,30 +15,32 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
     [x] check_margin_sufficient() 保证金充足检查
     [x] check_forced_liquidation() 强制平仓检查
 [x] 实现立即成交机制（Market Order）
-[ ] CSV 输出
-    [ ] trades.csv 交易记录
-    [ ] positions.csv 持仓变化
-    [ ] risk_log.csv 风控日志
-    [ ] account_snapshot.csv 账户快照
-    [ ] indicator_comparison.csv 指标对比
+[x] 单元测试 (账户创建/持仓盈亏/通道切换/频率限制)
 
-## B. 信号综合层 - 通道退出逻辑
+## B. SQLite 持久化模块 (新增)
 --------------------------------------------------------------------------------
-参考:
-  - pin_status_detector.py (分钟级): 进入高速/退出高速/马丁策略
-  - trend_status_detector.py (日线级): 趋势策略/平仓条件
+[ ] 创建 engine/src/persistence.rs
+[ ] 创建 database.sqlite 文件
+[ ] 表结构:
+    [ ] account_snapshots     # 账户快照 (最先记录)
+    [ ] exchange_positions   # 交易所持仓
+    [ ] local_positions      # 本地仓位记录
+    [ ] channel_events       # 通道切换事件
+    [ ] risk_events          # 风控拒绝/强平触发
+    [ ] indicator_events     # 指标重要变化
 
-通道切换逻辑：
-  1. 进入高速：15min>=13% 或 1min>=3% → 马丁策略(分钟级)
-  2. 退出高速：tr_ratio < 1 → 回到慢速通道
-  3. 日线趋势平仓：ma5_close位置 + Pine颜色
+## C. CSV 输出
+--------------------------------------------------------------------------------
+[ ] indicator_comparison.csv  # 指标对比输出
 
+## D. 信号综合层 - 通道退出逻辑
+--------------------------------------------------------------------------------
 [x] 实现 tr_ratio < 1 退出条件判断
 [x] 实现日线趋势平仓条件(ma5_close + PineColor)
 [x] 实现通道状态变化记录
-[ ] 输出 trigger_log.csv
+[x] trigger_log 合并到 SQLite indicator_events
 
-## C. 完整测试用例
+## E. 完整测试用例
 --------------------------------------------------------------------------------
 [ ] 指标层测试
     [ ] EMA 增量计算测试
@@ -59,8 +61,9 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
     [x] 正常交易流程测试
     [x] 风控拒绝场景测试
     [x] 强制平仓场景测试
+[ ] SQLite 持久化测试
 
-## D. 指标对比验证
+## F. 指标对比验证
 --------------------------------------------------------------------------------
 [ ] 同步输出 Rust 计算的指标值
 [ ] 提供 Python 指标对比接口

@@ -18,6 +18,7 @@ pub mod position_manager;
 pub mod risk;
 pub mod risk_rechecker;
 pub mod round_guard;
+pub mod sqlite_persistence;
 pub mod strategy_pool;
 pub mod symbol_rules;
 pub mod thresholds;
@@ -44,6 +45,11 @@ pub use position_manager::{Direction, LocalPosition, LocalPositionManager, Posit
 pub use risk::{RiskPreChecker, VolatilityMode};
 pub use risk_rechecker::RiskReChecker;
 pub use round_guard::{RoundGuard, RoundGuardScope};
+pub use sqlite_persistence::{
+    AccountSnapshotRecord, ChannelEventRecord, ExchangePositionRecord,
+    IndicatorCsvWriter, IndicatorComparisonRow, IndicatorEventRecord,
+    LocalPositionRecord, RiskEventRecord, SqliteRecordService, format_decimal,
+};
 pub use strategy_pool::{StrategyAllocation, StrategyPool};
 pub use symbol_rules::SymbolRules;
 pub use thresholds::ThresholdConstants;
