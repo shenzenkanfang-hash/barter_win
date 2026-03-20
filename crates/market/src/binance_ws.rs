@@ -5,7 +5,7 @@
 use crate::error::MarketError;
 use crate::types::Tick;
 use chrono::{TimeZone, Utc};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -15,6 +15,12 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 pub struct BinanceWsConnector {
     url: String,
     symbol: String,
+    ws_stream: Option<
+        futures_util::stream::SplitSink<
+            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+            Message,
+        >,
+    >,
 }
 
 /// Binance Trade WebSocket 消息格式
@@ -48,13 +54,12 @@ impl BinanceWsConnector {
         Self {
             url,
             symbol: symbol.to_string(),
+            ws_stream: None,
         }
     }
 
     /// 连接到 Binance WebSocket 并返回 ticks
-    pub async fn connect(
-        &self,
-    ) -> Result<BinanceTradeStream, MarketError> {
+    pub async fn connect(&mut self) -> Result<BinanceTradeStream, MarketError> {
         let (ws_stream, _) = connect_async(&self.url)
             .await
             .map_err(|e| MarketError::WebSocketConnectionFailed(e.to_string()))?;
@@ -62,11 +67,53 @@ impl BinanceWsConnector {
         tracing::info!("Binance WebSocket 连接成功: {}", self.url);
 
         let (write, read) = ws_stream.split();
+        self.ws_stream = Some(write);
         Ok(BinanceTradeStream {
             ws_stream: read,
-            _write: write,
             symbol: self.symbol.clone(),
         })
+    }
+
+    /// 发送订阅消息
+    pub async fn subscribe(&mut self, streams: &[String]) -> Result<(), MarketError> {
+        let msg = serde_json::json!({
+            "method": "SUBSCRIBE",
+            "params": streams,
+            "id": chrono::Utc::now().timestamp_millis()
+        });
+
+        let text = serde_json::to_string(&msg)
+            .map_err(|e| MarketError::SerializeError(e.to_string()))?;
+
+        let write = self.ws_stream.as_mut()
+            .ok_or_else(|| MarketError::WebSocketError("Not connected".to_string()))?;
+
+        write.send(Message::Text(text.into()))
+            .await
+            .map_err(|e| MarketError::WebSocketError(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// 发送退订消息
+    pub async fn unsubscribe(&mut self, streams: &[String]) -> Result<(), MarketError> {
+        let msg = serde_json::json!({
+            "method": "UNSUBSCRIBE",
+            "params": streams,
+            "id": chrono::Utc::now().timestamp_millis()
+        });
+
+        let text = serde_json::to_string(&msg)
+            .map_err(|e| MarketError::SerializeError(e.to_string()))?;
+
+        let write = self.ws_stream.as_mut()
+            .ok_or_else(|| MarketError::WebSocketError("Not connected".to_string()))?;
+
+        write.send(Message::Text(text.into()))
+            .await
+            .map_err(|e| MarketError::WebSocketError(e.to_string()))?;
+
+        Ok(())
     }
 }
 
@@ -74,10 +121,6 @@ impl BinanceWsConnector {
 pub struct BinanceTradeStream {
     ws_stream: futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-    >,
-    _write: futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-        Message,
     >,
     symbol: String,
 }

@@ -5,6 +5,12 @@ pub enum MarketError {
     #[error("WebSocket连接失败: {0}")]
     WebSocketConnectionFailed(String),
 
+    #[error("WebSocket错误: {0}")]
+    WebSocketError(String),
+
+    #[error("序列化错误: {0}")]
+    SerializeError(String),
+
     #[error("订阅失败: {0}")]
     SubscribeFailed(String),
 
