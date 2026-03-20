@@ -21,8 +21,10 @@ impl RoundGuard {
     }
 
     /// 获取下一轮次ID (原子递增)
+    /// 返回递增后的新值
     pub fn next_round_id(&self) -> u64 {
-        self.round_id.fetch_add(1, Ordering::SeqCst)
+        self.round_id.fetch_add(1, Ordering::SeqCst);
+        self.round_id.load(Ordering::SeqCst)
     }
 
     /// 获取当前轮次ID (不递增)

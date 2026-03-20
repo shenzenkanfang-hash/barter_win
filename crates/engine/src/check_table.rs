@@ -122,6 +122,7 @@ impl Default for CheckTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_check_table_basic() {

@@ -81,9 +81,18 @@ impl Default for AccountPool {
 impl AccountPool {
     /// 创建账户保证金池
     pub fn new() -> Self {
+        let initial = dec!(100000.0);
         Self {
-            account: RwLock::new(AccountInfo::default()),
-            initial_balance: RwLock::new(dec!(100000.0)), // 默认 10 万
+            account: RwLock::new(AccountInfo {
+                account_id: "default".to_string(),
+                total_equity: initial,
+                available: initial,  // 修复: available 应初始化为 initial_balance
+                margin_used: dec!(0),
+                frozen: dec!(0),
+                cumulative_profit: dec!(0),
+                circuit_state: CircuitBreakerState::Normal,
+            }),
+            initial_balance: RwLock::new(initial), // 默认 10 万
             circuit_threshold: dec!(0.20),   // 20% 亏损触发完全熔断
             partial_circuit_threshold: dec!(0.10), // 10% 亏损触发部分熔断
             recovery_threshold: dec!(0.05),    // 5% 盈利恢复

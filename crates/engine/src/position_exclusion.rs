@@ -145,11 +145,13 @@ impl PositionExclusionChecker {
     ) -> bool {
         // 如果没有配置跨品种互斥，默认不互斥
         if let Some(muted_symbols) = self.cross_symbol_mutex.get(symbol) {
-            // 检查是否有互斥品种处于同一方向持仓
+            // 检查是否有互斥品种处于同一方向持仓（跨品种不区分策略）
             for muted_sym in muted_symbols {
-                let pos = self.get_position(muted_sym, ""); // 跨品种不区分策略
-                if pos.direction == direction && pos.qty > dec!(0) {
-                    return false; // 互斥品种有同向持仓，不能开仓
+                // 直接遍历 positions 查找该品种任意策略的持仓
+                for ((sym, _), pos) in &self.positions {
+                    if sym == muted_sym && pos.direction == direction && pos.qty > dec!(0) {
+                        return false; // 互斥品种有同向持仓，不能开仓
+                    }
                 }
             }
         }
