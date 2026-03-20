@@ -2,7 +2,6 @@
 //!
 //! 基于 Barter-rs 风格架构的高性能量化交易系统
 
-use account::types::FundPool;
 use engine::TradingEngine;
 use market::{MarketConnector, MockMarketConnector, MockMarketStream};
 use rust_decimal::Decimal;
@@ -25,18 +24,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Decimal::try_from(50000.0).unwrap(),
     ));
 
-    // 2. 创建初始资金池
-    let fund_pool = FundPool {
-        total_equity: Decimal::try_from(100000.0).unwrap(),
-        available: Decimal::try_from(100000.0).unwrap(),
-        positions_value: Decimal::try_from(0.0).unwrap(),
-    };
-
-    // 3. 创建交易引擎
+    // 2. 创建交易引擎 (初始资金 100000)
     let mut engine = TradingEngine::new(
         market_stream,
         "BTCUSDT".to_string(),
-        fund_pool,
+        Decimal::try_from(100000.0).unwrap(),
     );
 
     // 4. 运行引擎 (使用内部 run 方法，会在内部处理循环)

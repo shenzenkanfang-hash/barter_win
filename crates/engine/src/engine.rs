@@ -1,4 +1,3 @@
-use account::types::FundPool;
 use crate::account_pool::{AccountPool, CircuitBreakerState};
 use crate::check_table::CheckTable;
 use crate::market_status::{MarketStatus, MarketStatusDetector};
@@ -93,9 +92,6 @@ pub struct TradingEngine {
     // 订单执行
     order_executor: OrderExecutor,
 
-    // 资金池 (旧版，保留用于兼容)
-    fund_pool: FundPool,
-
     // 策略实例
     #[allow(dead_code)]
     strategy_id: StrategyId,
@@ -111,10 +107,16 @@ pub struct TradingEngine {
 }
 
 impl TradingEngine {
+    /// 创建交易引擎
+    ///
+    /// # 参数
+    /// * `market_stream` - 市场数据流
+    /// * `symbol` - 交易品种
+    /// * `initial_balance` - 初始资金
     pub fn new(
         market_stream: Box<dyn MarketStream>,
         symbol: String,
-        fund_pool: FundPool,
+        initial_balance: Decimal,
     ) -> Self {
         Self {
             market_stream,
@@ -135,7 +137,7 @@ impl TradingEngine {
             position_manager: LocalPositionManager::new(),
             pnl_manager: PnlManager::new(),
             account_pool: AccountPool::with_config(
-                fund_pool.total_equity,
+                initial_balance,
                 Decimal::try_from(0.20).unwrap(),
                 Decimal::try_from(0.10).unwrap(),
             ),
@@ -145,7 +147,6 @@ impl TradingEngine {
             check_table: CheckTable::new(),
             thresholds: ThresholdConstants::production(),
             order_executor: OrderExecutor::new(),
-            fund_pool,
             strategy_id: StrategyId("main".to_string()),
             symbol,
             current_ts: 0,
@@ -254,12 +255,12 @@ impl TradingEngine {
     pub async fn execute_order(&mut self, order: OrderRequest) -> Result<(), crate::EngineError> {
         let order_value = order.qty * order.price.unwrap_or(order.qty);
 
-        // 1. 风控预检 (锁外)
+        // 1. 风控预检 (锁外) - 使用 AccountPool
         self.risk_checker.pre_check(
             &order.symbol,
-            self.fund_pool.available,
+            self.account_pool.available(),
             order_value,
-            self.fund_pool.total_equity,
+            self.account_pool.total_equity(),
         )?;
 
         // 2. 预占保证金
