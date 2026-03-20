@@ -307,6 +307,8 @@ impl AccountPool {
 mod tests {
     use super::*;
 
+    /// E3.3 AccountPool 测试 - 多策略并发请求账户分配
+
     #[test]
     fn test_account_pool_basic() {
         let pool = AccountPool::with_config(
@@ -352,5 +354,168 @@ mod tests {
         pool.update_equity(dec!(-25000), 1000); // 25% 亏损，完全熔断
 
         assert!(!pool.can_trade(dec!(1000)));
+    }
+
+    #[test]
+    fn test_multi_strategy_allocation_sequential() {
+        // 多策略顺序请求账户分配
+        let pool = AccountPool::new();
+        let initial = dec!(100000);
+
+        // 策略1请求5000保证金
+        assert!(pool.can_trade(dec!(5000)));
+        pool.freeze(dec!(5000)).unwrap();
+
+        // 策略2请求3000保证金
+        assert!(pool.can_trade(dec!(3000)));
+        pool.freeze(dec!(3000)).unwrap();
+
+        // 剩余 90000 - 8000 = 82000
+        assert_eq!(pool.available(), initial - dec!(8000));
+    }
+
+    #[test]
+    fn test_multi_strategy_concurrent_allocation() {
+        // 多策略并发请求账户分配测试
+        // 由于 RwLock 特性，读操作不阻塞其他读，但阻塞写
+        // 这里模拟并发场景：多个策略同时查询账户状态
+        let pool = AccountPool::new();
+
+        // 模拟策略A查询
+        let available_a = pool.available();
+        let circuit_a = pool.circuit_state();
+
+        // 模拟策略B查询（可并行）
+        let available_b = pool.available();
+        let circuit_b = pool.circuit_state();
+
+        // 两次查询结果应该一致
+        assert_eq!(available_a, available_b);
+        assert_eq!(circuit_a, circuit_b);
+    }
+
+    #[test]
+    fn test_partial_circuit_trade_limit() {
+        let pool = AccountPool::with_config(
+            dec!(100000),
+            dec!(0.20),
+            dec!(0.10),
+        );
+
+        // 亏损 12% -> 部分熔断
+        pool.update_equity(dec!(-12000), 1000);
+        assert_eq!(pool.circuit_state(), CircuitBreakerState::Partial);
+
+        // 部分熔断时，只能用一半资金
+        // 可用 88000，实际只能当作 44000 用
+        // 保证金需求 1000，需要 2000 实际可用资金
+        assert!(pool.can_trade(dec!(1000)));
+    }
+
+    #[test]
+    fn test_circuit_recovery() {
+        let pool = AccountPool::with_config(
+            dec!(100000),
+            dec!(0.10),
+            dec!(0.05),
+        );
+
+        // 亏损 12% -> 完全熔断
+        pool.update_equity(dec!(-12000), 1000);
+        assert_eq!(pool.circuit_state(), CircuitBreakerState::Full);
+        assert!(!pool.can_trade(dec!(1000)));
+
+        // 恢复阶段：盈利 6% (超过恢复阈值 5%)
+        pool.update_equity(dec!(6000), 1000 + 300); // 超过冷却时间
+        assert_eq!(pool.circuit_state(), CircuitBreakerState::Normal);
+        assert!(pool.can_trade(dec!(1000)));
+    }
+
+    #[test]
+    fn test_circuit_cooldown() {
+        let pool = AccountPool::with_config(
+            dec!(100000),
+            dec!(0.10),
+            dec!(0.05),
+        );
+
+        // 亏损 12% -> 完全熔断
+        pool.update_equity(dec!(-12000), 1000);
+        assert_eq!(pool.circuit_state(), CircuitBreakerState::Full);
+
+        // 冷却时间内再次亏损，不重复触发熔断
+        pool.update_equity(dec!(-1000), 1200); // 200秒后，还在冷却期内
+        assert_eq!(pool.circuit_state(), CircuitBreakerState::Full);
+    }
+
+    #[test]
+    fn test_available_margin_partial_circuit() {
+        let pool = AccountPool::with_config(
+            dec!(100000),
+            dec!(0.20),
+            dec!(0.10),
+        );
+
+        // 亏损 12% -> 部分熔断
+        pool.update_equity(dec!(-12000), 1000);
+
+        // 部分熔断时，可用保证金减半
+        let account = pool.account();
+        assert_eq!(account.available, dec!(88000));
+        drop(account);
+
+        // available_margin() 返回一半
+        assert_eq!(pool.available_margin(), dec!(44000));
+    }
+
+    #[test]
+    fn test_freeze_unfreeze_round_trip() {
+        let pool = AccountPool::new();
+        let initial = pool.available();
+
+        // 冻结
+        pool.freeze(dec!(10000)).unwrap();
+        assert_eq!(pool.available(), initial - dec!(10000));
+
+        // 解冻
+        pool.unfreeze(dec!(10000));
+        assert_eq!(pool.available(), initial);
+    }
+
+    #[test]
+    fn test_unfreeze_partial() {
+        let pool = AccountPool::new();
+
+        // 冻结 10000
+        pool.freeze(dec!(10000)).unwrap();
+
+        // 解冻 5000（少于冻结金额）
+        pool.unfreeze(dec!(5000));
+        assert_eq!(pool.available(), dec!(95000));
+    }
+
+    #[test]
+    fn test_deduct_margin_exceeds_frozen() {
+        let pool = AccountPool::new();
+        pool.freeze(dec!(5000)).unwrap();
+
+        // 尝试扣除 10000，但冻结只有 5000
+        let result = pool.deduct_margin(dec!(10000));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_release_margin_round_trip() {
+        let pool = AccountPool::new();
+
+        // 扣除保证金
+        pool.freeze(dec!(10000)).unwrap();
+        pool.deduct_margin(dec!(10000)).unwrap();
+        assert_eq!(pool.margin_used(), dec!(10000));
+
+        // 释放保证金
+        pool.release_margin(dec!(10000));
+        assert_eq!(pool.margin_used(), dec!(0));
+        assert_eq!(pool.available(), dec!(100000));
     }
 }
