@@ -1,8 +1,6 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-#![forbid(unsafe_code)]
-
 #[derive(Debug, Clone)]
 pub struct RSI {
     pub period: u32,

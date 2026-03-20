@@ -821,7 +821,7 @@ mod tests {
         strategy.reset();
         assert_eq!(strategy.state(), PinState::Idle);
         assert_eq!(strategy.add_count(), 0);
-        assert_eq!(strategy.hedge_count(), 0);
+        assert_eq!(strategy.hedge_count, 0);
         assert_eq!(strategy.entry_price(), dec!(0));
         assert_eq!(strategy.position_qty(), dec!(0));
     }

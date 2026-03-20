@@ -1,8 +1,6 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-#![forbid(unsafe_code)]
-
 #[derive(Debug, Clone)]
 pub struct EMA {
     pub period: u32,
@@ -112,6 +110,6 @@ mod tests {
         // EMA 应该在稳定价格附近
         let diff = (ema.value - stable_price).abs();
         assert!(diff < dec!(0.01),
-            format!("EMA should converge to stable price, diff: {}", diff));
+            "EMA should converge to stable price, diff: {}", diff);
     }
 }
