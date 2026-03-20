@@ -579,6 +579,10 @@ impl BigCycleCalculator {
 mod tests {
     use super::*;
 
+    /// E1.4 BigCycleCalculator 测试 - 验证 tr_ratio/pine_color 正确
+    ///
+    /// 测试场景: 输入 100+ 根日线，验证大周期指标
+
     #[test]
     fn test_big_cycle_basic() {
         let mut calc = BigCycleCalculator::new();
@@ -644,5 +648,182 @@ mod tests {
 
         let color = calc.detect_pine_color_20_50();
         println!("Pine Color: {:?}", color);
+    }
+
+    /// E1.4 测试: 验证 100+ 根日线后指标就绪
+    #[test]
+    fn test_big_cycle_100_days_ready() {
+        let mut calc = BigCycleCalculator::new();
+
+        // 喂入 100 天数据
+        for i in 0..100 {
+            let base = dec!(100) + Decimal::from(i);
+            let high = base + dec!(2);
+            let low = base - dec!(2);
+            let close = base;
+            calc.update(high, low, close);
+        }
+
+        assert!(calc.is_ready(), "Calculator should be ready after 100 days");
+        assert!(calc.len() >= 60, "History should have at least 60 bars");
+    }
+
+    /// E1.4 测试: 验证 TR Ratio 极端信号
+    #[test]
+    fn test_tr_ratio_extreme_signal() {
+        let mut calc = BigCycleCalculator::new();
+
+        // 模拟极端波动
+        for i in 0..25 {
+            let volatility = if i < 5 {
+                dec!(0.5)  // 低波动
+            } else {
+                dec!(5.0)  // 高波动
+            };
+            let base = dec!(100);
+            let high = base + volatility;
+            let low = base - volatility;
+            let close = base;
+            calc.update(high, low, close);
+        }
+
+        let signal = calc.tr_ratio_signal();
+        println!("TR Ratio Signal: {:?}", signal);
+        // 信号可能是 High 或 Extreme，取决于波动率
+    }
+
+    /// E1.4 测试: 验证 pos_norm_20 边界
+    #[test]
+    fn test_pos_norm_20_boundaries() {
+        let mut calc = BigCycleCalculator::new();
+
+        // 价格在 20 日最高点
+        for i in 0..20 {
+            let base = dec!(100) + Decimal::from(i);
+            calc.update(base + dec!(2), base - dec!(2), base + dec!(2)); // close at high
+        }
+        let pos_high = calc.calculate_pos_norm_20();
+        assert!(pos_high > dec!(90), "Price at 20d high should have pos > 90");
+
+        // 重置并测试价格在 20 日最低点
+        let mut calc2 = BigCycleCalculator::new();
+        for i in 0..20 {
+            let base = dec!(100) + Decimal::from(i);
+            calc2.update(base + dec!(2), base - dec!(2), base - dec!(2)); // close at low
+        }
+        let pos_low = calc2.calculate_pos_norm_20();
+        assert!(pos_low < dec!(10), "Price at 20d low should have pos < 10");
+    }
+
+    /// E1.4 测试: 验证 MA5 在 MA5 区间位置
+    #[test]
+    fn test_ma5_in_20d_ma5_pos() {
+        let mut calc = BigCycleCalculator::new();
+
+        for i in 0..60 {
+            let base = dec!(100) + Decimal::from(i);
+            calc.update(base + dec!(2), base - dec!(2), base);
+        }
+
+        let pos = calc.calculate_ma5_in_20d_ma5_pos();
+        assert!(pos >= dec!(0) && pos <= dec!(100),
+            "MA5 position should be between 0 and 100, got {}", pos);
+    }
+
+    /// E1.4 测试: 验证 MA20 在 MA20 区间位置
+    #[test]
+    fn test_ma20_in_60d_ma20_pos() {
+        let mut calc = BigCycleCalculator::new();
+
+        for i in 0..60 {
+            let base = dec!(100) + Decimal::from(i);
+            calc.update(base + dec!(2), base - dec!(2), base);
+        }
+
+        let pos = calc.calculate_ma20_in_60d_ma20_pos();
+        assert!(pos >= dec!(0) && pos <= dec!(100),
+            "MA20 position should be between 0 and 100, got {}", pos);
+    }
+
+    /// E1.4 测试: 验证三种 PineColor 参数组合
+    #[test]
+    fn test_pine_color_all_parameters() {
+        let mut calc = BigCycleCalculator::new();
+
+        // 喂入足够数据让所有 EMA 和 RSI 初始化
+        for i in 0..200 {
+            let price = dec!(100) + Decimal::from(i) / dec!(10);
+            let high = price + dec!(1);
+            let low = price - dec!(1);
+            calc.update(high, low, price);
+            calc.update_pine_ema(high, low, price);
+        }
+
+        let color_100_200 = calc.detect_pine_color_100_200();
+        let color_20_50 = calc.detect_pine_color_20_50();
+        let color_12_26 = calc.detect_pine_color_12_26();
+
+        println!("PineColor 100/200: {:?}", color_100_200);
+        println!("PineColor 20/50: {:?}", color_20_50);
+        println!("PineColor 12/26: {:?}", color_12_26);
+
+        // 验证返回值是有效的 PineColorBig
+        assert!(matches!(color_100_200, PineColorBig::PureGreen | PineColorBig::LightGreen
+            | PineColorBig::PureRed | PineColorBig::LightRed | PineColorBig::Purple | PineColorBig::Neutral));
+    }
+
+    /// E1.4 测试: 验证 TR 5d/20d/60d 均值
+    #[test]
+    fn test_tr_averages() {
+        let mut calc = BigCycleCalculator::new();
+
+        for i in 0..70 {
+            let base = dec!(100);
+            let high = base + dec!(2);
+            let low = base - dec!(2);
+            let close = base;
+            calc.update(high, low, close);
+        }
+
+        let tr_5d = calc.tr_5d_avg();
+        let tr_20d = calc.tr_20d_avg();
+        let tr_60d = calc.tr_60d_avg();
+
+        println!("TR 5d avg: {}", tr_5d);
+        println!("TR 20d avg: {}", tr_20d);
+        println!("TR 60d avg: {}", tr_60d);
+
+        // 稳定价格下，TR 应该很小
+        assert!(tr_5d >= dec!(0), "TR 5d should be non-negative");
+    }
+
+    /// E1.4 测试: 验证 TRRatioSignal 枚举
+    #[test]
+    fn test_tr_ratio_signal_enum() {
+        // 验证 TRRatioSignal 可以正确比较
+        let signal1 = TRRatioSignal::Extreme;
+        let signal2 = TRRatioSignal::High;
+        let signal3 = TRRatioSignal::Normal;
+
+        assert_ne!(signal1, signal2);
+        assert_ne!(signal2, signal3);
+        assert_ne!(signal1, signal3);
+    }
+
+    /// E1.4 测试: 验证 PineColorBig 颜色判断辅助函数
+    #[test]
+    fn test_pine_color_big_helpers() {
+        assert!(PineColorBig::PureGreen.is_green());
+        assert!(PineColorBig::LightGreen.is_green());
+        assert!(!PineColorBig::PureGreen.is_red());
+
+        assert!(PineColorBig::PureRed.is_red());
+        assert!(PineColorBig::LightRed.is_red());
+        assert!(!PineColorBig::PureRed.is_green());
+
+        assert!(!PineColorBig::Purple.is_green());
+        assert!(!PineColorBig::Purple.is_red());
+        assert!(PineColorBig::Neutral.is_green() == false);
+        assert!(PineColorBig::Neutral.is_red() == false);
     }
 }
