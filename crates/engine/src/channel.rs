@@ -1,7 +1,7 @@
 use crate::check_table::CheckTable;
 use crate::pipeline_form::PipelineForm;
 use crate::round_guard::RoundGuard;
-use indicator::{EMA, PineColor, PineColorDetector, PricePosition, RSI};
+use indicator::{BigCycleCalculator, EMA, PineColor, PineColorBig, PineColorDetector, PricePosition, RSI};
 use market::{KLine, KLineSynthesizer, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -49,6 +49,9 @@ pub struct VolatilityChannel {
     /// 日线价格位置
     price_position_daily: PricePosition,
 
+    /// 大周期计算器 (TR Ratio, 区间位置, PineColor)
+    big_cycle: BigCycleCalculator,
+
     /// 当前通道类型
     current_channel: ChannelType,
     /// Check表
@@ -79,6 +82,7 @@ impl VolatilityChannel {
             rsi_daily: RSI::new(14),  // 日线RSI
             price_position: PricePosition::new(14),
             price_position_daily: PricePosition::new(14),
+            big_cycle: BigCycleCalculator::new(),
             current_channel: ChannelType::Slow,
             check_table: CheckTable::new(),
             round_guard: Arc::new(RoundGuard::new()),
@@ -120,10 +124,15 @@ impl VolatilityChannel {
             current_kline.low,
         );
 
-        // 4. 检查波动率，决定通道
+        // 4. 更新大周期指标 (TR Ratio, 区间位置, PineColor)
+        if let Some(ref dk) = daily_kline {
+            self.big_cycle.update(dk.high, dk.low, dk.close);
+        }
+
+        // 5. 检查波动率，决定通道
         let is_high_freq = self.check_volatility();
 
-        // 5. 如果K线完成，生成CheckEntry
+        // 6. 如果K线完成，生成CheckEntry
         let form = if completed_1m.is_some() || is_high_freq != (self.current_channel == ChannelType::High) {
             let channel_changed = is_high_freq != (self.current_channel == ChannelType::High);
             if channel_changed {
@@ -297,6 +306,23 @@ impl VolatilityChannel {
     /// 获取当前通道类型
     pub fn current_channel(&self) -> ChannelType {
         self.current_channel
+    }
+
+    /// 获取大周期计算器
+    pub fn big_cycle(&self) -> &BigCycleCalculator {
+        &self.big_cycle
+    }
+
+    /// 获取大周期指标 (TR Ratio, 区间位置)
+    pub fn get_big_cycle_indicators(&self) -> Option<indicator::BigCycleIndicators> {
+        if !self.big_cycle.is_ready() {
+            return None;
+        }
+        Some(self.big_cycle.calculate(
+            self.big_cycle.current_price().unwrap_or(dec!(0)),
+            self.big_cycle.current_price().unwrap_or(dec!(0)),
+            self.big_cycle.current_price().unwrap_or(dec!(0)),
+        ))
     }
 
     /// 填入CheckEntry
