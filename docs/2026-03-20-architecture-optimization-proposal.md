@@ -3,7 +3,10 @@ title: 量化交易系统架构优化建议
 author: 工作流程优化器 (Workflow Optimizer)
 created: 2026-03-20
 updated: 2026-03-20
-role: 工作流程优化器
+role: 软件架构师
+status: 已评审
+review_date: 2026-03-20
+reviewer: 软件架构师
 related_docs:
   - docs/2026-03-20-module-deep-analysis.md
 ---
@@ -886,6 +889,155 @@ pub struct AccountPool {
 | engine/src/strategy_stage.rs | 新建，策略处理 | 低 |
 
 ================================================================================
+架构师评审意见
+================================================================================
+
+## 评审结论
+
+**文档状态**: 已评审 ✅
+**评审日期**: 2026-03-20
+**评审结论**: 建议按 P0 → P1 → P2 顺序实施，Phase A 和 Phase B 可并行准备
+
+--------------------------------------------------------------------------------
+
+## 问题确认
+
+### P0 线程安全问题 - 确认 🔴
+
+| 模块 | 问题 | 架构师确认 |
+|------|------|-----------|
+| AccountPool | freeze/can_trade 无锁 | ✅ 确认 |
+| StrategyPool | reserve_margin 非原子 | ✅ 确认 |
+| OrderCheck | reservations HashMap 并发 | ✅ 确认 |
+| PnlManager | unrealized_pnl 并发写入 | ✅ 确认 |
+
+**架构建议**:
+- 使用 `parking_lot::RwLock` 而非 `std::sync::Mutex`
+- 理由: RwLock 在读多写少场景性能更好，trading system 符合此模式
+- AccountPool 已有 RwLock 雏形，但 `can_trade` 等方法直接访问 `account` 字段未加锁
+
+### P1 RSI 算法问题 - 需校准 🟡
+
+**问题描述准确**，但影响评估过于严重。
+
+当前实现:
+```rust
+if self.avg_loss.is_zero() {
+    self.avg_gain = gain;  // 第1次直接赋值
+    self.avg_loss = loss;
+}
+```
+
+**实际影响**:
+- 仅影响前 `period` 次计算（RSI 初始化阶段）
+- 初始化完成后使用 Wilder 平滑，误差会收敛
+- 策略层面影响有限，不应列为 P1 致命问题
+
+**架构建议**: 降级为 P2，在 Phase C 中一并处理
+
+### P2 性能问题 - 确认 🟡
+
+| 问题 | 确认 | 建议 |
+|------|------|------|
+| KLineSynthesizer clone | ✅ | 使用 mem::replace |
+| PnlManager Vec → HashSet | ✅ | 低优先级 |
+| 串行 on_tick | ✅ | Phase B 中解决 |
+
+--------------------------------------------------------------------------------
+
+## 方案可行性评估
+
+### Phase A: 线程安全 ✅ 可行
+
+**优点**:
+- 改动范围明确，影响可控
+- parking_lot 已是项目依赖
+- 渐进式重构风险低
+
+**风险**:
+- 需要确保锁粒度不过细导致死锁
+- AccountPool 多个方法需要一起加锁
+
+**架构建议**:
+```
+AccountPool {
+    account: RwLock<AccountInfo>,  // 整个 AccountInfo 加锁
+}
+
+impl AccountPool {
+    // 所有 public 方法自动获得锁保护
+    // can_trade(): read lock
+    // freeze(): write lock
+    // update_equity(): write lock
+}
+```
+
+### Phase B: 多品种流水线 ⚠️ 需细化
+
+**问题**:
+- 文档中 `PipelineOrchestrator` 设计合理
+- 但未说明 Tick 如何分发给各品种流水线
+- Channel 背压控制方案缺失
+
+**关键设计决策**:
+```
+Tick 输入 → 按 symbol 分组 → 发送到对应 pipeline
+                    ↑
+            需要一个 Router 或 Dispatcher
+```
+
+**架构建议**:
+1. 保留 `TradingEngine` 作为单品种模式
+2. 新增 `MultiStrategyEngine` 包装多个 `TradingEngine`
+3. 或使用 `Actor` 模式：每个品种一个 Actor
+
+### Phase C: PipelineForm ⚠️ 建议推迟
+
+**理由**:
+- 可追溯性是"锦上添花"，不是核心问题
+- 当前 Phase 6 Integration 尚未完成，不宜叠加
+- 等系统稳定后再加可观测性更合理
+
+**架构建议**: 降级为"未来考虑项"，不纳入当前优化范围
+
+--------------------------------------------------------------------------------
+
+## 实施建议
+
+### 推荐顺序
+
+| 优先级 | Phase | 理由 |
+|--------|-------|------|
+| P0 | Phase A: 线程安全 | 致命问题必须先修 |
+| P1 | Phase B: 多品种并行 | 性能收益最大 |
+| P2 | RSI 校准 | 随 Phase A/B 顺便修复 |
+| P3 | PipelineForm | 推迟到 v1.1 |
+
+### 实施约束
+
+1. **编译活动暂停规则不变**
+   - 当前 Phase 6 Integration 还在进行
+   - 修复 P0 问题不应触发编译验证
+   - 等 Integration 完成后统一验证
+
+2. **改动范围控制**
+   - Phase A 只改 engine/src/account_pool.rs
+   - 不动其他模块
+   - 保持向后兼容
+
+3. **文档更新要求**
+   - 修复后更新 .planning/STATE.md
+   - 记录已知风险和缓解措施
+
+--------------------------------------------------------------------------------
+
+## 需澄清的问题
+
+1. **Tick 分发机制**: Phase B 中 Tick 如何按 symbol 分发？
+2. **资金池统一**: AccountPool vs FundPool 是否需要合并？
+3. **PipelineForm 必要性**: 是否确实需要全程表单追踪？
+
+================================================================================
 总结
 ================================================================================
 
@@ -921,4 +1073,4 @@ pub struct AccountPool {
 更新日期: 2026-03-20
 文档状态: 待评审
 相关文档: docs/2026-03-20-module-deep-analysis.md
-下一步: 提交给架构师评审
+下一步: 提交给开发者执行 Phase A 线程安全修复
