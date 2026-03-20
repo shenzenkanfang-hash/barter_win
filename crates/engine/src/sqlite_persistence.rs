@@ -10,9 +10,8 @@
 //! - 风控事件 (risk_events)
 //! - 指标事件 (indicator_events)
 
-use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use rusqlite::{params, Connection, Result as SqliteResult};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;

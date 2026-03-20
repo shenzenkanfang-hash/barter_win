@@ -2,7 +2,7 @@ use crate::EngineError;
 use crate::account_pool::AccountPool;
 use crate::position_manager::{Direction, LocalPositionManager};
 use crate::strategy_pool::StrategyPool;
-use crate::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, LocalPositionRecord, RiskEventRecord, format_decimal};
+use crate::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, RiskEventRecord, format_decimal};
 use fnv::FnvHashMap;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
@@ -311,7 +311,7 @@ impl MockBinanceGateway {
         let current_ts = current_timestamp();
 
         // 1. 订单频率检查
-        if !self.check_order_frequency(current_ts) {
+        if !self.check_order_frequency(current_ts as u64) {
             return Ok(self.reject_order(
                 order_id.clone(),
                 req.clone(),
@@ -326,11 +326,12 @@ impl MockBinanceGateway {
 
         // 3. 风控检查
         if let Some(reason) = self.pre_risk_check(&req, order_value, current_price) {
+            let reason_str = reason.to_string();
             self.log_risk_event(
                 &order_id,
                 &req.symbol,
                 "REJECT",
-                &reason.to_string(),
+                &reason_str,
                 self.account.read().available,
                 self.account.read().margin_ratio(),
             );
@@ -339,11 +340,11 @@ impl MockBinanceGateway {
                 "REJECT",
                 &req.symbol,
                 &order_id,
-                &reason.to_string(),
+                &reason_str,
                 "ORDER_REJECTED",
-                &format!("订单被拒绝: {}", reason),
+                &format!("订单被拒绝: {}", reason_str),
             );
-            return Ok(self.reject_order(order_id, req, reason, format!("风控拒绝: {}", reason)));
+            return Ok(self.reject_order(order_id, req, reason, format!("风控拒绝: {}", reason_str)));
         }
 
         // 4. 执行订单 (市价单立即成交)
@@ -509,7 +510,7 @@ impl MockBinanceGateway {
         self.orders.write().insert(order_id.to_string(), order);
 
         info!(
-            "订单成交: {} {} {}@{} 手续费:{}",
+            "订单成交: {} {:?} {}@{} 手续费:{}",
             order_id, req.side, filled_qty, filled_price, commission
         );
 
@@ -732,15 +733,16 @@ impl MockBinanceGateway {
                 // 记录成交
                 let trade_id = self.generate_trade_id();
                 let order_id = self.generate_order_id();
+                let commission = total_qty * current_price * dec!(0.0004);
 
                 let trade = MockTrade {
                     trade_id,
                     order_id: order_id.clone(),
                     symbol: symbol.to_string(),
-                    side: if position.long_qty > Decimal::ZERO { Side::Sell } else { Side::Buy },
+                    side: if position.long_qty > Decimal::ZERO { Side::Short } else { Side::Long },
                     qty: total_qty,
                     price: current_price,
-                    commission: total_qty * current_price * dec!(0.0004),
+                    commission,
                     realized_pnl,
                     ts: current_timestamp(),
                 };
@@ -757,7 +759,7 @@ impl MockBinanceGateway {
 
                 info!(
                     "强制平仓完成: {} 盈亏:{} 手续费:{}",
-                    symbol, realized_pnl, trade.commission
+                    symbol, realized_pnl, commission
                 );
 
                 // 记录强制平仓事件到 SQLite
