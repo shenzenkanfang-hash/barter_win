@@ -17,7 +17,7 @@ use crate::volatility::VolatilityDetector;
 use crate::symbol_registry::SymbolRegistry;
 use crate::types::{KLine, Period, Tick};
 use fnv::FnvHashMap;
-use fnv::FnvSet;
+use fnv::FnvHashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::{broadcast, RwLock};

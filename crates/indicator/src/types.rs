@@ -40,6 +40,52 @@ pub enum StrategyLevel {
     DAY,  // 日线级策略
 }
 
+/// Pine 颜色枚举
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PineColor {
+    PureGreen,    // 纯绿
+    LightGreen,   // 浅绿
+    PureRed,      // 纯红
+    LightRed,     // 浅红
+    Purple,       // 紫色 (RSI 极值)
+    Neutral,      // 中性
+}
+
+impl PineColor {
+    pub fn from_string(s: &str) -> Self {
+        match s {
+            "纯绿" | "PureGreen" => PineColor::PureGreen,
+            "浅绿" | "LightGreen" => PineColor::LightGreen,
+            "纯红" | "PureRed" => PineColor::PureRed,
+            "浅红" | "LightRed" => PineColor::LightRed,
+            "紫色" | "Purple" => PineColor::Purple,
+            _ => PineColor::Neutral,
+        }
+    }
+}
+
+/// 价格位置指标
+#[derive(Debug, Clone)]
+pub struct PricePosition {
+    period: usize,
+}
+
+impl PricePosition {
+    pub fn new(period: usize) -> Self {
+        Self { period }
+    }
+
+    /// 计算价格位置: (close - low) / (high - low) * 100
+    pub fn calculate(&self, close: Decimal, high: Decimal, low: Decimal) -> Decimal {
+        if high <= low {
+            return dec!(50);
+        }
+        let range = high - low;
+        let pos = (close - low) / range * dec!(100);
+        pos.max(dec!(0)).min(dec!(100))
+    }
+}
+
 /// 交易动作
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TradingAction {

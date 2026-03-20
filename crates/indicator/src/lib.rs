@@ -9,7 +9,7 @@ pub mod day;
 
 pub mod trading_trigger;
 
-pub use pine_indicator_full::{PineColorDetector as PineColorDetectorV5, colors};
+pub use pine_indicator_full::{PineColorDetector as PineColorDetectorV5, colors, EMA, RSI};
 pub use types::*;
 pub use trading_trigger::TradingTrigger;
 
@@ -23,4 +23,6 @@ pub use day::{
     DayMarketStatusGenerator,
     DaySignalGenerator,
     DayPriceControlGenerator,
+    BigCycleCalculator,
+    BigCycleIndicators,
 };

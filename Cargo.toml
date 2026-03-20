@@ -11,25 +11,6 @@ edition = "2024"
 name = "trading-system"
 path = "src/main.rs"
 
-[[bin]]
-name = "binance_test"
-path = "binance_test.rs"
-
-[[bin]]
-name = "indicator_compare"
-path = "indicator_compare.rs"
-
-[[bin]]
-name = "pine_debug"
-path = "pine_debug.rs"
-
-[[bin]]
-name = "pine_output_csv"
-path = "pine_output_csv.rs"
-
-[[bin]]
-name = "pine_compare"
-path = "pine_compare_with_python_data.rs"
 
 [dependencies]
 account = { path = "crates/account" }

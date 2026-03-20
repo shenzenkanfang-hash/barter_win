@@ -53,7 +53,7 @@ pub struct TradingEngine {
     rsi: RSI,
 
     // 风控预检 (锁外)
-    risk_checker: RiskPreChecker,
+    risk_checker: Arc<RiskPreChecker>,
 
     // 风控锁内复核
     risk_rechecker: RiskReChecker,
@@ -216,11 +216,11 @@ impl TradingEngine {
 
     fn update_indicators(&mut self, price: Decimal) {
         // 更新 EMA
-        let ema_f = self.ema_fast.calculate(price);
-        let ema_s = self.ema_slow.calculate(price);
+        let ema_f = self.ema_fast.update(price);
+        let ema_s = self.ema_slow.update(price);
 
         // 更新 RSI
-        let _rsi_value = self.rsi.calculate(ema_f - ema_s);
+        let _rsi_value = self.rsi.update(ema_f - ema_s);
 
         // 更新市场状态检测
         let _market_status = self.market_detector.detect(

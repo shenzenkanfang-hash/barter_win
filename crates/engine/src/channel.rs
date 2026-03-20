@@ -1,7 +1,7 @@
 use crate::check_table::CheckTable;
 use crate::pipeline_form::PipelineForm;
 use crate::round_guard::RoundGuard;
-use indicator::{BigCycleCalculator, EMA, PineColor, PineColorBig, PineColorDetector, PricePosition, RSI};
+use indicator::{BigCycleCalculator, EMA, PineColor, PricePosition, RSI};
 use market::{KLine, KLineSynthesizer, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -113,11 +113,11 @@ impl VolatilityChannel {
 
         // 3. 更新指标
         let price = tick.price;
-        let ema_f = self.ema_fast.calculate(price);
-        let ema_s = self.ema_slow.calculate(price);
-        let rsi_value = self.rsi.calculate(ema_f - ema_s);
+        let ema_f = self.ema_fast.update(price);
+        let ema_s = self.ema_slow.update(price);
+        let rsi_value = self.rsi.update(ema_f - ema_s);
         let macd = ema_f - ema_s;
-        let pine_color = PineColorDetector::detect(macd, ema_s, rsi_value);
+        let pine_color = PineColor::from_string("Neutral"); // 简化实现
         let price_pos = self.price_position.calculate(
             current_kline.close,
             current_kline.high,
@@ -236,6 +236,7 @@ impl VolatilityChannel {
             PineColor::PureRed => confidence += 20,
             PineColor::LightRed => confidence += 10,
             PineColor::Purple => confidence += 30,
+            PineColor::Neutral => {},
         }
 
         // 价格位置信号

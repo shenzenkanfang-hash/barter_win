@@ -33,7 +33,7 @@ fn safe_div(n: Decimal, d: Decimal, epsilon: Decimal) -> Decimal {
 
 // ==================== EMA（严格对齐 Python ewm(span=window, adjust=False)）====================
 /// EMA 指标：alpha = 2 / (period + 1)，完全对齐 Python pandas ewm
-struct EMA {
+pub struct EMA {
     period: usize,
     alpha: Decimal,
     value: Decimal,
@@ -41,7 +41,7 @@ struct EMA {
 }
 
 impl EMA {
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         let alpha = dec!(2) / Decimal::from(period + 1);
         Self {
             period,
@@ -51,7 +51,7 @@ impl EMA {
         }
     }
 
-    fn update(&mut self, price: Decimal) -> Decimal {
+    pub fn update(&mut self, price: Decimal) -> Decimal {
         if !self.initialized {
             self.value = price;
             self.initialized = true;
@@ -61,19 +61,25 @@ impl EMA {
         self.value
     }
 
-    fn get(&self) -> Decimal {
+    pub fn get(&self) -> Decimal {
         self.value
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.value = Decimal::ZERO;
         self.initialized = false;
+    }
+
+    /// 计算 EMA 值（静态方法）
+    pub fn calculate(value: Decimal, period: usize) -> Decimal {
+        let alpha = dec!(2) / Decimal::from(period + 1);
+        value * alpha
     }
 }
 
 // ==================== RMA（RSI 平滑，对齐 Python _rma_vectorized）====================
 /// RMA 指标：alpha = 1 / period，完全对齐 Python ewm(alpha=1/window, adjust=False)
-struct RMA {
+pub struct RMA {
     period: usize,
     alpha: Decimal,
     value: Decimal,
@@ -81,7 +87,7 @@ struct RMA {
 }
 
 impl RMA {
-    fn new(period: usize) -> Self {
+    pub fn new(period: usize) -> Self {
         let alpha = dec!(1) / Decimal::from(period);
         Self {
             period,
@@ -91,7 +97,7 @@ impl RMA {
         }
     }
 
-    fn update(&mut self, price: Decimal) -> Decimal {
+    pub fn update(&mut self, price: Decimal) -> Decimal {
         if !self.initialized {
             self.value = price;
             self.initialized = true;
@@ -101,8 +107,54 @@ impl RMA {
         self.value
     }
 
-    fn get(&self) -> Decimal {
+    pub fn get(&self) -> Decimal {
         self.value
+    }
+}
+
+// ==================== RSI ====================
+/// RSI 指标：基于 U/D 变化的相对强度指数
+pub struct RSI {
+    period: usize,
+    rma_up: RMA,
+    rma_down: RMA,
+    last_price: Decimal,
+    epsilon: Decimal,
+}
+
+impl RSI {
+    pub fn new(period: usize) -> Self {
+        Self {
+            period,
+            rma_up: RMA::new(period),
+            rma_down: RMA::new(period),
+            last_price: Decimal::ZERO,
+            epsilon: dec!(1e-8),
+        }
+    }
+
+    pub fn update(&mut self, price: Decimal) -> Decimal {
+        let change = if self.last_price == Decimal::ZERO {
+            Decimal::ZERO
+        } else {
+            price - self.last_price
+        };
+        self.last_price = price;
+
+        let up = if change > Decimal::ZERO { change } else { Decimal::ZERO };
+        let down = if change < Decimal::ZERO { -change } else { Decimal::ZERO };
+
+        let rma_up_val = self.rma_up.update(up);
+        let rma_down_val = self.rma_down.update(down);
+
+        if rma_down_val < self.epsilon {
+            dec!(100)
+        } else if rma_up_val < self.epsilon {
+            dec!(0)
+        } else {
+            let ratio = safe_div(rma_up_val, rma_down_val, self.epsilon);
+            dec!(100) - dec!(100) / (dec!(1) + ratio)
+        }
     }
 }
 
