@@ -25,7 +25,18 @@ Status: v0.6 Core Integration Complete
 
 ## Next Action
 
-(v0.6 完成 - 所有核心模块已集成并验证通过)
+(v0.7 进行中 - Binance 实时数据连接完成)
+
+## v0.7 Binance 实时数据连接
+
+新增:
+- binance_ws.rs: Binance WebSocket 连接器 (测试网)
+- binance_test.rs: 实时数据测试程序
+- tokio-tungstenite native-tls 特性支持 TLS 连接
+
+验证:
+- 成功从 Binance 测试网接收实时 Tick 数据
+- BTCUSDT 价格: ~70485 USDT
 
 ## 设计决策记录
 
