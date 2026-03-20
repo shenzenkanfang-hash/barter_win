@@ -131,6 +131,7 @@
 - VelocityPercentile: Velocity percentile indicator
 - PriceDeviation: Price deviation indicator
 - Momentum: Momentum indicator
+- BigCycleCalculator: Daily cycle indicators (TR Ratio, position, PineColor)
 
 **Status**: COMPLETE
 
