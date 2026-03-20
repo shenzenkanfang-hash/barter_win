@@ -154,7 +154,7 @@ impl MinSignalGenerator {
         if input.pine_bar_color != "纯红" {
             conditions += 1;
         }
-        if input.price_deviation_horizontal_position >= dec!(10) {
+        if dec!(10) < input.price_deviation_horizontal_position.abs() && input.price_deviation_horizontal_position.abs() <= dec!(90) {
             conditions += 1;
         }
 
