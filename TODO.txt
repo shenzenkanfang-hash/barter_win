@@ -148,3 +148,19 @@ SymbolRules 相关:
 建议: 确认 Side 类型分离是否有意设计，然后可以开始实现阶段。
 
 ================================================================================
+9. v0.8 编译修复记录 (2026-03-20)
+================================================================================
+
+修复的编译错误:
+1. PricePosition::new() 需要 period 参数 - 修复: PricePosition::new(14)
+2. KLineSynthesizer.current 私有字段访问 - 修复: 添加 current_kline() accessor
+3. channel.rs 未使用 chrono::Utc - 修复: 移除未使用导入
+4. check_table.rs/pipeline_form.rs 未使用 OrderType, Side - 修复: 移除未使用导入
+5. symbol_rules.rs step_size() 使用循环代替不存在的 powd() 方法
+
+新增代码:
+- market/kline.rs: current_kline() accessor 方法
+
+编译验证: cargo check 通过，无警告
+
+================================================================================
