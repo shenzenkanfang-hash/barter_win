@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod checkpoint;
+pub mod pipeline;
 pub mod account_pool;
 pub mod channel;
 pub mod check_table;
@@ -30,6 +31,7 @@ pub use account_pool::{AccountInfo, AccountPool, CircuitBreakerState};
 pub use checkpoint::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
 pub use channel::{ChannelType, VolatilityChannel};
 pub use check_table::{CheckEntry, CheckTable};
+pub use pipeline::{Pipeline, Processor};
 pub use engine::TradingEngine;
 pub use error::EngineError;
 pub use gateway::ExchangeGateway;
