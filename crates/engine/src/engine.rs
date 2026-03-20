@@ -33,6 +33,7 @@ pub struct TradingEngine {
     fund_pool: FundPool,
 
     // 策略实例 (简化版)
+    #[allow(dead_code)]
     strategy_id: StrategyId,
 }
 
@@ -63,6 +64,7 @@ impl TradingEngine {
     pub async fn on_tick(&mut self, tick: &Tick) {
         // 1. 更新 K线
         let completed_1m = self.kline_1m.update(tick);
+        #[allow(unused_variables)]
         let completed_1d = self.kline_1d.update(tick);
 
         // 2. 更新指标
@@ -108,6 +110,7 @@ impl TradingEngine {
         // 1. 风控预检
         let order_value = order.qty * order.price.unwrap_or(order.qty);
         self.risk_checker.pre_check(
+            &order.symbol,
             self.fund_pool.available,
             order_value,
             self.fund_pool.total_equity,

@@ -1,6 +1,18 @@
 use crate::types::{KLine, Period, Tick};
 use chrono::{DateTime, Utc};
 
+/// K线合成器
+///
+/// 将 Tick 数据聚合为指定周期的 K线。
+/// 支持 O(1) 增量更新，每次 tick 只更新当前 K线。
+///
+/// # 泛型参数
+/// 无，使用 Period 枚举区分周期
+///
+/// # 示例
+/// ```
+/// let mut synthesizer = KLineSynthesizer::new("BTCUSDT".to_string(), Period::Minute(1));
+/// ```
 pub struct KLineSynthesizer {
     pub symbol: String,
     pub period: Period,

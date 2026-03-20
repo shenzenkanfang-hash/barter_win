@@ -2,7 +2,7 @@
 //!
 //! 连接 Binance 测试网 WebSocket 获取实时 Tick 数据
 
-use market::{BinanceTradeStream, BinanceWsConnector};
+use market::BinanceWsConnector;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]

@@ -1,5 +1,11 @@
 use strategy::TradingMode;
 
+/// 交易模式切换器
+///
+/// 根据市场波动率状态自动切换交易模式:
+/// - Low: 正常模式
+/// - Medium: 警戒模式
+/// - High: 高频交易模式
 pub struct ModeSwitcher {
     current_mode: TradingMode,
 }

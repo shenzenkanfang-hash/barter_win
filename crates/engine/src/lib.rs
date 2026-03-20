@@ -10,4 +10,4 @@ pub use engine::TradingEngine;
 pub use error::EngineError;
 pub use mode::ModeSwitcher;
 pub use order::OrderExecutor;
-pub use risk::RiskPreChecker;
+pub use risk::{RiskPreChecker, VolatilityMode};

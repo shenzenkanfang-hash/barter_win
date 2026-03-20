@@ -1,6 +1,10 @@
 use crate::error::EngineError;
 use strategy::types::{OrderRequest, OrderType, Side};
 
+/// 订单执行器
+///
+/// 负责将经过风控的订单发送到交易所执行。
+/// 目前仅做结构验证，实际交易执行需对接交易所API。
 pub struct OrderExecutor;
 
 impl OrderExecutor {
