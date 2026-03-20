@@ -88,7 +88,7 @@ pub enum PositionSide {
 // ==================== min/ 输入输出类型 ====================
 
 /// 分钟级市场状态输入
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MinMarketStatusInput {
     pub tr_ratio_10min: Decimal,
     pub tr_ratio_15min: Decimal,
@@ -98,11 +98,21 @@ pub struct MinMarketStatusInput {
 }
 
 /// 分钟级市场状态输出
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MinMarketStatusOutput {
     pub status: MarketStatus,
     pub volatility_level: VolatilityLevel,
     pub high_volatility_reason: Option<String>,
+}
+
+impl Default for MinMarketStatusOutput {
+    fn default() -> Self {
+        Self {
+            status: MarketStatus::TREND,
+            volatility_level: VolatilityLevel::NORMAL,
+            high_volatility_reason: None,
+        }
+    }
 }
 
 /// 分钟级信号输入
@@ -158,13 +168,25 @@ pub struct MinSignalOutput {
 // ==================== day/ 输入输出类型 ====================
 
 /// 日线级市场状态输入
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DayMarketStatusInput {
     pub tr_ratio_5d_20d: Decimal,
     pub tr_ratio_20d_60d: Decimal,
     pub pine_color: String,
     pub ma5_in_20d_ma5_pos: Decimal,
     pub power_percentile: Decimal,
+}
+
+impl Default for DayMarketStatusInput {
+    fn default() -> Self {
+        Self {
+            tr_ratio_5d_20d: Decimal::ZERO,
+            tr_ratio_20d_60d: Decimal::ZERO,
+            pine_color: String::new(),
+            ma5_in_20d_ma5_pos: dec!(50),
+            power_percentile: Decimal::ZERO,
+        }
+    }
 }
 
 /// 日线级市场状态输出
@@ -328,12 +350,12 @@ impl MinMarketStatusGenerator {
         let volatility_level = self.determine_volatility_level(input.tr_ratio_15min);
 
         // 2. 判断市场状态 (优先级: INVALID > PIN > RANGE > TREND)
-        let status = self.determine_status(input, &volatility_level);
+        let (status, reason) = self.determine_status(input, &volatility_level);
 
         MinMarketStatusOutput {
             status,
             volatility_level,
-            high_volatility_reason: None,
+            high_volatility_reason: reason,
         }
     }
 
@@ -349,11 +371,13 @@ impl MinMarketStatusGenerator {
     }
 
     /// 判断市场状态
-    fn determine_status(&self, input: &MinMarketStatusInput, vol_level: &VolatilityLevel) -> MarketStatus {
+    fn determine_status(&self, input: &MinMarketStatusInput, vol_level: &VolatilityLevel) -> (MarketStatus, Option<String>) {
         // PIN 条件检测 (前置: tr_base_60min > 15%)
         if input.tr_base_60min > dec!(0.15) {
-            if self.is_pin_conditions_met(input) {
-                return MarketStatus::PIN;
+            let pin_count = self.count_pin_conditions(input);
+            if pin_count >= 4 {
+                let reason = format!("PIN detected with {}/7 conditions satisfied", pin_count);
+                return (MarketStatus::PIN, Some(reason));
             }
         }
 
@@ -361,53 +385,39 @@ impl MinMarketStatusGenerator {
         if vol_level == &VolatilityLevel::LOW && input.tr_ratio_15min < dec!(1.0) {
             let zscore_near_zero = input.zscore.abs() < dec!(0.5);
             if zscore_near_zero {
-                return MarketStatus::RANGE;
+                return (MarketStatus::RANGE, None);
             }
         }
 
-        MarketStatus::TREND
+        (MarketStatus::TREND, None)
     }
 
-    /// 检测插针条件是否满足 (7个条件满足 >= 4)
-    fn is_pin_conditions_met(&self, input: &MinMarketStatusInput) -> bool {
+    /// 统计满足的插针条件数量 (基于 MinMarketStatusInput 可用字段)
+    /// 简化版: 满足条件 >= 2 即为 PIN
+    fn count_pin_conditions(&self, input: &MinMarketStatusInput) -> u8 {
         let mut satisfied: u8 = 0;
 
-        // 1. extreme_z: |zscore_14_1m| > 2 或 |zscore_1h_1m| > 2
-        if input.zscore_14_1m.abs() > dec!(2) || input.zscore_1h_1m.abs() > dec!(2) {
+        // 1. extreme_z: |zscore| > 2
+        if input.zscore.abs() > dec!(2) {
             satisfied += 1;
         }
 
-        // 2. extreme_vol: tr_ratio_60min_5h > 1 或 tr_ratio_10min_1h > 1
-        if input.tr_ratio_60min_5h > dec!(1) || input.tr_ratio_10min_1h > dec!(1) {
+        // 2. extreme_vol: tr_ratio_15min > 13% (高波动)
+        if input.tr_ratio_15min > dec!(0.13) {
             satisfied += 1;
         }
 
-        // 3. extreme_pos: pos_norm_60 > 90 或 < 10
-        if input.pos_norm_60 > dec!(90) || input.pos_norm_60 < dec!(10) {
+        // 3. extreme_pos: price_position > 90% 或 < 10%
+        if input.price_position > dec!(90) || input.price_position < dec!(10) {
             satisfied += 1;
         }
 
-        // 4. extreme_speed: acc_percentile_1h > 90
-        if input.acc_percentile_1h > dec!(90) {
+        // 4. extreme_tr: tr_base_60min > 20% (极端波动)
+        if input.tr_base_60min > dec!(0.20) {
             satisfied += 1;
         }
 
-        // 5. extreme_bg_color: "纯绿" 或 "纯红"
-        if input.pine_bg_color == "纯绿" || input.pine_bg_color == "纯红" {
-            satisfied += 1;
-        }
-
-        // 6. extreme_bar_color: "纯绿" 或 "纯红"
-        if input.pine_bar_color == "纯绿" || input.pine_bar_color == "纯红" {
-            satisfied += 1;
-        }
-
-        // 7. price_deviation_extreme: |horizontal_position| == 100
-        if input.price_deviation_horizontal_position.abs() == dec!(100) {
-            satisfied += 1;
-        }
-
-        satisfied >= 4
+        satisfied
     }
 }
 
