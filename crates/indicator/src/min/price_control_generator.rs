@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn test_profit_distance_long() {
-        let gen = MinPriceControlGenerator::new();
+        let r#gen = MinPriceControlGenerator::new();
         let input = PriceControlInput {
             position_entry_price: dec!(100),
             position_side: PositionSide::LONG,
@@ -120,14 +120,14 @@ mod tests {
             move_stop_threshold: dec!(0.02),
         };
 
-        let output = gen.check(&input);
+        let output = r#gen.check(&input);
         assert_eq!(output.profit_distance_pct, dec!(0.02));
         assert!(output.should_take_profit); // 2% > 1% 阈值
     }
 
     #[test]
     fn test_loss_distance_short() {
-        let gen = MinPriceControlGenerator::new();
+        let r#gen = MinPriceControlGenerator::new();
         let input = PriceControlInput {
             position_entry_price: dec!(100),
             position_side: PositionSide::SHORT,
@@ -139,14 +139,14 @@ mod tests {
             move_stop_threshold: dec!(0.02),
         };
 
-        let output = gen.check(&input);
+        let output = r#gen.check(&input);
         assert_eq!(output.stop_distance_pct, dec!(0.03));
         assert!(output.should_stop); // 3% > 2% 止损阈值
     }
 
     #[test]
     fn test_no_position() {
-        let gen = MinPriceControlGenerator::new();
+        let r#gen = MinPriceControlGenerator::new();
         let input = PriceControlInput {
             position_entry_price: dec!(100),
             position_side: PositionSide::NONE,
@@ -158,7 +158,7 @@ mod tests {
             move_stop_threshold: dec!(0.02),
         };
 
-        let output = gen.check(&input);
+        let output = r#gen.check(&input);
         assert!(!output.should_stop);
         assert!(!output.should_take_profit);
         assert!(!output.should_add);

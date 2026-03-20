@@ -105,51 +105,51 @@ mod tests {
 
     #[test]
     fn test_volatility_level_high() {
-        let gen = MinMarketStatusGenerator::new();
+        let r#gen = MinMarketStatusGenerator::new();
         let input = MinMarketStatusInput {
             tr_ratio_15min: dec!(0.15),
             ..Default::default()
         };
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.volatility_level, VolatilityLevel::HIGH);
     }
 
     #[test]
     fn test_volatility_level_normal() {
-        let gen = MinMarketStatusGenerator::new();
+        let r#gen = MinMarketStatusGenerator::new();
         let input = MinMarketStatusInput {
             tr_ratio_15min: dec!(0.08),
             ..Default::default()
         };
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.volatility_level, VolatilityLevel::NORMAL);
     }
 
     #[test]
     fn test_volatility_level_low() {
-        let gen = MinMarketStatusGenerator::new();
+        let r#gen = MinMarketStatusGenerator::new();
         let input = MinMarketStatusInput {
             tr_ratio_15min: dec!(0.02),
             ..Default::default()
         };
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.volatility_level, VolatilityLevel::LOW);
     }
 
     #[test]
     fn test_status_trend_default() {
-        let gen = MinMarketStatusGenerator::new();
+        let r#gen = MinMarketStatusGenerator::new();
         let input = MinMarketStatusInput {
             tr_ratio_15min: dec!(0.08),
             ..Default::default()
         };
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.status, MarketStatus::TREND);
     }
 
     #[test]
     fn test_status_pin_with_high_tr_base() {
-        let gen = MinMarketStatusGenerator::new();
+        let r#gen = MinMarketStatusGenerator::new();
         // tr_base_60min > 15% and zscore > 2 (1 condition)
         let input = MinMarketStatusInput {
             tr_ratio_15min: dec!(0.15),  // > 13%, satisfies extreme_vol
@@ -158,26 +158,26 @@ mod tests {
             price_position: dec!(50),   // not extreme
             ..Default::default()
         };
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         // 2 conditions satisfied: extreme_z, extreme_vol
         assert_eq!(output.status, MarketStatus::PIN);
     }
 
     #[test]
     fn test_status_range_low_volatility() {
-        let gen = MinMarketStatusGenerator::new();
+        let r#gen = MinMarketStatusGenerator::new();
         let input = MinMarketStatusInput {
             tr_ratio_15min: dec!(0.02),  // < 3%, LOW volatility
             zscore: dec!(0.3),           // < 0.5, near zero
             ..Default::default()
         };
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.status, MarketStatus::RANGE);
     }
 
     #[test]
     fn test_count_pin_conditions() {
-        let gen = MinMarketStatusGenerator::new();
+        let r#gen = MinMarketStatusGenerator::new();
         let input = MinMarketStatusInput {
             tr_ratio_15min: dec!(0.15),  // > 13%
             tr_base_60min: dec!(0.25),   // > 20%
@@ -186,7 +186,7 @@ mod tests {
             ..Default::default()
         };
         // Should satisfy all 4 conditions
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.status, MarketStatus::PIN);
         assert!(output.high_volatility_reason.is_some());
     }

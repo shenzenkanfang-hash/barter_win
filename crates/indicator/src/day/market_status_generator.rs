@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_trend_status() {
-        let gen = DayMarketStatusGenerator::new();
+        let r#gen = DayMarketStatusGenerator::new();
         let input = DayMarketStatusInput {
             tr_ratio_5d_20d: dec!(1.0),
             tr_ratio_20d_60d: dec!(1.0),
@@ -79,13 +79,13 @@ mod tests {
             power_percentile: dec!(50),
         };
 
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.status, MarketStatus::TREND);
     }
 
     #[test]
     fn test_range_status() {
-        let gen = DayMarketStatusGenerator::new();
+        let r#gen = DayMarketStatusGenerator::new();
         let input = DayMarketStatusInput {
             tr_ratio_5d_20d: dec!(0.5),
             tr_ratio_20d_60d: dec!(0.5),
@@ -94,13 +94,13 @@ mod tests {
             power_percentile: dec!(50),
         };
 
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.status, MarketStatus::RANGE);
     }
 
     #[test]
     fn test_pin_status() {
-        let gen = DayMarketStatusGenerator::new();
+        let r#gen = DayMarketStatusGenerator::new();
         let input = DayMarketStatusInput {
             tr_ratio_5d_20d: dec!(2.5),  // > 2.0 → HIGH
             tr_ratio_20d_60d: dec!(1.0),
@@ -108,7 +108,7 @@ mod tests {
             ma5_in_20d_ma5_pos: dec!(50),
             power_percentile: dec!(50),
         };
-        let output = gen.detect(&input);
+        let output = r#gen.detect(&input);
         assert_eq!(output.status, MarketStatus::PIN);
         assert_eq!(output.volatility_level, VolatilityLevel::HIGH);
     }

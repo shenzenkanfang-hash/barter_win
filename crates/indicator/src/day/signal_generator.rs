@@ -87,7 +87,7 @@ impl DaySignalGenerator {
     }
 
     /// 根据周期获取 Pine 颜色
-    fn get_pine_color_for_period(&self, input: &DaySignalInput, period: &str) -> Option<&str> {
+    fn get_pine_color_for_period<'a>(&self, input: &'a DaySignalInput, period: &str) -> Option<&'a str> {
         match period {
             PERIOD_100_200 => Some(&input.pine_color_100_200),
             PERIOD_20_50 => Some(&input.pine_color_20_50),

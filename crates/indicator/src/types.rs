@@ -1,4 +1,5 @@
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 // ==================== 公共枚举 ====================
@@ -12,12 +13,24 @@ pub enum MarketStatus {
     INVALID, // 数据无效
 }
 
+impl Default for MarketStatus {
+    fn default() -> Self {
+        MarketStatus::TREND
+    }
+}
+
 /// 波动率等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VolatilityLevel {
     HIGH,    // 高波动 (15min TR > 13%)
     NORMAL,  // 正常波动
     LOW,     // 低波动
+}
+
+impl Default for VolatilityLevel {
+    fn default() -> Self {
+        VolatilityLevel::NORMAL
+    }
 }
 
 /// 策略层级
@@ -83,8 +96,8 @@ pub struct MinSignalInput {
     pub price_deviation_horizontal_position: Decimal,
 }
 
-impl Default for MinSignalInput {
-    fn default() -> Self {
+impl MinSignalInput {
+    pub fn new() -> Self {
         Self {
             tr_base_60min: Decimal::ZERO,
             tr_ratio_15min: Decimal::ZERO,
@@ -104,7 +117,7 @@ impl Default for MinSignalInput {
 }
 
 /// 分钟级信号输出
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MinSignalOutput {
     pub long_entry: bool,
     pub short_entry: bool,
@@ -127,8 +140,8 @@ pub struct DayMarketStatusInput {
     pub power_percentile: Decimal,
 }
 
-impl Default for DayMarketStatusInput {
-    fn default() -> Self {
+impl DayMarketStatusInput {
+    pub fn new() -> Self {
         Self {
             tr_ratio_5d_20d: Decimal::ZERO,
             tr_ratio_20d_60d: Decimal::ZERO,
@@ -158,7 +171,7 @@ pub struct DaySignalInput {
 }
 
 /// 日线级信号输出
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DaySignalOutput {
     pub long_entry: bool,
     pub short_entry: bool,

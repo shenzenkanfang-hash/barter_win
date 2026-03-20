@@ -274,7 +274,7 @@ mod tests {
     fn create_test_input() -> TradingTriggerInput {
         TradingTriggerInput {
             symbol: "BTCUSDT".to_string(),
-            current_price: dec!(50000),
+            current_price: dec!(49000),  // 设为 entry_price 附近，避免触发止盈
             high: dec!(50500),
             low: dec!(49500),
             close: dec!(50000),

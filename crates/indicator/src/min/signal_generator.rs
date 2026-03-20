@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_new_generator() {
-        let gen = MinSignalGenerator::new();
-        assert!(gen.generate(&MinSignalInput::default(), &VolatilityLevel::NORMAL).long_entry == false);
+        let r#gen = MinSignalGenerator::new();
+        assert!(r#gen.generate(&MinSignalInput::default(), &VolatilityLevel::NORMAL).long_entry == false);
     }
 }
