@@ -20,6 +20,9 @@ pub enum EngineError {
     #[error("模式切换失败: {0}")]
     ModeSwitchFailed(String),
 
+    #[error("网络错误: {0}")]
+    Network(String),
+
     #[error("其他错误: {0}")]
     Other(String),
 }

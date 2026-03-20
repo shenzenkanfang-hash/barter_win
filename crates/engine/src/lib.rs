@@ -22,6 +22,7 @@ pub mod round_guard;
 pub mod sqlite_persistence;
 pub mod strategy_pool;
 pub mod symbol_rules;
+pub mod telegram_notifier;
 pub mod thresholds;
 
 pub use account_pool::{AccountInfo, AccountPool, CircuitBreakerState};
@@ -55,4 +56,5 @@ pub use sqlite_persistence::{
 };
 pub use strategy_pool::{StrategyAllocation, StrategyPool};
 pub use symbol_rules::SymbolRules;
+pub use telegram_notifier::{TelegramConfig, TelegramNotifier};
 pub use thresholds::ThresholdConstants;
