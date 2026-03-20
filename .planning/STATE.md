@@ -56,7 +56,10 @@ Current: SQLite + CSV 模块实现完成，测试通过
 - [x] symbol_rules/thresholds 测试修复 (13 tests pass)
 
 ### 待完成
-- [ ] 指标对比验证 (Rust vs Python)
+- [x] 指标对比验证 (Rust vs Python)
+  - indicator_compare.rs: 从币安获取1000根日线
+  - BigCycleCalculator getter 方法
+  - 输出 indicator_comparison_btcusdt.csv (1001行)
 
 ## Next Action
 
