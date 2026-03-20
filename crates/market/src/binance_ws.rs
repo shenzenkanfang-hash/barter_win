@@ -9,6 +9,8 @@ use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use std::time::Duration;
+use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// Binance WebSocket 连接器 (测试网)
@@ -125,6 +127,30 @@ impl BinanceWsConnector {
             .map_err(|e| MarketError::WebSocketError(e.to_string()))?;
 
         Ok(())
+    }
+
+    /// 重连 (指数退避)
+    ///
+    /// 重连策略: 5s → 10s → 20s → ... → 120s (最大)
+    pub async fn reconnect_with_backoff(&mut self) -> Result<(), MarketError> {
+        let mut backoff = Duration::from_secs(5);
+        let max_backoff = Duration::from_secs(120);
+
+        loop {
+            tracing::info!("WebSocket 重连中, 等待 {:?}...", backoff);
+            sleep(backoff).await;
+
+            match self.connect().await {
+                Ok(_) => {
+                    tracing::info!("WebSocket 重连成功");
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::warn!("WebSocket 重连失败: {}", e);
+                    backoff = (backoff * 2).min(max_backoff);
+                }
+            }
+        }
     }
 }
 
