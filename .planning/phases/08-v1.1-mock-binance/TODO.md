@@ -45,29 +45,29 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
 
 ## E. 完整测试用例
 --------------------------------------------------------------------------------
-[ ] 指标层测试
-    [ ] EMA 增量计算测试
-    [ ] RSI 计算测试
-    [ ] PineColor 判断测试
-    [ ] BigCycleCalculator 测试
-[ ] 策略层测试
-    [ ] TrendStrategy 状态机测试
-    [ ] PinStrategy 状态机测试
-[ ] 风控层测试
-    [ ] RiskPreChecker 测试
-    [ ] RiskReChecker 测试
-    [ ] AccountPool 测试
-[ ] 引擎层测试
-    [ ] VolatilityChannel 通道切换测试
-    [ ] TradingEngine 集成测试
+[x] 指标层测试
+    [x] EMA 增量计算测试
+    [x] RSI 计算测试
+    [x] PineColor 判断测试
+    [x] BigCycleCalculator 测试
+[x] 策略层测试
+    [x] TrendStrategy 状态机测试
+    [x] PinStrategy 状态机测试
+[x] 风控层测试
+    [x] RiskPreChecker 测试
+    [x] RiskReChecker 测试
+    [x] AccountPool 测试
+[x] 引擎层测试
+    [x] VolatilityChannel 通道切换测试
+    [x] TradingEngine 集成测试
 [x] MockBinanceGateway 测试
     [x] 正常交易流程测试
     [x] 风控拒绝场景测试
     [x] 强制平仓场景测试
-[ ] SQLite 持久化测试
-    [ ] SqliteRecordService 单元测试
-    [ ] IndicatorCsvWriter 单元测试
-    [ ] EventRecorder 集成测试
+[x] SQLite 持久化测试
+    [x] SqliteRecordService 单元测试
+    [x] IndicatorCsvWriter 单元测试
+    [x] EventRecorder 集成测试
 
 ## F. 指标对比验证
 --------------------------------------------------------------------------------
