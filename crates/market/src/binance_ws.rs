@@ -45,8 +45,8 @@ struct BinanceTradeMsg {
 }
 
 impl BinanceWsConnector {
+    /// 创建 Trade 流连接器 (单 symbol)
     pub fn new(symbol: &str) -> Self {
-        // Binance 测试网 WebSocket URL
         let url = format!(
             "wss://stream.binancefuture.com/ws/{}@trade",
             symbol.to_lowercase()
@@ -54,6 +54,17 @@ impl BinanceWsConnector {
         Self {
             url,
             symbol: symbol.to_string(),
+            ws_stream: None,
+        }
+    }
+
+    /// 创建多 stream 连接器 (用于 KLine/Depth 批量订阅)
+    /// url: wss://stream.binancefuture.com/ws
+    /// streams: 要订阅的 streams 列表，如 ["btcusdt@kline_1m", "ethusdt@kline_1m"]
+    pub fn new_multi(url: &str, streams: Vec<String>) -> Self {
+        Self {
+            url: url.to_string(),
+            symbol: streams.join(","), // 用于标识
             ws_stream: None,
         }
     }

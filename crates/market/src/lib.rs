@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod binance_ws;
+pub mod data_feeder;
 pub mod error;
 pub mod kline;
 pub mod kline_persistence;
@@ -11,6 +12,7 @@ pub mod volatility;
 pub mod websocket;
 
 pub use binance_ws::{BinanceTradeStream, BinanceWsConnector};
+pub use data_feeder::{DataFeeder, DataMessage};
 pub use error::MarketError;
 pub use kline::KLineSynthesizer;
 pub use kline_persistence::KlinePersistence;
