@@ -283,6 +283,43 @@ pub struct StrategyPool {
 
 ### 核心设计
 
+#### 0. 共同注册表 (Symbol Registry)
+
+**设计决策**: 各策略/流水线通过注册表声明关注哪些品种，数据层主动推送或策略层主动拉取。
+
+```rust
+/// 品种注册表 - 管理所有活跃品种和数据订阅关系
+pub struct SymbolRegistry {
+    /// 品种元数据: symbol -> SymbolMeta
+    symbols: RwLock<HashMap<String, SymbolMeta>>,
+    /// 订阅者: symbol -> Vec<PipelineId>
+    subscribers: RwLock<HashMap<String, Vec<PipelineId>>>,
+}
+
+impl SymbolRegistry {
+    /// 策略注册时声明关注品种
+    pub fn subscribe(&self, pipeline_id: PipelineId, symbols: Vec<String>) {
+        for symbol in symbols {
+            self.subscribers.write().entry(symbol)
+                .or_default()
+                .push(pipeline_id.clone());
+        }
+    }
+
+    /// 获取某品种的所有订阅者
+    pub fn get_subscribers(&self, symbol: &str) -> Vec<PipelineId> {
+        self.subscribers.read()
+            .get(symbol)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+```
+
+**两种数据获取模式**:
+1. **推模式 (Push)**: 数据层通过注册表找到订阅者，主动推送 Tick
+2. **拉模式 (Pull)**: 流水线通过注册表找到数据层，主动拉取
+
 #### 1. SymbolPipeline (品种流水线)
 
 ```rust
@@ -808,7 +845,9 @@ low_volatility_symbols: HashSet<String>,  // HashSet: O(1)
 
 #### AccountPool vs FundPool
 
-**types.rs FundPool**:
+**设计决策**: 合并为一套设计，以 AccountPool 为基础，移除 FundPool。
+
+**types.rs FundPool** (待移除):
 ```rust
 pub struct FundPool {
     pub total_equity: Decimal,
@@ -1034,8 +1073,12 @@ Tick 输入 → 按 symbol 分组 → 发送到对应 pipeline
 ## 需澄清的问题
 
 1. **Tick 分发机制**: Phase B 中 Tick 如何按 symbol 分发？
+   > 有个共同注册表，确定谁在进行交易，或在指标层自己找数据层拿数据
+
 2. **资金池统一**: AccountPool vs FundPool 是否需要合并？
-3. **PipelineForm 必要性**: 是否确实需要全程表单追踪？
+   > 是的，需要合并为一套设计
+
+3. ~~PipelineForm 必要性~~: 推迟到 v1.1
 
 ================================================================================
 总结
