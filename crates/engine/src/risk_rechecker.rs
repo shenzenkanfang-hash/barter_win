@@ -151,6 +151,8 @@ impl RiskReChecker {
 mod tests {
     use super::*;
 
+    /// E3.2 RiskReChecker 测试 - 锁内复核检查
+
     #[test]
     fn test_risk_re_checker_basic() {
         let checker = RiskReChecker::new();
@@ -201,6 +203,130 @@ mod tests {
             dec!(49000),    // low
         );
         // 波动率 5% 等于阈值，应该通过
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_risk_re_checker_extreme_volatility_mode() {
+        let checker = RiskReChecker::new();
+        // 极端波动模式：禁止所有交易
+        let result = checker.re_check(
+            dec!(10000),
+            dec!(1000),
+            dec!(50000),
+            dec!(49500),
+            VolatilityMode::Extreme,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("极端波动模式"));
+    }
+
+    #[test]
+    fn test_risk_re_checker_high_volatility_mode_rejected() {
+        let checker = RiskReChecker::new();
+        // 高波动模式：订单比例超过 40%
+        let result = checker.re_check(
+            dec!(10000),
+            dec!(5000),     // order_value / available_balance = 50% > 40%
+            dec!(50000),
+            dec!(49500),
+            VolatilityMode::High,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("高波动模式"));
+    }
+
+    #[test]
+    fn test_risk_re_checker_high_volatility_mode_pass() {
+        let checker = RiskReChecker::new();
+        // 高波动模式：订单比例 30% < 40% -> 通过
+        let result = checker.re_check(
+            dec!(10000),
+            dec!(3000),
+            dec!(50000),
+            dec!(49500),
+            VolatilityMode::High,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_volatility_realtime_exceeded() {
+        let checker = RiskReChecker::new();
+        // 实时波动率 6% > 5% 阈值 -> 拒绝
+        let result = checker.check_volatility_realtime(
+            dec!(53000),    // current_price
+            dec!(50000),    // open_price
+            dec!(54000),    // high
+            dec!(49000),    // low
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("实时波动率"));
+    }
+
+    #[test]
+    fn test_volatility_realtime_zero_open_price() {
+        let checker = RiskReChecker::new();
+        // 开盘价为0时不计算波动率 -> 通过
+        let result = checker.check_volatility_realtime(
+            dec!(50000),
+            dec!(0),        // open_price = 0
+            dec!(53000),
+            dec!(49000),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_order_value_exceeds_balance() {
+        let checker = RiskReChecker::new();
+        let result = checker.check_order_value(
+            dec!(15000),    // order_value > available
+            dec!(10000),    // available_balance
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("超过可用资金"));
+    }
+
+    #[test]
+    fn test_order_value_exceeds_90_percent() {
+        let checker = RiskReChecker::new();
+        // 单笔订单 95% > 90% -> 拒绝
+        let result = checker.check_order_value(
+            dec!(9500),
+            dec!(10000),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("超过 90%"));
+    }
+
+    #[test]
+    fn test_order_value_boundary() {
+        let checker = RiskReChecker::new();
+        // 正好 90% -> 通过
+        let result = checker.check_order_value(
+            dec!(9000),
+            dec!(10000),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_risk_re_checker_zero_reference_price() {
+        let checker = RiskReChecker::new();
+        // 参考价为0时不检查价格偏离 -> 通过
+        let result = checker.re_check(
+            dec!(10000),
+            dec!(1000),
+            dec!(50000),
+            dec!(0),        // reference_price = 0
+            VolatilityMode::Normal,
+        );
         assert!(result.is_ok());
     }
 }
