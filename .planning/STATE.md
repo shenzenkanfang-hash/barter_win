@@ -45,6 +45,15 @@ Status: v0.9 Enhancement Complete
 - ThresholdConstants (thresholds.rs): 阈值常量集中管理
 - OrderCheck (order_check.rs): 订单风控检查器
 - 日线指标 (channel.rs): kline_1d, ema_100/200, rsi_daily
+- ZScore (z_score.rs): Z-Score 指标框架
+- TRRatio (tr_ratio.rs): TR-Ratio 指标框架
+- LocalPositionManager (position_manager.rs): 持仓管理器
+- TrendStrategy (trend_strategy.rs): 趋势策略状态机
+- PinStrategy (pin_strategy.rs): 马丁/插针策略状态机
+
+待调整:
+- 指标计算逻辑需根据 indicator_1m/indicator_calc.py 调整
+- 指标计算逻辑需根据 indicator_1d/pine_scripts.py 调整
 
 ## v0.8 编译修复 (补充)
 
