@@ -350,7 +350,7 @@ mod tests {
         pool.register_strategy("trend", dec!(50000), 80);
 
         pool.reserve_margin("trend", dec!(10000)).unwrap();
-        pool.release_margin("trend", dec!(5000)).unwrap();
+        pool.release_margin("trend", dec!(5000));
 
         let alloc = pool.get_allocation("trend").unwrap();
         assert_eq!(alloc.used, dec!(5000));

@@ -141,7 +141,7 @@ mod tests {
             price_position: Decimal::from(75),
             final_signal: Signal::LongEntry,
             target_price: Decimal::from(50000),
-            quantity: Decimal::from(0.1),
+            quantity: dec!(0.1),
             risk_flag: false,
             timestamp: Utc::now(),
             round_id,
