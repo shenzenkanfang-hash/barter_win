@@ -28,4 +28,10 @@ pub enum MarketError {
 
     #[error("超时: {0}")]
     Timeout(String),
+
+    #[error("Redis错误: {0}")]
+    RedisError(String),
+
+    #[error("网络请求错误: {0}")]
+    NetworkError(String),
 }
