@@ -14,6 +14,11 @@
 - 混合持仓模式: 资金池共享，策略持仓独立计算
 - 高性能: 1-2 品种秒级/Tick级计算，采用增量计算模式
 
+架构特点：
+- 事件驱动优于 Tick 驱动（日线/分钟级策略不需要每个 Tick 都处理）
+- Pipeline 作为守门员，简单条件先过滤
+- 指标子线程后台计算，不阻塞主线程
+
 
 ================================================================================
 二、模块架构
@@ -191,7 +196,57 @@ TradingMode:
 六、引擎层 (engine crate)
 ================================================================================
 
-6.1 核心引擎 TradingEngine
+6.1 Pipeline 架构 (新增)
+
+Pipeline 封装完整的交易流程，作为事件驱动的守门员：
+
+Pipeline::process(tick) -> Option<OrderRequest>
+    |
+    +-- Indicator (指标计算)
+    |       失败 -> blocked，停止传递
+    |
+    +-- Strategy (策略判断)
+    |       失败 -> blocked，停止传递
+    |
+    +-- RiskPre (风控预检)
+    |       失败 -> blocked，停止传递
+    |
+    +-- build_order_request()
+            生成订单请求
+
+
+6.2 CheckpointLogger 日志系统
+
+CheckpointLogger trait - 观察者模式记录 Pipeline 各环节：
+
+方法:
+- log_start(stage, symbol)           记录环节开始
+- log_pass(stage, symbol, details)    记录环节通过
+- log_blocked(stage, symbol, reason) 记录环节失败
+- log_checkpoint(symbol, results, blocked_at) 记录完整 checkpoint
+
+实现类:
+- ConsoleCheckpointLogger    终端彩色输出
+- TracingCheckpointLogger    基于 tracing 结构化日志
+- CompositeCheckpointLogger  组合多个 logger
+
+
+6.3 Processor trait
+
+所有阶段处理器实现统一接口：
+
+pub trait Processor: Send + Sync {
+    fn process(&mut self, check_table: &mut CheckTable, tick: &Tick) -> StageResult;
+}
+
+StageResult:
+- stage: 环节名称
+- passed: 是否通过
+- details: 详细信息
+- blocked_reason: 失败原因
+
+
+6.4 核心引擎 TradingEngine
 
 整合所有模块的主引擎:
 
@@ -203,7 +258,7 @@ on_tick(tick):
     5. 日线完成时重新平衡策略
 
 
-6.2 通道切换 (VolatilityChannel)
+6.5 通道切换 (VolatilityChannel)
 
 根据波动率在两种通道间切换:
 
@@ -222,7 +277,7 @@ High通道 (高速)
     退出High: tr_ratio < 1 (波动率降低)
 
 
-6.3 信号合成层 (SignalSynthesisLayer)
+6.6 信号合成层 (SignalSynthesisLayer)
 
 综合多个信号源生成最终决策:
 
@@ -238,7 +293,7 @@ High通道 (高速)
 - 日线趋势退出: ma5_in_20d_pos < 0.5 + PineColor=Red
 
 
-6.4 风控体系
+6.7 风控体系
 
 三层风控:
 
@@ -260,7 +315,7 @@ High通道 (高速)
     - Full: 停止交易 (亏损40%)
 
 
-6.5 账户与持仓
+6.8 账户与持仓
 
 AccountPool (账户保证金池)
     - 总权益
@@ -280,7 +335,7 @@ PositionManager (持仓管理器)
     - 持仓方向
 
 
-6.6 订单处理
+6.9 订单处理
 
 OrderCheck (订单预占检查)
     - 预占保证金
@@ -299,7 +354,7 @@ MockBinanceGateway (模拟交易所)
     - 频率限制 (10次/秒)
 
 
-6.7 持久化
+6.10 持久化
 
 SqlitePersistence (SQLite持久化)
     6张表:
@@ -316,10 +371,56 @@ IndicatorCsvWriter
 
 
 ================================================================================
-七、核心业务流程
+七、事件驱动架构 (重要更新)
 ================================================================================
 
-7.1 初始化流程
+7.1 Tick驱动 vs 事件驱动
+
+Tick驱动的问题:
+- 100ms频率的K线推送，99%时间价格小幅震荡
+- 每个Tick都走完整Pipeline，浪费CPU
+- 数据可能被覆盖（下一个Tick来了，上一个还没处理完）
+
+事件驱动的优势:
+- 只有关键价格/指标触发才处理
+- 主线程极简，延迟低
+- 指标子线程后台计算，不阻塞主线程
+
+7.2 事件类型
+
+价格事件:
+- 价格触及均线（MA5/MA20交叉）
+- 价格突破前期高点/低点
+- 价格触及支撑/阻力位
+- 固定时间窗口（日线收盘、1小时收盘）
+
+指标事件:
+- Pine颜色变化（红->绿 或 绿->红）
+- RSI 超买/超卖
+- 波动率突破（TR 超过阈值）
+
+7.3 分层架构
+
+主线程（事件监听）
+    +-- 价格触发
+    +-- 简单条件判断 -> 快速通道下单
+    +-- 不满足则过滤
+
+Pipeline（守门员）
+    +-- 复杂场景进入
+    +-- 完整流程验证
+
+指标子线程（后台计算）
+    +-- 增量计算 EMA/RSI/Pine颜色
+    +-- 结果推送/存储
+    +-- 主线程需要时查询
+
+
+================================================================================
+八、核心业务流程
+================================================================================
+
+8.1 初始化流程
 
 1. 创建 TradingEngine
 2. 创建/连接 DataFeeder
@@ -328,7 +429,7 @@ IndicatorCsvWriter
 5. 分片订阅 K线 streams
 6. 启动后台监控任务
 
-7.2 正常交易流程
+8.2 正常交易流程
 
 1. 收到 Tick 数据
 2. DataFeeder 广播到各模块
@@ -344,7 +445,7 @@ IndicatorCsvWriter
    - 更新持仓
    - 记录事件
 
-7.3 高波动交易流程
+8.3 高波动交易流程
 
 1. 检测到 1m >= 3% 或 15m >= 13%
 2. 切换到 High 通道
@@ -354,7 +455,7 @@ IndicatorCsvWriter
 6. 波动降低时 (tr_ratio < 1) 切回 Slow
 
 
-7.4 日线重平衡流程
+8.4 日线重平衡流程
 
 1. 日线 K线完成
 2. 更新大周期指标
@@ -363,47 +464,70 @@ IndicatorCsvWriter
 
 
 ================================================================================
-八、技术特点
+九、技术特点
 ================================================================================
 
-8.1 高频路径无锁
+9.1 高频路径无锁
 
 - Tick 接收、指标更新、策略判断全部无锁
 - 锁仅用于下单和资金更新
 - 锁外预检所有风控条件
 
-8.2 增量计算 O(1)
+9.2 增量计算 O(1)
 
 - EMA、SMA、MACD 等指标增量计算
 - K线增量更新当前K线
 - 订单簿 O(log N) 更新
 
-8.3 混合持仓模式
+9.3 混合持仓模式
 
 - 资金池 RwLock 保护 (低频)
 - 策略持仓独立计算 (无锁)
 
-8.4 一轮编码机制
+9.4 一轮编码机制
 
 确保同一轮计算的一致性:
 - RoundGuard 生成唯一 round_id
 - RoundGuardScope RAII 管理
 
+9.5 Rust 异步模型
+
+- tokio::spawn        异步任务（轻量）
+- tokio::spawn_blocking 阻塞代码（CPU密集计算）
+- parking_lot::RwLock 线程间共享数据
+
 
 ================================================================================
-九、当前状态
+十、当前状态
 ================================================================================
 
 Phase 1-8, Phase A, Phase A.5 已完成
 
-市场数据层: DataFeeder, VolatilityDetector, OrderBook, SymbolRegistry, KlinePersistence
-指标层: EMA, RSI, PineColor, BigCycleCalculator, ZScore, Velocity
-策略层: PinStrategy, TrendStrategy, Signal
-引擎层: TradingEngine, VolatilityChannel, SignalSynthesisLayer, 风控体系
-持久化: SQLite, CSV
+市场数据层:
+- DataFeeder, VolatilityDetector, OrderBook, SymbolRegistry, KlinePersistence
 
-测试状态: 198 个测试全部通过
-编译状态: cargo check --all 通过
+指标层:
+- EMA, RSI, PineColor, BigCycleCalculator, ZScore, Velocity
+
+策略层:
+- PinStrategy, TrendStrategy, Signal
+
+引擎层:
+- TradingEngine, VolatilityChannel, SignalSynthesisLayer
+- Pipeline, CheckpointLogger, Processor trait
+- 风控体系 (RiskPreChecker, RiskReChecker, AccountPool)
+- 持久化 (SQLite, CSV)
+
+测试状态:
+- 138 个测试全部通过 (Pipeline 测试用例已完善)
+
+编译状态:
+- cargo check --all 通过
+
+架构决策记录:
+- 事件驱动优于 Tick 驱动（日线/分钟级策略）
+- Pipeline 作为守门员分层过滤
+- 指标子线程后台计算不阻塞主线程
 
 
 ================================================================================
