@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 为交易系统添加 Pipeline Checkpoint 日志系统，实时可视化数据流转过程，便于调试。
+**Goal:** 为交易系统添加 Pipeline Checkpoint 日志系统，使用 Pipeline 封装实现清晰的流程控制和调试日志。
 
 **Architecture:**
-- 定义 `CheckpointLogger` trait + `StageResult` 结构
-- 实现 `ConsoleCheckpointLogger`（终端彩色）+ `TracingCheckpointLogger`（结构化）
-- 在 `TradingEngine::on_tick()` 中集成 checkpoint 调用
-- Pipeline 任一环节失败时清晰显示 BLOCKED
+- 使用 Pipeline 对象封装完整的交易流程
+- CheckTable 作为数据存储在各 Processor 间传递
+- CheckpointLogger trait 实现日志输出（观察者模式）
+- 清晰的流程控制：任一环节失败则停止
 
-**Tech Stack:** tracing（已有）, chrono（已有）
+**Tech Stack:** tracing（已有）, chrono（已有）, rust_decimal（已有）
 
 ---
 
@@ -18,9 +18,10 @@
 
 ```
 crates/engine/src/
-├── checkpoint.rs          # 【新建】CheckpointLogger trait + StageResult + 实现
-├── engine.rs             # 【修改】集成 CheckpointLogger
-└── lib.rs               # 【修改】导出 checkpoint 模块
+├── pipeline.rs              # 【新建】Pipeline 封装 + Processor trait
+├── checkpoint.rs           # 【新建】CheckpointLogger trait + StageResult
+├── engine.rs              # 【修改】简化为持有 Pipeline
+└── lib.rs                 # 【修改】导出新模块
 ```
 
 ---
@@ -115,11 +116,7 @@ pub trait CheckpointLogger: Send + Sync {
     /// 记录完整 checkpoint（所有环节结果）
     fn log_checkpoint(&self, symbol: &str, results: &[StageResult], blocked_at: Option<Stage>);
 }
-```
 
-- [ ] **Step 2: 添加 ConsoleCheckpointLogger 实现**
-
-```rust
 /// 控制台彩色输出 CheckpointLogger
 pub struct ConsoleCheckpointLogger;
 
@@ -168,12 +165,6 @@ impl CheckpointLogger for ConsoleCheckpointLogger {
         }
     }
 }
-```
-
-- [ ] **Step 3: 添加 TracingCheckpointLogger 实现**
-
-```rust
-use tracing::{info, warn, error};
 
 /// 基于 tracing 的结构化日志 CheckpointLogger
 pub struct TracingCheckpointLogger;
@@ -192,15 +183,15 @@ impl Default for TracingCheckpointLogger {
 
 impl CheckpointLogger for TracingCheckpointLogger {
     fn log_start(&self, stage: Stage, symbol: &str) {
-        info!(stage = ?stage, symbol = symbol, "Pipeline stage started");
+        tracing::info!(stage = ?stage, symbol = symbol, "Pipeline stage started");
     }
 
     fn log_pass(&self, stage: Stage, symbol: &str, details: &str) {
-        info!(stage = ?stage, symbol = symbol, details = details, "Pipeline stage passed");
+        tracing::info!(stage = ?stage, symbol = symbol, details = details, "Pipeline stage passed");
     }
 
     fn log_blocked(&self, stage: Stage, symbol: &str, reason: &str) {
-        warn!(stage = ?stage, symbol = symbol, reason = reason, "Pipeline stage blocked");
+        tracing::warn!(stage = ?stage, symbol = symbol, reason = reason, "Pipeline stage blocked");
     }
 
     fn log_checkpoint(&self, symbol: &str, results: &[StageResult], blocked_at: Option<Stage>) {
@@ -213,14 +204,14 @@ impl CheckpointLogger for TracingCheckpointLogger {
         }).collect();
 
         if let Some(blocked) = blocked_at {
-            warn!(
+            tracing::warn!(
                 symbol = symbol,
                 stages = ?stages,
                 blocked_at = ?blocked,
                 "Pipeline blocked at stage"
             );
         } else {
-            info!(
+            tracing::info!(
                 symbol = symbol,
                 stages = ?stages,
                 "Pipeline completed successfully"
@@ -228,11 +219,7 @@ impl CheckpointLogger for TracingCheckpointLogger {
         }
     }
 }
-```
 
-- [ ] **Step 4: 添加复合 Logger 实现**
-
-```rust
 /// 组合多个 Logger
 pub struct CompositeCheckpointLogger {
     loggers: Vec<Box<dyn CheckpointLogger>>,
@@ -280,11 +267,7 @@ impl CheckpointLogger for CompositeCheckpointLogger {
         }
     }
 }
-```
 
-- [ ] **Step 5: 添加单元测试**
-
-```rust
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,7 +307,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 6: 更新 lib.rs 导出**
+- [ ] **Step 2: 更新 lib.rs 导出**
 
 ```rust
 // 在 lib.rs 添加
@@ -332,166 +315,313 @@ pub mod checkpoint;
 pub use checkpoint::{CheckpointLogger, Stage, StageResult};
 ```
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 3: 编译验证**
+
+```bash
+cd D:\Rust项目\barter-rs-main
+export PATH="/c/Users/char/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin:$PATH"
+export RUSTC="/c/Users/char/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin/rustc.exe"
+cargo check -p engine
+```
+
+- [ ] **Step 4: 提交**
 
 ```bash
 git add crates/engine/src/checkpoint.rs crates/engine/src/lib.rs
-git commit -m "feat(engine): 添加 Pipeline CheckpointLogger trait + 实现"
+git commit -m "feat(engine): 添加 Pipeline CheckpointLogger trait + StageResult"
 ```
 
 ---
 
-## Task 2: 在 TradingEngine 中集成 CheckpointLogger
+## Task 2: 创建 Pipeline 封装
 
 **Files:**
+- Create: `crates/engine/src/pipeline.rs`
 - Modify: `crates/engine/src/engine.rs`
+- Modify: `crates/engine/src/lib.rs` (添加导出)
 
-- [ ] **Step 1: 添加 checkpoint_logger 字段到 TradingEngine**
+- [ ] **Step 1: 创建 pipeline.rs 文件**
 
-在 `TradingEngine` 结构体中添加:
 ```rust
-use crate::checkpoint::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
+use crate::checkpoint::{CheckpointLogger, Stage, StageResult};
+use crate::check_table::CheckTable;
+use crate::error::EngineError;
+use market::types::Tick;
+use rust_decimal::Decimal;
+use strategy::types::{OrderRequest, Side, Signal};
+use std::sync::Arc;
 
-pub struct TradingEngine {
-    // ... 现有字段 ...
-
-    // Checkpoint 日志记录器
-    checkpoint_logger: Box<dyn CheckpointLogger>,
+/// Pipeline Processor trait - 所有阶段处理器都实现这个接口
+pub trait Processor: Send + Sync {
+    /// 处理 tick，返回阶段结果
+    fn process(&mut self, check_table: &mut CheckTable, tick: &Tick) -> StageResult;
 }
-```
 
-在 `TradingEngine::new()` 中添加初始化:
-```rust
-Self {
-    // ... 现有字段初始化 ...
-    checkpoint_logger: Box::new(ConsoleCheckpointLogger::new()),
+/// Pipeline - 封装完整的交易流程
+pub struct Pipeline {
+    /// CheckTable 数据存储
+    check_table: CheckTable,
+    /// Checkpoint 日志记录器
+    logger: Box<dyn CheckpointLogger>,
+    /// 指标处理器
+    indicator_processor: Box<dyn Processor>,
+    /// 策略处理器
+    strategy_processor: Box<dyn Processor>,
+    /// 风控处理器
+    risk_processor: Box<dyn Processor>,
+    /// 当前品种
+    symbol: String,
 }
-```
 
-- [ ] **Step 2: 在 on_tick 中集成 checkpoint 调用**
-
-修改 `on_tick` 方法:
-
-```rust
-pub async fn on_tick(&mut self, tick: &Tick) {
-    self.current_ts = tick.timestamp.timestamp();
-    self.current_price = tick.price;
-
-    // 收集所有阶段结果
-    let mut stage_results: Vec<StageResult> = Vec::new();
-    let mut blocked_at: Option<Stage> = None;
-
-    // 1. 更新 K线
-    let completed_1m = self.kline_1m.update(tick);
-    let completed_1d = self.kline_1d.update(tick);
-
-    // 2. 更新指标
-    let indicator_result = self.update_indicators(tick.price);
-    stage_results.push(indicator_result.clone());
-
-    if !indicator_result.passed {
-        blocked_at = Some(Stage::Indicator);
-        self.checkpoint_logger.log_checkpoint(&self.symbol, &stage_results, blocked_at);
-        return;
-    }
-
-    // 3. 风控预检 (锁外)
-    let risk_pre_result = self.pre_trade_check(tick);
-    stage_results.push(risk_pre_result.clone());
-
-    if !risk_pre_result.passed {
-        blocked_at = Some(Stage::RiskPre);
-        self.checkpoint_logger.log_checkpoint(&self.symbol, &stage_results, blocked_at);
-        return;
-    }
-
-    // 4. 如果有完成的 K线，生成信号
-    if let Some(kline) = completed_1m {
-        let signal_result = self.on_kline_completed(&kline);
-        stage_results.push(signal_result.clone());
-
-        if !signal_result.passed {
-            blocked_at = Some(Stage::Strategy);
-            self.checkpoint_logger.log_checkpoint(&self.symbol, &stage_results, blocked_at);
-            return;
+impl Pipeline {
+    /// 创建 Pipeline
+    pub fn new(
+        symbol: String,
+        logger: Box<dyn CheckpointLogger>,
+        indicator_processor: Box<dyn Processor>,
+        strategy_processor: Box<dyn Processor>,
+        risk_processor: Box<dyn Processor>,
+    ) -> Self {
+        Self {
+            check_table: CheckTable::new(),
+            logger,
+            indicator_processor,
+            strategy_processor,
+            risk_processor,
+            symbol,
         }
     }
 
-    // 5. 日线 K线完成处理
-    if let Some(kline) = completed_1d {
-        self.on_daily_kline_completed(&kline);
+    /// 处理单个 Tick - 明确的流程控制
+    pub fn process(&mut self, tick: &Tick) -> Option<OrderRequest> {
+        let mut stage_results: Vec<StageResult> = Vec::new();
+        let mut blocked_at: Option<Stage> = None;
+
+        // 1. 指标计算阶段
+        let indicator_result = self.indicator_processor.process(&mut self.check_table, tick);
+        self.logger.log_pass(Stage::Indicator, &self.symbol, &indicator_result.details);
+        stage_results.push(indicator_result.clone());
+
+        if !indicator_result.passed {
+            blocked_at = Some(Stage::Indicator);
+            self.logger.log_blocked(Stage::Indicator, &self.symbol,
+                indicator_result.blocked_reason.as_deref().unwrap_or("指标计算失败"));
+            self.logger.log_checkpoint(&self.symbol, &stage_results, blocked_at);
+            return None;
+        }
+
+        // 2. 策略判断阶段
+        let strategy_result = self.strategy_processor.process(&mut self.check_table, tick);
+        self.logger.log_pass(Stage::Strategy, &self.symbol, &strategy_result.details);
+        stage_results.push(strategy_result.clone());
+
+        if !strategy_result.passed {
+            blocked_at = Some(Stage::Strategy);
+            self.logger.log_blocked(Stage::Strategy, &self.symbol,
+                strategy_result.blocked_reason.as_deref().unwrap_or("策略判断失败"));
+            self.logger.log_checkpoint(&self.symbol, &stage_results, blocked_at);
+            return None;
+        }
+
+        // 3. 风控预检阶段
+        let risk_result = self.risk_processor.process(&mut self.check_table, tick);
+        self.logger.log_pass(Stage::RiskPre, &self.symbol, &risk_result.details);
+        stage_results.push(risk_result.clone());
+
+        if !risk_result.passed {
+            blocked_at = Some(Stage::RiskPre);
+            self.logger.log_blocked(Stage::RiskPre, &self.symbol,
+                risk_result.blocked_reason.as_deref().unwrap_or("风控预检失败"));
+            self.logger.log_checkpoint(&self.symbol, &stage_results, blocked_at);
+            return None;
+        }
+
+        // 4. 全部通过，获取交易决策
+        self.logger.log_checkpoint(&self.symbol, &stage_results, None);
+        self.build_order_request()
     }
 
-    // 6. 打印状态（原有日志保留）
-    self.print_status(tick);
+    /// 从 CheckTable 构建订单请求
+    fn build_order_request(&self) -> Option<OrderRequest> {
+        let entry = self.check_table.get(&self.symbol, "main", "1m")?;
 
-    // 7. 记录完整 checkpoint
-    self.checkpoint_logger.log_checkpoint(&self.symbol, &stage_results, None);
-}
-```
+        if !matches!(entry.final_signal, Signal::LongEntry | Signal::ShortEntry) {
+            return None;
+        }
 
-- [ ] **Step 3: 修改 update_indicators 返回 StageResult**
-
-```rust
-fn update_indicators(&mut self, price: Decimal) -> StageResult {
-    // 更新 EMA
-    let ema_f = self.ema_fast.update(price);
-    let ema_s = self.ema_slow.update(price);
-
-    // 更新 RSI
-    let rsi_value = self.rsi.update(ema_f - ema_s);
-
-    // 构建详情字符串
-    let details = format!(
-        "EMA12={} EMA26={} RSI={:.2}",
-        ema_f.round_dp(2),
-        ema_s.round_dp(2),
-        rsi_value.round_dp(2)
-    );
-
-    StageResult::pass(Stage::Indicator, details)
-}
-```
-
-- [ ] **Step 4: 修改 pre_trade_check 返回 StageResult**
-
-```rust
-fn pre_trade_check(&self, tick: &Tick) -> StageResult {
-    let order_value = tick.price * tick.qty;
-
-    // 检查账户是否可以交易
-    if !self.account_pool.can_trade(order_value) {
-        return StageResult::fail(Stage::RiskPre, "账户余额不足或熔断中");
+        Some(OrderRequest {
+            symbol: self.symbol.clone(),
+            side: match entry.final_signal {
+                Signal::LongEntry | Signal::LongHedge => Side::Long,
+                _ => Side::Short,
+            },
+            order_type: strategy::types::OrderType::Market,
+            price: Some(entry.target_price),
+            qty: entry.quantity,
+        })
     }
 
-    // 检查策略是否可以开仓
-    if !self.strategy_pool.can_open_position("main", order_value) {
-        return StageResult::fail(Stage::RiskPre, "策略资金池余额不足");
+    /// 获取 CheckTable 引用（只读）
+    pub fn check_table(&self) -> &CheckTable {
+        &self.check_table
     }
+}
 
-    StageResult::pass(Stage::RiskPre, "OK")
+/// 默认的指标处理器（实际实现应调用真实的指标计算）
+pub struct DefaultIndicatorProcessor {
+    // 这里会集成真实的 EMA、RSI 等指标
+}
+
+impl DefaultIndicatorProcessor {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Processor for DefaultIndicatorProcessor {
+    fn process(&self, check_table: &mut CheckTable, tick: &Tick) -> StageResult {
+        // TODO: 调用真实的指标计算
+        let details = format!(
+            "EMA12={:.2} EMA26={:.2} RSI={:.2}",
+            tick.price * dec!(0.99),  // 模拟值
+            tick.price,
+            dec!(50)
+        );
+        StageResult::pass(Stage::Indicator, details)
+    }
+}
+
+/// 默认的策略处理器
+pub struct DefaultStrategyProcessor;
+
+impl DefaultStrategyProcessor {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Processor for DefaultStrategyProcessor {
+    fn process(&self, check_table: &mut CheckTable, tick: &Tick) -> StageResult {
+        // TODO: 调用真实的策略判断
+        let details = format!("Signal=BUY confidence=80");
+        StageResult::pass(Stage::Strategy, details)
+    }
+}
+
+/// 默认的风控处理器
+pub struct DefaultRiskProcessor;
+
+impl DefaultRiskProcessor {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Processor for DefaultRiskProcessor {
+    fn process(&self, check_table: &mut CheckTable, tick: &Tick) -> StageResult {
+        // TODO: 调用真实的风控检查
+        StageResult::pass(Stage::RiskPre, "OK")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pipeline_basic() {
+        // 创建带 NoOp logger 的 Pipeline
+        struct NoOpLogger;
+        impl CheckpointLogger for NoOpLogger {
+            fn log_start(&self, _: Stage, _: &str) {}
+            fn log_pass(&self, _: Stage, _: &str, _: &str) {}
+            fn log_blocked(&self, _: Stage, _: &str, _: &str) {}
+            fn log_checkpoint(&self, _: &str, _: &[StageResult], _: Option<Stage>) {}
+        }
+
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger),
+            Box::new(DefaultIndicatorProcessor::new()),
+            Box::new(DefaultStrategyProcessor::new()),
+            Box::new(DefaultRiskProcessor::new()),
+        );
+
+        let tick = Tick {
+            symbol: "BTCUSDT".to_string(),
+            price: dec!(50000),
+            qty: dec!(1.0),
+            timestamp: chrono::Utc::now(),
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
+        };
+
+        // Pipeline.process() 应该返回 None（因为没有真实实现）
+        let result = pipeline.process(&tick);
+        // TODO: 真实实现后应该返回 Some(OrderRequest)
+        assert!(result.is_none());
+    }
 }
 ```
 
-- [ ] **Step 5: 修改 on_kline_completed 返回 StageResult**
+- [ ] **Step 2: 更新 lib.rs 导出**
 
 ```rust
-fn on_kline_completed(&mut self, kline: &market::types::KLine) -> StageResult {
-    // 构建信号详情
-    let details = format!(
-        "K线完成 close={} high={} low={}",
-        kline.close, kline.high, kline.low
-    );
+// 添加
+pub mod pipeline;
+pub use pipeline::{Pipeline, Processor};
+```
 
-    StageResult::pass(Stage::Strategy, details)
+- [ ] **Step 3: 简化 engine.rs 使用 Pipeline**
+
+在 `TradingEngine` 中持有 Pipeline：
+
+```rust
+pub struct TradingEngine {
+    // 替换原来的多个组件为一个 Pipeline
+    pipeline: Pipeline,
+    // ...
+}
+
+impl TradingEngine {
+    pub fn new(...) -> Self {
+        // 创建 Pipeline
+        let pipeline = Pipeline::new(
+            symbol.clone(),
+            Box::new(ConsoleCheckpointLogger::new()),
+            Box::new(DefaultIndicatorProcessor::new()),
+            Box::new(DefaultStrategyProcessor::new()),
+            Box::new(DefaultRiskProcessor::new()),
+        );
+
+        Self {
+            pipeline,
+            // ... 其他必要字段
+        }
+    }
+
+    pub async fn on_tick(&mut self, tick: &Tick) {
+        // 委托给 Pipeline 处理
+        if let Some(order) = self.pipeline.process(tick) {
+            // 执行订单
+            self.execute_order(order).await;
+        }
+    }
 }
 ```
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 4: 编译验证**
 
 ```bash
-git add crates/engine/src/engine.rs
-git commit -m "feat(engine): 集成 CheckpointLogger 到 on_tick 流程"
+cargo check -p engine
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add crates/engine/src/pipeline.rs crates/engine/src/engine.rs crates/engine/src/lib.rs
+git commit -m "feat(engine): 添加 Pipeline 封装，清晰的流程控制"
 ```
 
 ---
@@ -501,7 +631,6 @@ git commit -m "feat(engine): 集成 CheckpointLogger 到 on_tick 流程"
 - [ ] **Step 1: 运行 cargo check**
 
 ```bash
-cd D:\Rust项目\barter-rs-main
 export PATH="/c/Users/char/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin:$PATH"
 export RUSTC="/c/Users/char/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin/rustc.exe"
 cargo check --all
@@ -529,7 +658,7 @@ cargo run --bin data-printer --release
 
 ```bash
 git add -A
-git commit -m "test(engine): 验证 CheckpointLogger 集成"
+git commit -m "test(engine): 验证 Pipeline CheckpointLogger 集成"
 ```
 
 ---
@@ -541,6 +670,7 @@ git commit -m "test(engine): 验证 CheckpointLogger 集成"
 - [ ] 运行 `cargo run --release` 时能看到 checkpoint 日志
 - [ ] Pipeline 任一环节失败时，日志清晰显示 `✘ [BLOCKED]`
 - [ ] 日志格式统一，易于阅读
+- [ ] 代码结构清晰：Pipeline 封装 + Processor trait
 
 ---
 
