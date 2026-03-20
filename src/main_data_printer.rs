@@ -69,10 +69,10 @@ async fn print_trades(symbol: &str, batch_size: usize) -> Result<(), Box<dyn std
             if let Ok(trade) = serde_json::from_str::<TradeRaw>(&text) {
                 let time_str = parse_timestamp_short(trade.trade_time);
                 let side = if trade.is_buyer_maker { "SELL" } else { "BUY" };
-                let side_indicator = if trade.is_buyer_maker { "<<" } else { ">>";
+                let side_indicator = if trade.is_buyer_maker { "<<" } else { ">>" };
 
                 println!(
-                    "{} {:>12} | {:>12} | {:>12} | {} {}",
+                    "{} {:>12} | {:>12} | {:>12} | {}",
                     time_str, trade.price, trade.quantity, side_indicator, side
                 );
 
