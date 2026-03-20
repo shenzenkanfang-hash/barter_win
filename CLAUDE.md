@@ -130,7 +130,7 @@ src/
 | Phase 6: Integration | 完成 | TradingEngine, main.rs |
 | Phase 7: Enhancement | 完成 | RiskReChecker, PnlManager, MarketStatusDetector等 |
 | Phase A: 线程安全修复 | 完成 | parking_lot::RwLock 保护 |
-| Phase A.5 | 进行中 | FundPool → AccountPool 合并 |
+| Phase A.5: FundPool合并 | 完成 | AccountPool/PnlManager/OrderCheck/StrategyPool线程安全 |
 
 ================================================================================
 角色定位
