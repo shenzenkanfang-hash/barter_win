@@ -3,6 +3,7 @@
 //! 从币安获取1000根日线数据，使用分钟级指标计算，输出CSV进行对比验证
 
 use chrono::{DateTime, TimeZone, Utc};
+use engine::SymbolRules;
 use indicator::{BigCycleCalculator, EMA, PricePosition, RSI};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -20,49 +21,27 @@ struct BinanceKline {
     close_time: u64,
 }
 
-/// CSV 输出行
-#[derive(Debug)]
-struct CsvRow {
-    timestamp: i64,
-    parent_1m_ts: i64,
-    tick_index: i64,
-    open: Decimal,
-    high: Decimal,
-    low: Decimal,
-    close: Decimal,
-    volume: Decimal,
-    tr_ratio_5d_all: Decimal,
-    tr_ratio_5d_20d_rank_20d: Decimal,
-    tr_ratio_5d_20d: Decimal,
-    tr_base_5d: Decimal,
-    tr_ratio_20d_all: Decimal,
-    tr_ratio_20d_60d_rank_20d: Decimal,
-    tr_ratio_20d_60d: Decimal,
-    tr_base_20d: Decimal,
-    readable_time: String,
-    jerk_signal: Decimal,
-    top3_avg_amplitude_pct: Decimal,
-    pine_bar_color_20_50: String,
-    pine_bg_color_20_50: String,
-    pine_bar_color_100_200: String,
-    pine_bg_color_100_200: String,
-    pine_bar_color_12_26: String,
-    pine_bg_color_12_26: String,
-    real_time_tr_5d: Decimal,
-    real_time_tr_20d: Decimal,
-    ema_100_200_compare: String,
-    real_time_tr_ratio_5d_20d: Decimal,
-    real_time_tr_ratio_20d_60d: Decimal,
-    pos_norm_20: Decimal,
-    ma5_close_in_20d_ma5_pos: Decimal,
-    ma20_close_in_60d_ma20_pos: Decimal,
-    ma5_close_in_all_ma5_pos: Decimal,
-    ma20_close_in_all_ma20_pos: Decimal,
-    vel_percentile_d: Decimal,
-    acc_percentile_d: Decimal,
-    power: Decimal,
-    power_percentile_60d: Decimal,
-    strategy_calc_ts: i64,
+/// Pine颜色中文映射
+fn pine_color_to_cn(color: &str) -> String {
+    match color {
+        "PureGreen" => "纯绿".to_string(),
+        "LightGreen" => "浅绿".to_string(),
+        "PureRed" => "纯红".to_string(),
+        "LightRed" => "浅红".to_string(),
+        "Purple" => "紫色".to_string(),
+        "Neutral" => "中性".to_string(),
+        _ => color.to_string(),
+    }
+}
+
+/// EMA比较中文
+fn ema_compare_to_cn(compare: &str) -> &str {
+    match compare {
+        "above" => "上方",
+        "below" => "下方",
+        "equal" => "相等",
+        _ => compare,
+    }
 }
 
 /// 实时TR计算器
@@ -101,6 +80,26 @@ impl RealTimeTR {
         let sum: Decimal = self.history.iter().sum();
         sum / Decimal::from(self.history.len())
     }
+
+    /// 获取最新TR值
+    fn latest(&self) -> Decimal {
+        self.history.back().copied().unwrap_or(dec!(0))
+    }
+
+    /// 获取TR数组引用
+    fn history(&self) -> &VecDeque<Decimal> {
+        &self.history
+    }
+}
+
+/// TR排名百分位计算
+fn tr_rank_percentile(history: &VecDeque<Decimal>, current: Decimal) -> Decimal {
+    if history.is_empty() {
+        return dec!(50);
+    }
+    let len = history.len();
+    let rank = history.iter().filter(|&&x| x < current).count();
+    Decimal::from(rank) / Decimal::from(len) * dec!(100)
 }
 
 /// 速度百分位计算器
@@ -150,7 +149,7 @@ impl PowerCalculator {
         }
     }
 
-    fn update(&mut self, tr: Decimal) -> (Decimal, Decimal, Decimal, Decimal) {
+    fn update(&mut self, tr: Decimal) -> (Decimal, Decimal, Decimal, Decimal, Decimal, Decimal) {
         // Velocity: TR变化率
         let velocity = if let Some(prev) = self.tr_history.back() {
             if *prev > dec!(0) {
@@ -163,9 +162,9 @@ impl PowerCalculator {
         };
 
         // Acceleration: 速度变化率
-        let acceleration = if let Some(prev_vel) = self.velocity_history.back() {
-            if *prev_vel > dec!(0) {
-                (velocity - *prev_vel) / *prev_vel
+        let acceleration = if let Some(prev_vel) = self.velocity_history.back().copied() {
+            if prev_vel > dec!(0) {
+                (velocity - prev_vel) / prev_vel.abs()
             } else {
                 dec!(0)
             }
@@ -187,15 +186,15 @@ impl PowerCalculator {
             self.acc_history.pop_front();
         }
 
-        // Power = velocity * acceleration (简化)
+        // Power = velocity * acceleration
         let power = velocity * acceleration;
 
-        // Percentiles (简化计算)
+        // Percentiles
         let vel_pct = self.percentile(&self.velocity_history, velocity);
         let acc_pct = self.percentile(&self.acc_history, acceleration);
         let power_pct = self.percentile(&self.velocity_history, power);
 
-        (velocity, acceleration, power, power_pct)
+        (velocity, acceleration, power, vel_pct, acc_pct, power_pct)
     }
 
     fn percentile(&self, history: &VecDeque<Decimal>, value: Decimal) -> Decimal {
@@ -217,7 +216,7 @@ impl Default for PowerCalculator {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("============================================");
     println!("指标对比验证程序");
-    println!("从币安获取1000根日线，计算指标输出CSV");
+    println!("从币安获取日线数据，计算指标输出CSV");
     println!("============================================\n");
 
     // 获取命令行参数
@@ -231,6 +230,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("交易对: {}", symbol);
     println!("获取K线数量: {}\n", limit);
 
+    // 创建交易规则
+    let symbol_rules = SymbolRules::new(symbol.clone());
+    let price_precision = symbol_rules.price_precision;
+    let qty_precision = symbol_rules.quantity_precision;
+
     // 从币安API获取K线数据
     let url = format!(
         "https://api.binance.com/api/v3/klines?symbol={}&interval=1d&limit={}",
@@ -241,7 +245,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::new();
     let response = client.get(&url).send()?;
     let text = response.text()?;
-    let klines_raw: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| format!("JSON parse error: {}", e))?;
+    let klines_raw: Vec<serde_json::Value> = serde_json::from_str(&text)
+        .map_err(|e| format!("JSON解析错误: {}", e))?;
 
     // 解析K线数据
     let mut klines = Vec::new();
@@ -284,55 +289,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_path = format!("indicator_comparison_{}.csv", symbol.to_lowercase());
     let mut csv_content = String::new();
 
-    // CSV表头
-    csv_content.push_str(&format!(
-        "timestamp,parent_1m_ts,tick_index,open,high,low,volume,",
-    ));
-    csv_content.push_str(&format!(
-        "tr_ratio_5d_all,tr_ratio_5d_20d_rank_20d,tr_ratio_5d_20d,tr_base_5d,",
-    ));
-    csv_content.push_str(&format!(
-        "tr_ratio_20d_all,tr_ratio_20d_60d_rank_20d,tr_ratio_20d_60d,tr_base_20d,",
-    ));
-    csv_content.push_str(&format!(
-        "readable_time,jerk_signal,top3_avg_amplitude_pct,",
-    ));
-    csv_content.push_str(&format!(
-        "pine_bar_color_20_50,pine_bg_color_20_50,",
-    ));
-    csv_content.push_str(&format!(
-        "pine_bar_color_100_200,pine_bg_color_100_200,",
-    ));
-    csv_content.push_str(&format!(
-        "pine_bar_color_12_26,pine_bg_color_12_26,",
-    ));
-    csv_content.push_str(&format!(
-        "real_time_tr_5d,real_time_tr_20d,ema_100_200_compare,",
-    ));
-    csv_content.push_str(&format!(
-        "real_time_tr_ratio_5d_20d,real_time_tr_ratio_20d_60d,",
-    ));
-    csv_content.push_str(&format!(
-        "pos_norm_20,ma5_close_in_20d_ma5_pos,ma20_close_in_60d_ma20_pos,",
-    ));
-    csv_content.push_str(&format!(
-        "ma5_close_in_all_ma5_pos,ma20_close_in_all_ma20_pos,",
-    ));
-    csv_content.push_str(&format!(
-        "vel_percentile_d,acc_percentile_d,power,power_percentile_60d,",
-    ));
-    csv_content.push_str("strategy_calc_ts\n");
+    // CSV表头 (中文)
+    csv_content.push_str("时间戳,父级1m时间戳,Tick索引,开盘价,最高价,最低价,收盘价,成交量,");
+    csv_content.push_str("TR比率5日全量,TR比率5日20日排名20日,TR比率5日20D,TR基准5日,");
+    csv_content.push_str("TR比率20日全量,TR比率20日60日排名20日,TR比率20日60D,TR基准20日,");
+    csv_content.push_str("可读时间,加加速度信号,Top3平均振幅百分比,");
+    csv_content.push_str("松林颜色20_50柱,松林颜色20_50背景,");
+    csv_content.push_str("松林颜色100_200柱,松林颜色100_200背景,");
+    csv_content.push_str("松林颜色12_26柱,松林颜色12_26背景,");
+    csv_content.push_str("实时TR5日,实时TR20日,EMA100对比EMA200,");
+    csv_content.push_str("实时TR比率5日20日,实时TR比率20日60日,");
+    csv_content.push_str("20日位置归一化,MA5在20日MA5位置,MA20在60日MA20位置,");
+    csv_content.push_str("MA5在全部MA5位置,MA20在全部MA20位置,");
+    csv_content.push_str("速度百分位日,加速度百分位日,功率,功率百分位60日,");
+    csv_content.push_str("策略计算时间戳\n");
 
     let mut prev_close = None;
     let mut tick_index = 0i64;
 
+    // TR历史用于排名计算
+    let mut tr_5d_all_history: VecDeque<Decimal> = VecDeque::new();
+    let mut tr_20d_all_history: VecDeque<Decimal> = VecDeque::new();
+
     for kline in &klines {
         let open_time = kline.open_time as i64;
-        let open = parse_decimal(&kline.open);
-        let high = parse_decimal(&kline.high);
-        let low = parse_decimal(&kline.low);
-        let close = parse_decimal(&kline.close);
-        let volume = parse_decimal(&kline.volume);
+
+        // 使用交易规则解析价格精度
+        let open = round_price(parse_decimal(&kline.open), price_precision);
+        let high = round_price(parse_decimal(&kline.high), price_precision);
+        let low = round_price(parse_decimal(&kline.low), price_precision);
+        let close = round_price(parse_decimal(&kline.close), price_precision);
+        let volume = round_qty(parse_decimal(&kline.volume), qty_precision);
 
         let readable_time = Utc.timestamp_millis_opt(open_time)
             .single()
@@ -347,14 +334,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(prev) = prev_close {
             real_time_tr_5d.update(high, low, close, prev);
             real_time_tr_20d.update(high, low, close, prev);
+
+            // 更新TR历史
+            let current_tr = RealTimeTR::calculate_tr(high, low, close, prev);
+            tr_5d_all_history.push_back(current_tr);
+            if tr_5d_all_history.len() > 100 {
+                tr_5d_all_history.pop_front();
+            }
+
+            let tr_20d_val = (high - low) / prev;
+            tr_20d_all_history.push_back(tr_20d_val);
+            if tr_20d_all_history.len() > 100 {
+                tr_20d_all_history.pop_front();
+            }
         }
         prev_close = Some(close);
+
+        // 计算TR排名
+        let tr_5d_latest = real_time_tr_5d.latest();
+        let tr_ratio_5d_all = tr_rank_percentile(&tr_5d_all_history, tr_5d_latest);
+
+        // tr_ratio_5d_20d_rank_20d: 需要20日TR历史用于排名
+        let tr_ratio_5d_20d_rank_20d = if real_time_tr_20d.history().len() >= 20 {
+            tr_rank_percentile(real_time_tr_20d.history(), tr_5d_latest)
+        } else {
+            dec!(0)
+        };
+
+        // TR 20d 排名
+        let tr_20d_latest = real_time_tr_20d.latest();
+        let tr_ratio_20d_all = tr_rank_percentile(&tr_20d_all_history, tr_20d_latest);
+
+        // tr_ratio_20d_60d_rank_20d: 需要60日TR历史，但我们只有20日
+        let tr_ratio_20d_60d_rank_20d = dec!(0); // 简化
 
         // 计算实时TR比率
         let rt_tr_5d_avg = real_time_tr_5d.avg();
         let rt_tr_20d_avg = real_time_tr_20d.avg();
         let rt_tr_ratio_5d_20d = if rt_tr_20d_avg > dec!(0) {
-            real_time_tr_20d.history.back().copied().unwrap_or(dec!(0)) / rt_tr_20d_avg
+            tr_5d_latest / rt_tr_20d_avg
         } else {
             dec!(0)
         };
@@ -365,21 +383,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // 速度百分位
-        let rt_tr = real_time_tr_20d.history.back().copied().unwrap_or(dec!(0));
-        let vel_pct = vel_percentile.update(rt_tr);
+        let vel_pct = vel_percentile.update(tr_20d_latest);
 
         // 功率计算
-        let (velocity, acceleration, power, power_pct) = power_calc.update(rt_tr);
+        let (_velocity, acceleration, power, _vel_pct, _acc_pct, power_pct) = power_calc.update(tr_20d_latest);
 
         // EMA比较
         let ema_100_val = ema_100.calculate(close);
         let ema_200_val = ema_200.calculate(close);
         let ema_compare = if ema_100_val > ema_200_val {
-            "above".to_string()
+            "上方"
         } else if ema_100_val < ema_200_val {
-            "below".to_string()
+            "下方"
         } else {
-            "equal".to_string()
+            "相等"
         };
 
         // RSI和PricePosition
@@ -389,34 +406,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 获取大周期指标
         let indicators = big_cycle.calculate(high, low, close);
 
-        // PineColor字符串
-        let pine_bar_20_50 = format!("{:?}", indicators.pine_color_20_50);
-        let pine_bg_20_50 = format!("{:?}", indicators.pine_color_20_50);
-        let pine_bar_100_200 = format!("{:?}", indicators.pine_color_100_200);
-        let pine_bg_100_200 = format!("{:?}", indicators.pine_color_100_200);
-        let pine_bar_12_26 = format!("{:?}", indicators.pine_color_12_26);
-        let pine_bg_12_26 = format!("{:?}", indicators.pine_color_12_26);
+        // PineColor字符串 (中文)
+        let pine_bar_20_50 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_20_50));
+        let pine_bg_20_50 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_20_50));
+        let pine_bar_100_200 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_100_200));
+        let pine_bg_100_200 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_100_200));
+        let pine_bar_12_26 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_12_26));
+        let pine_bg_12_26 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_12_26));
 
-        // 简化的jerk_signal和top3_avg_amplitude_pct
+        // jerk_signal 和 top3_avg_amplitude_pct
         let jerk_signal = acceleration;
         let top3_avg_amplitude_pct = dec!(0); // 简化
 
-        // ma5_in_all_ma5_pos (简化)
+        // ma5_in_all_ma5_pos
         let ma5_in_all_ma5_pos = indicators.ma5_in_20d_ma5_pos;
         let ma20_in_all_ma20_pos = indicators.ma20_in_60d_ma20_pos;
 
         // 写入CSV行
         csv_content.push_str(&format!(
-            "{},{},{},{},{},{},{},",
-            open_time, 0, tick_index, open, high, low, close,
+            "{},{},{},{},{},{},{},{},",
+            open_time, 0, tick_index, open, high, low, close, volume,
         ));
         csv_content.push_str(&format!(
             "{},{},{},{},",
-            dec!(0), dec!(0), indicators.tr_ratio_5d_20d, big_cycle.tr_5d_avg(),
+            tr_ratio_5d_all, tr_ratio_5d_20d_rank_20d, indicators.tr_ratio_5d_20d, big_cycle.tr_5d_avg(),
         ));
         csv_content.push_str(&format!(
             "{},{},{},{},",
-            dec!(0), dec!(0), indicators.tr_ratio_20d_60d, big_cycle.tr_20d_avg(),
+            tr_ratio_20d_all, tr_ratio_20d_60d_rank_20d, indicators.tr_ratio_20d_60d, big_cycle.tr_20d_avg(),
         ));
         csv_content.push_str(&format!(
             "{},{},{},",
@@ -461,6 +478,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n============================================");
     println!("CSV文件已生成: {}", output_path);
     println!("共 {} 条记录", tick_index);
+    println!("价格精度: {} 位小数", price_precision);
+    println!("数量精度: {} 位小数", qty_precision);
     println!("============================================");
 
     Ok(())
@@ -468,4 +487,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn parse_decimal(s: &str) -> Decimal {
     s.parse().unwrap_or(dec!(0))
+}
+
+/// 按精度四舍五入价格
+fn round_price(price: Decimal, precision: u8) -> Decimal {
+    price.round_dp(precision as u32)
+}
+
+/// 按精度四舍五入数量
+fn round_qty(qty: Decimal, precision: u8) -> Decimal {
+    qty.round_dp(precision as u32)
 }
