@@ -4,6 +4,8 @@ author: 工作流程优化器 (Workflow Optimizer)
 created: 2026-03-20
 updated: 2026-03-20
 role: 工作流程优化器
+related_docs:
+  - docs/2026-03-20-module-deep-analysis.md
 ---
 
 ================================================================================
@@ -684,10 +686,150 @@ impl SymbolPipeline {
 | 性能开销 | < 0.1ms |
 
 ================================================================================
-第四部分：风险评估
+第四部分：模块问题清单
 ================================================================================
 
-4.1 风险矩阵
+本文档第三部分的模块深度分析报告发现了以下具体问题，按优先级整理。
+
+4.1 P0 - 线程安全问题 (致命)
+--------------------------------------------------------------------------------
+
+| 模块 | 文件 | 问题 | 风险等级 |
+|------|------|------|----------|
+| AccountPool | engine/src/account_pool.rs | 无锁保护 can_trade/freeze/update_equity | 🔴 致命 |
+| StrategyPool | engine/src/strategy_pool.rs | reserve_margin 非原子操作 | 🔴 致命 |
+| OrderCheck | engine/src/order_check.rs | reservations HashMap 并发写入 | 🔴 致命 |
+| PnlManager | engine/src/pnl_manager.rs | unrealized_pnl HashMap 并发写入 | 🔴 致命 |
+| PositionManager | engine/src/position_manager.rs | 多字段复合操作非原子 | 🔴 致命 |
+| CheckTable | engine/src/check_table.rs | 多线程写入同一 HashMap | 🟡 中等 |
+
+#### 问题详解
+
+**AccountPool freeze 竞态**:
+```
+T1: 线程A 调用 freeze(1000)
+T2: 线程A 检查 available >= 1000 ✅
+T3: 线程B 调用 freeze(2000)
+T4: 线程B 检查 available >= 2000 ✅ (基于A的旧值!)
+T5: 线程A available -= 1000
+T6: 线程B available -= 2000
+结果: 总共扣减 3000，但初始值可能只有 2000
+```
+
+**StrategyPool reserve_margin 竞态**:
+```
+当前: get_mut → 检查 → 修改 非原子
+风险: 并发调用可能导致超额预占
+```
+
+--------------------------------------------------------------------------------
+
+4.2 P1 - 算法正确性问题
+--------------------------------------------------------------------------------
+
+| 模块 | 文件 | 问题 | 严重程度 |
+|------|------|------|----------|
+| RSI | indicator/src/rsi.rs | 非标准 Wilder 平滑算法 | 🔴 高 |
+| EMA | indicator/src/ema.rs | 初始值直接赋值，非 SMA | 🟡 中 |
+| PineColor | indicator/src/pine_color.rs | 阈值硬编码 70/30 | 🟢 低 |
+
+#### RSI 算法问题详解
+
+**当前实现 (第1次)**:
+```rust
+if self.avg_loss.is_zero() {
+    self.avg_gain = gain;  // ❌ 直接赋值
+    self.avg_loss = loss;
+}
+```
+
+**标准 RSI (Wilder平滑)**:
+```rust
+// 第1次: 使用 SMA 初始化
+avg_gain = sum(gains[0:period]) / period
+avg_loss = sum(losses[0:period]) / period
+
+// 第N次:
+avg = (avg_prev * (period-1) + current) / period
+```
+
+**影响**: 启动阶段 RSI 值不准确，可能导致错误交易信号。
+
+--------------------------------------------------------------------------------
+
+4.3 P2 - 性能问题
+--------------------------------------------------------------------------------
+
+| 模块 | 文件 | 问题 | 影响 |
+|------|------|------|------|
+| KLineSynthesizer | market/src/kline.rs | clone 返回值 | 内存分配开销 |
+| PnlManager | engine/src/pnl_manager.rs | Vec.contains O(n) | 品种多时变慢 |
+| engine.rs | engine/src/engine.rs | 串行 on_tick | CPU 利用率低 |
+
+#### KLineSynthesizer clone 问题
+
+```rust
+// 当前: 每次K线完成都克隆
+Some(kline) => {
+    let completed = kline.clone();  // 🔴 克隆开销
+    self.current = Some(self.new_kline(tick, kline_timestamp));
+    Some(completed)
+}
+```
+
+**优化**: 返回引用 `Option<&KLine>` 或使用 `std::mem::replace`
+
+#### PnlManager Vec 问题
+
+```rust
+// 当前: O(n) 遍历
+pub fn is_low_volatility(&self, symbol: &str) -> bool {
+    self.low_volatility_symbols.contains(&symbol.to_string())  // Vec: O(n)
+}
+
+// 优化: O(1)
+low_volatility_symbols: HashSet<String>,  // HashSet: O(1)
+```
+
+--------------------------------------------------------------------------------
+
+4.4 P3 - 设计实现差异
+--------------------------------------------------------------------------------
+
+| 设计承诺 | 实际实现 | 差异 |
+|----------|----------|------|
+| AccountPool (熔断) | FundPool (无熔断) | types.rs vs account_pool.rs 两套设计 |
+| PipelineForm | 直接传参 | 数据流无表单 |
+| 双通道架构 | 单通道串行 | 未实现 |
+| Lua 脚本预占 | 接口存在但未实现 | order_check.rs |
+
+#### AccountPool vs FundPool
+
+**types.rs FundPool**:
+```rust
+pub struct FundPool {
+    pub total_equity: Decimal,
+    pub available: Decimal,
+    pub positions_value: Decimal,
+}
+```
+
+**engine/account_pool.rs AccountPool**:
+```rust
+pub struct AccountPool {
+    account: RwLock<AccountInfo>,  // 有熔断状态
+    circuit_threshold: Decimal,
+    // ...
+}
+```
+
+**问题**: 两套设计，功能重叠，应统一。
+
+================================================================================
+第五部分：风险评估
+================================================================================
+
+5.1 风险矩阵
 --------------------------------------------------------------------------------
 
 | 风险 | 概率 | 影响 | 缓解措施 |
@@ -695,8 +837,9 @@ impl SymbolPipeline {
 | Phase A 死锁 | 中 | 高 | 单锁设计，避免嵌套 |
 | Phase B 内存爆炸 | 低 | 高 | Channel 背压控制 |
 | Phase C 性能开销 | 低 | 低 | 增量实现，按需启用 |
+| 修复 RSI 算法 | 低 | 中 | 添加校准期 |
 
-4.2 回滚计划
+5.2 回滚计划
 --------------------------------------------------------------------------------
 
 | Phase | 回滚方案 |
@@ -704,6 +847,43 @@ impl SymbolPipeline {
 | Phase A | 注释掉 RwLock，恢复无锁版本 |
 | Phase B | 恢复单品种模式 |
 | Phase C | 保持原参数传递 |
+| RSI 修复 | 使用特征标记过渡期 |
+
+================================================================================
+第六部分：详细改动清单
+================================================================================
+
+6.1 Phase A 改动清单
+--------------------------------------------------------------------------------
+
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| engine/src/account_pool.rs | 添加 RwLock<AccountInfo> | 低 |
+| engine/src/strategy_pool.rs | 添加 RwLock<allocations> | 低 |
+| engine/src/order_check.rs | 添加 RwLock<reservations> | 低 |
+| engine/src/pnl_manager.rs | Vec → HashSet，添加 RwLock | 低 |
+| engine/src/position_manager.rs | 添加 RwLock | 中 |
+| engine/src/check_table.rs | 添加 RwLock | 低 |
+| engine/src/engine.rs | 锁协调逻辑 | 中 |
+
+6.2 Phase B 改动清单
+--------------------------------------------------------------------------------
+
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| engine/src/symbol_pipeline.rs | 新建，提取品种逻辑 | 中 |
+| engine/src/orchestrator.rs | 新建，多品种编排 | 中 |
+| engine/src/engine.rs | 改为使用 Orchestrator | 高 |
+
+6.3 Phase C 改动清单
+--------------------------------------------------------------------------------
+
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| engine/src/pipeline_form.rs | 新建，定义表单结构 | 低 |
+| engine/src/stage_handler.rs | 新建，trait 定义 | 低 |
+| engine/src/indicator_stage.rs | 新建，指标处理 | 低 |
+| engine/src/strategy_stage.rs | 新建，策略处理 | 低 |
 
 ================================================================================
 总结
@@ -717,11 +897,28 @@ impl SymbolPipeline {
 
 建议按 P0 → P1 → P2 顺序实施，每个 Phase 独立验收。
 
+## 关键发现
+
+| 类别 | 问题数 | 致命问题 |
+|------|--------|----------|
+| P0 线程安全 | 6 | 6 |
+| P1 算法正确性 | 3 | 1 |
+| P2 性能 | 3 | 0 |
+| P3 设计差异 | 4 | 0 |
+
+## 下一步
+
+1. 评审本优化建议文档
+2. 确认修复优先级
+3. 开始 Phase A: 线程安全修复
+
 ================================================================================
 文档信息
 ================================================================================
 
 作者: 工作流程优化器 (Workflow Optimizer)
 创建日期: 2026-03-20
+更新日期: 2026-03-20
 文档状态: 待评审
+相关文档: docs/2026-03-20-module-deep-analysis.md
 下一步: 提交给架构师评审
