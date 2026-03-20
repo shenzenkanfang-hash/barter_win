@@ -677,7 +677,479 @@ impl EventRecorder for SqliteEventRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal_macros::dec;
+    use tempfile::TempDir;
+
+    // =========================================================================
+    // E5.1 SqliteRecordService 单元测试
+    // =========================================================================
+
+    #[test]
+    fn test_service_creation_and_table_init() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_events.db");
+
+        let service = SqliteRecordService::new(db_path.clone()).unwrap();
+
+        // 验证数据库文件已创建
+        assert!(db_path.exists(), "数据库文件应该被创建");
+
+        // 验证 6 张表已创建
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+
+        let tables = vec![
+            "account_snapshots",
+            "exchange_positions",
+            "local_positions",
+            "channel_events",
+            "risk_events",
+            "indicator_events",
+        ];
+
+        for table_name in tables {
+            let count: i32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    params![table_name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "表 {} 应该被创建", table_name);
+        }
+
+        // 验证索引也已创建
+        let index_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index_count, 6, "应该有 6 个索引");
+    }
+
+    #[test]
+    fn test_save_and_get_account_snapshot() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_account.db");
+
+        let service = SqliteRecordService::new(db_path.clone()).unwrap();
+
+        // 保存账户快照
+        let record = AccountSnapshotRecord {
+            id: None,
+            ts: 1710931200,
+            account_id: "test_account".to_string(),
+            total_equity: "100000.0".to_string(),
+            available: "95000.0".to_string(),
+            frozen_margin: "5000.0".to_string(),
+            unrealized_pnl: "0.0".to_string(),
+            margin_ratio: "0.05".to_string(),
+        };
+
+        let id = service.save_account_snapshot(record.clone()).unwrap();
+        assert!(id > 0, "插入应该返回有效的 ID");
+
+        // 查询账户快照
+        let retrieved = service.get_latest_account_snapshot("test_account").unwrap();
+        assert!(retrieved.is_some(), "应该能查询到账户快照");
+
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.account_id, "test_account");
+        assert_eq!(retrieved.total_equity, "100000.0");
+        assert_eq!(retrieved.available, "95000.0");
+        assert_eq!(retrieved.frozen_margin, "5000.0");
+    }
+
+    #[test]
+    fn test_save_and_get_channel_event() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_channel.db");
+
+        let service = SqliteRecordService::new(db_path.clone()).unwrap();
+
+        // 保存通道事件
+        let record = ChannelEventRecord {
+            id: None,
+            ts: 1710931200,
+            event: "SLOW_TO_FAST".to_string(),
+            from_channel: "Slow".to_string(),
+            to_channel: "Fast".to_string(),
+            tr_ratio: "1.5".to_string(),
+            ma5_in_20d_pos: "0.7".to_string(),
+            pine_color: "Green".to_string(),
+            details: "High volatility detected".to_string(),
+        };
+
+        let id = service.save_channel_event(record.clone()).unwrap();
+        assert!(id > 0, "插入应该返回有效的 ID");
+
+        // 查询通道事件
+        let retrieved = service.get_latest_channel_event().unwrap();
+        assert!(retrieved.is_some(), "应该能查询到通道事件");
+
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.event, "SLOW_TO_FAST");
+        assert_eq!(retrieved.from_channel, "Slow");
+        assert_eq!(retrieved.to_channel, "Fast");
+        assert_eq!(retrieved.tr_ratio, "1.5");
+    }
+
+    #[test]
+    fn test_save_and_get_risk_event() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_risk.db");
+
+        let service = SqliteRecordService::new(db_path.clone()).unwrap();
+
+        // 保存风控事件
+        let record = RiskEventRecord {
+            id: None,
+            ts: 1710931200,
+            event_type: "REJECT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            order_id: "ORDER_001".to_string(),
+            reason: "Insufficient margin".to_string(),
+            available_before: "1000.0".to_string(),
+            margin_ratio_before: "0.15".to_string(),
+            action_taken: "Order rejected".to_string(),
+            details: "Margin ratio below minimum".to_string(),
+        };
+
+        let id = service.save_risk_event(record.clone()).unwrap();
+        assert!(id > 0, "插入应该返回有效的 ID");
+
+        // 查询所有风控事件
+        let events = service.get_all_risk_events().unwrap();
+        assert_eq!(events.len(), 1, "应该只有 1 条风控事件");
+
+        let retrieved = &events[0];
+        assert_eq!(retrieved.event_type, "REJECT");
+        assert_eq!(retrieved.symbol, "BTCUSDT");
+        assert_eq!(retrieved.order_id, "ORDER_001");
+        assert_eq!(retrieved.reason, "Insufficient margin");
+    }
+
+    #[test]
+    fn test_multiple_records_ordering() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_ordering.db");
+
+        let service = SqliteRecordService::new(db_path.clone()).unwrap();
+
+        // 按不同时间戳保存多个账户快照
+        let timestamps = vec![1710931200, 1710931300, 1710931400, 1710931500];
+
+        for (i, ts) in timestamps.iter().enumerate() {
+            let record = AccountSnapshotRecord {
+                id: None,
+                ts: *ts,
+                account_id: "test_account".to_string(),
+                total_equity: format!("{}", 100000.0 + i as f64 * 100.0),
+                available: "95000.0".to_string(),
+                frozen_margin: "5000.0".to_string(),
+                unrealized_pnl: "0.0".to_string(),
+                margin_ratio: "0.05".to_string(),
+            };
+            service.save_account_snapshot(record).unwrap();
+        }
+
+        // 查询最新的账户快照（应该按时间倒序）
+        let retrieved = service.get_latest_account_snapshot("test_account").unwrap();
+        assert!(retrieved.is_some(), "应该能查询到账户快照");
+
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.ts, 1710931500, "最新记录的时间戳应该是 1710931500");
+        assert_eq!(retrieved.total_equity, "100003.0", "最新记录的 equity 应该是 100003.0");
+    }
+
+    // =========================================================================
+    // E5.2 IndicatorCsvWriter 单元测试
+    // =========================================================================
+
+    #[test]
+    fn test_csv_writer_creates_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("indicators.csv");
+
+        let writer = IndicatorCsvWriter::new(csv_path.clone()).unwrap();
+
+        // 验证文件已创建
+        assert!(csv_path.exists(), "CSV 文件应该被创建");
+
+        // 验证文件路径正确
+        assert_eq!(writer.file_path(), &csv_path);
+
+        // 验证 CSV 头部已写入
+        let content = std::fs::read_to_string(&csv_path).unwrap();
+        let expected_header = "timestamp,symbol,tr_ratio_5d_20d,tr_ratio_20d_60d,pos_norm_20,ma5_in_20d_pos,ma20_in_60d_pos,pine_color_20_50,pine_color_100_200,pine_color_12_26,vel_percentile,acc_percentile,power,channel_type\n";
+        assert_eq!(content, expected_header, "CSV 头部应该正确");
+    }
+
+    #[test]
+    fn test_csv_writer_write_row() {
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("indicators.csv");
+
+        let writer = IndicatorCsvWriter::new(csv_path.clone()).unwrap();
+
+        // 写入一行数据
+        let row = IndicatorComparisonRow {
+            timestamp: 1710931200,
+            symbol: "BTCUSDT".to_string(),
+            tr_ratio_5d_20d: "1.5".to_string(),
+            tr_ratio_20d_60d: "1.2".to_string(),
+            pos_norm_20: "0.6".to_string(),
+            ma5_in_20d_pos: "0.7".to_string(),
+            ma20_in_60d_pos: "0.5".to_string(),
+            pine_color_20_50: "Green".to_string(),
+            pine_color_100_200: "Green".to_string(),
+            pine_color_12_26: "Red".to_string(),
+            vel_percentile: "0.8".to_string(),
+            acc_percentile: "0.75".to_string(),
+            power: "0.65".to_string(),
+            channel_type: "Fast".to_string(),
+        };
+
+        writer.write_row(&row).unwrap();
+
+        // 验证 CSV 内容
+        let content = std::fs::read_to_string(&csv_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "应该有两行：头部 + 1行数据");
+
+        let data_line = lines[1];
+        assert!(data_line.starts_with("1710931200,BTCUSDT,"), "数据行应该以 timestamp 和 symbol 开头");
+        assert!(data_line.ends_with(",Fast"), "数据行应该以 channel_type 结尾");
+    }
+
+    #[test]
+    fn test_csv_writer_multiple_rows() {
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("indicators.csv");
+
+        let writer = IndicatorCsvWriter::new(csv_path.clone()).unwrap();
+
+        // 写入多行数据
+        for i in 0..5 {
+            let row = IndicatorComparisonRow {
+                timestamp: 1710931200 + i * 60,
+                symbol: "BTCUSDT".to_string(),
+                tr_ratio_5d_20d: format!("1.{}", i),
+                tr_ratio_20d_60d: "1.2".to_string(),
+                pos_norm_20: "0.6".to_string(),
+                ma5_in_20d_pos: "0.7".to_string(),
+                ma20_in_60d_pos: "0.5".to_string(),
+                pine_color_20_50: "Green".to_string(),
+                pine_color_100_200: "Green".to_string(),
+                pine_color_12_26: "Red".to_string(),
+                vel_percentile: "0.8".to_string(),
+                acc_percentile: "0.75".to_string(),
+                power: "0.65".to_string(),
+                channel_type: "Fast".to_string(),
+            };
+            writer.write_row(&row).unwrap();
+        }
+
+        // 验证 CSV 内容
+        let content = std::fs::read_to_string(&csv_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 6, "应该有 6 行：头部 + 5行数据");
+    }
+
+    #[test]
+    fn test_csv_writer_content() {
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("indicators.csv");
+
+        let writer = IndicatorCsvWriter::new(csv_path.clone()).unwrap();
+
+        // 写入一行完整数据
+        let row = IndicatorComparisonRow {
+            timestamp: 1710931200,
+            symbol: "ETHUSDT".to_string(),
+            tr_ratio_5d_20d: "2.1".to_string(),
+            tr_ratio_20d_60d: "1.8".to_string(),
+            pos_norm_20: "0.45".to_string(),
+            ma5_in_20d_pos: "0.55".to_string(),
+            ma20_in_60d_pos: "0.62".to_string(),
+            pine_color_20_50: "Red".to_string(),
+            pine_color_100_200: "Red".to_string(),
+            pine_color_12_26: "Green".to_string(),
+            vel_percentile: "0.92".to_string(),
+            acc_percentile: "0.88".to_string(),
+            power: "0.78".to_string(),
+            channel_type: "Slow".to_string(),
+        };
+
+        writer.write_row(&row).unwrap();
+
+        // 验证 CSV 内容正确
+        let content = std::fs::read_to_string(&csv_path).unwrap();
+
+        // 检查头部
+        assert!(content.contains("timestamp,symbol,tr_ratio_5d_20d,tr_ratio_20d_60d"));
+
+        // 检查数据行
+        assert!(content.contains("1710931200,ETHUSDT,2.1,1.8,0.45,0.55,0.62,Red,Red,Green,0.92,0.88,0.78,Slow"));
+    }
+
+    // =========================================================================
+    // E5.3 EventRecorder trait 集成测试
+    // =========================================================================
+
+    #[test]
+    fn test_noop_event_recorder() {
+        let recorder = NoOpEventRecorder;
+
+        // NoOpEventRecorder 不记录任何数据，所以这些调用不应该panic
+        recorder.record_account_snapshot(AccountSnapshotRecord {
+            id: None,
+            ts: 1710931200,
+            account_id: "test".to_string(),
+            total_equity: "1000".to_string(),
+            available: "900".to_string(),
+            frozen_margin: "100".to_string(),
+            unrealized_pnl: "0".to_string(),
+            margin_ratio: "0.1".to_string(),
+        });
+
+        recorder.record_exchange_position(ExchangePositionRecord {
+            id: None,
+            ts: 1710931200,
+            symbol: "BTCUSDT".to_string(),
+            side: "long".to_string(),
+            qty: "1.0".to_string(),
+            avg_price: "50000".to_string(),
+            unrealized_pnl: "0".to_string(),
+            margin_used: "500".to_string(),
+        });
+
+        recorder.record_local_position(LocalPositionRecord {
+            id: None,
+            ts: 1710931200,
+            symbol: "BTCUSDT".to_string(),
+            strategy_id: "strategy1".to_string(),
+            direction: "long".to_string(),
+            qty: "1.0".to_string(),
+            avg_price: "50000".to_string(),
+            entry_ts: 1710931200,
+            remark: "".to_string(),
+        });
+
+        recorder.record_channel_event(ChannelEventRecord {
+            id: None,
+            ts: 1710931200,
+            event: "SLOW_TO_FAST".to_string(),
+            from_channel: "Slow".to_string(),
+            to_channel: "Fast".to_string(),
+            tr_ratio: "1.5".to_string(),
+            ma5_in_20d_pos: "0.7".to_string(),
+            pine_color: "Green".to_string(),
+            details: "".to_string(),
+        });
+
+        recorder.record_risk_event(RiskEventRecord {
+            id: None,
+            ts: 1710931200,
+            event_type: "REJECT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            order_id: "ORDER_001".to_string(),
+            reason: "Insufficient margin".to_string(),
+            available_before: "1000".to_string(),
+            margin_ratio_before: "0.15".to_string(),
+            action_taken: "Rejected".to_string(),
+            details: "".to_string(),
+        });
+
+        recorder.record_indicator_event(IndicatorEventRecord {
+            id: None,
+            ts: 1710931200,
+            symbol: "BTCUSDT".to_string(),
+            event: "TR_RATIO_BREAK".to_string(),
+            tr_ratio_5d_20d: "1.5".to_string(),
+            tr_ratio_20d_60d: "1.2".to_string(),
+            pos_norm_20: "0.6".to_string(),
+            ma5_in_20d_pos: "0.7".to_string(),
+            ma20_in_60d_pos: "0.5".to_string(),
+            pine_color_20_50: "Green".to_string(),
+            pine_color_100_200: "Green".to_string(),
+            pine_color_12_26: "Red".to_string(),
+            channel_type: "Fast".to_string(),
+            details: "".to_string(),
+        });
+
+        // 如果没有panic，说明测试通过
+    }
+
+    #[test]
+    fn test_sqlite_event_recorder() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_recorder.db");
+
+        let service = SqliteRecordService::new(db_path.clone()).unwrap();
+        let recorder = SqliteEventRecorder::new(service);
+
+        // 通过 recorder 记录账户快照
+        recorder.record_account_snapshot(AccountSnapshotRecord {
+            id: None,
+            ts: 1710931200,
+            account_id: "test_account".to_string(),
+            total_equity: "100000.0".to_string(),
+            available: "95000.0".to_string(),
+            frozen_margin: "5000.0".to_string(),
+            unrealized_pnl: "0.0".to_string(),
+            margin_ratio: "0.05".to_string(),
+        });
+
+        // 通过 recorder 记录通道事件
+        recorder.record_channel_event(ChannelEventRecord {
+            id: None,
+            ts: 1710931200,
+            event: "SLOW_TO_FAST".to_string(),
+            from_channel: "Slow".to_string(),
+            to_channel: "Fast".to_string(),
+            tr_ratio: "1.5".to_string(),
+            ma5_in_20d_pos: "0.7".to_string(),
+            pine_color: "Green".to_string(),
+            details: "".to_string(),
+        });
+
+        // 通过 recorder 记录风控事件
+        recorder.record_risk_event(RiskEventRecord {
+            id: None,
+            ts: 1710931200,
+            event_type: "REJECT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            order_id: "ORDER_001".to_string(),
+            reason: "Insufficient margin".to_string(),
+            available_before: "1000.0".to_string(),
+            margin_ratio_before: "0.15".to_string(),
+            action_taken: "Order rejected".to_string(),
+            details: "".to_string(),
+        });
+
+        // 重新创建 service 来验证数据
+        let service2 = SqliteRecordService::new(db_path.clone()).unwrap();
+
+        // 验证账户快照
+        let account = service2.get_latest_account_snapshot("test_account").unwrap();
+        assert!(account.is_some(), "应该能查询到账户快照");
+        assert_eq!(account.unwrap().total_equity, "100000.0");
+
+        // 验证通道事件
+        let channel = service2.get_latest_channel_event().unwrap();
+        assert!(channel.is_some(), "应该能查询到通道事件");
+        assert_eq!(channel.unwrap().event, "SLOW_TO_FAST");
+
+        // 验证风控事件
+        let risks = service2.get_all_risk_events().unwrap();
+        assert_eq!(risks.len(), 1, "应该只有 1 条风控事件");
+        assert_eq!(risks[0].event_type, "REJECT");
+    }
+
+    // =========================================================================
+    // 原有基础测试（保留）
+    // =========================================================================
 
     #[test]
     fn test_account_snapshot_record() {
