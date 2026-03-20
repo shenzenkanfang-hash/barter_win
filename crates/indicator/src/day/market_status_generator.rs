@@ -97,4 +97,19 @@ mod tests {
         let output = gen.detect(&input);
         assert_eq!(output.status, MarketStatus::RANGE);
     }
+
+    #[test]
+    fn test_pin_status() {
+        let gen = DayMarketStatusGenerator::new();
+        let input = DayMarketStatusInput {
+            tr_ratio_5d_20d: dec!(2.5),  // > 2.0 → HIGH
+            tr_ratio_20d_60d: dec!(1.0),
+            pine_color: "纯绿".to_string(),
+            ma5_in_20d_ma5_pos: dec!(50),
+            power_percentile: dec!(50),
+        };
+        let output = gen.detect(&input);
+        assert_eq!(output.status, MarketStatus::PIN);
+        assert_eq!(output.volatility_level, VolatilityLevel::HIGH);
+    }
 }
