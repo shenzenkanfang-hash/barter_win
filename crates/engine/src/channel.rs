@@ -1,7 +1,6 @@
 use crate::check_table::CheckTable;
 use crate::pipeline_form::PipelineForm;
 use crate::round_guard::RoundGuard;
-use chrono::Utc;
 use indicator::{EMA, PineColor, PineColorDetector, PricePosition, RSI};
 use market::{KLine, KLineSynthesizer, Period, Tick};
 use rust_decimal::Decimal;
@@ -64,7 +63,7 @@ impl VolatilityChannel {
             ema_fast: EMA::new(12),
             ema_slow: EMA::new(26),
             rsi: RSI::new(14),
-            price_position: PricePosition::new(),
+            price_position: PricePosition::new(14),
             current_channel: ChannelType::Slow,
             check_table: CheckTable::new(),
             round_guard: Arc::new(RoundGuard::new()),
@@ -82,7 +81,7 @@ impl VolatilityChannel {
         self.kline_15m.update(tick);
 
         // 2. 获取当前K线数据
-        let current_kline = match &self.kline_1m.current {
+        let current_kline = match self.kline_1m.current_kline() {
             Some(k) => k.clone(),
             None => {
                 return (false, None, false);
@@ -243,12 +242,12 @@ impl VolatilityChannel {
     /// 返回: true=进入高速通道, false=慢速通道
     fn check_volatility(&self) -> bool {
         // 获取当前1m和15m K线
-        let kline_1m = match &self.kline_1m.current {
+        let kline_1m = match self.kline_1m.current_kline() {
             Some(k) => k,
             None => return false,
         };
 
-        let kline_15m = match &self.kline_15m.current {
+        let kline_15m = match self.kline_15m.current_kline() {
             Some(k) => k,
             None => return false,
         };

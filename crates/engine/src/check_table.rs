@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use fnv::FnvHashMap;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use strategy::types::{OrderType, Side, Signal};
+use strategy::types::Signal;
 
 /// Check 表项 - 记录策略判断结果
 #[derive(Debug, Clone, Serialize, Deserialize)]

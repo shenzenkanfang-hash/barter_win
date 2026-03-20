@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use strategy::types::{OrderType, Side, Signal};
+use strategy::types::Signal;
 
 /// PipelineForm - 全流程表单贯穿设计
 ///

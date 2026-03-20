@@ -28,6 +28,10 @@ impl KLineSynthesizer {
         }
     }
 
+    pub fn current_kline(&self) -> Option<&KLine> {
+        self.current.as_ref()
+    }
+
     pub fn update(&mut self, tick: &Tick) -> Option<KLine> {
         let kline_timestamp = self.period_start(tick.timestamp);
 

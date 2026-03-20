@@ -89,7 +89,12 @@ impl SymbolRules {
 
     /// 数量最小步进
     pub fn step_size(&self) -> Decimal {
-        dec!(1) / dec!(10).powd(dec!(self.quantity_precision))
+        let ten = dec!(10);
+        let mut result = dec!(1);
+        for _ in 0..self.quantity_precision {
+            result = result / ten;
+        }
+        result
     }
 
     /// 价格取整
