@@ -5,7 +5,6 @@ pub mod error;
 pub mod mode;
 pub mod order;
 pub mod risk;
-pub mod types;
 
 pub use engine::TradingEngine;
 pub use error::EngineError;

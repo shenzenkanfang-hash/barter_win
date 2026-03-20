@@ -4,7 +4,7 @@
 
 use account::types::FundPool;
 use engine::TradingEngine;
-use market::{MockMarketConnector, MockMarketStream};
+use market::{MarketConnector, MockMarketConnector, MockMarketStream};
 use rust_decimal::Decimal;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -13,8 +13,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive("info".parse()?))
         .init();
 
     tracing::info!("量化交易系统启动");
@@ -42,7 +40,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 4. 运行引擎 (使用内部 run 方法，会在内部处理循环)
-    // 注意: 由于 run() 是无限循环，这里我们在 engine 内部设置超时退出
     tracing::info!("开始模拟交易...");
 
     // 使用 run_with_timeout 替代直接调用 run()

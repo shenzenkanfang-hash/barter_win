@@ -3,8 +3,6 @@ use crate::types::Tick;
 use async_trait::async_trait;
 use chrono::Utc;
 use rust_decimal::Decimal;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[async_trait]
 pub trait MarketConnector: Send + Sync {

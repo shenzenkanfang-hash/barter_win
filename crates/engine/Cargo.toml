@@ -12,3 +12,5 @@ account = { path = "../account" }
 market = { path = "../market" }
 indicator = { path = "../indicator" }
 tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

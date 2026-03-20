@@ -1,9 +1,10 @@
 use account::types::FundPool;
-use engine::order::OrderExecutor;
-use engine::risk::RiskPreChecker;
+use crate::order::OrderExecutor;
+use crate::risk::RiskPreChecker;
 use indicator::{EMA, RSI};
 use market::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
+use std::time::Duration;
 use strategy::types::OrderRequest;
 use strategy::StrategyId;
 use tracing::{info, warn};
@@ -90,7 +91,7 @@ impl TradingEngine {
     fn on_kline_completed(&mut self, kline: &market::types::KLine) {
         // 当 1 分钟 K 线完成时，可以在这里做更复杂的策略判断
         info!(
-            "K线完成: {} {} close={}",
+            "K线完成: {} {:?} close={}",
             kline.symbol, kline.period, kline.close
         );
     }
@@ -154,7 +155,7 @@ impl TradingEngine {
                 break;
             }
             // 小延迟避免过于密集
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
         info!("TradingEngine 超时退出");
