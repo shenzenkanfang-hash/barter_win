@@ -2,8 +2,8 @@
 
 ## Current Position
 
-Phase: 6 (Integration) - COMPLETE
-Status: v0.8 Issue Fix Complete
+Phase: 7 (Enhancement) - COMPLETE
+Status: v0.9 Enhancement Complete
 
 ## Completed
 
@@ -17,6 +17,14 @@ Status: v0.8 Issue Fix Complete
   - engine.rs TradingEngine 主引擎
   - websocket.rs MockMarketStream/MockMarketConnector
   - main.rs 程序入口 (10秒模拟运行)
+- Phase 7: Enhancement (v0.9)
+  - RiskReChecker: 风控锁内复核
+  - PnlManager: 盈亏管理模块
+  - MarketStatusDetector: 市场状态检测
+  - PositionExclusionChecker: 仓位互斥检查
+  - ThresholdConstants: 阈值常量集中管理
+  - OrderCheck: 订单风控检查器
+  - 日线指标支持 (channel.rs)
 - Workspace dependencies updated
 
 ## Blockers
@@ -25,7 +33,18 @@ Status: v0.8 Issue Fix Complete
 
 ## Next Action
 
-(v0.8 编译修复完成 - 待用户决定下一步)
+(v0.9 改进完成 - 待用户决定下一步: 编译验证/测试/新功能)
+
+## v0.9 Enhancement 完成
+
+新增模块:
+- RiskReChecker (risk_rechecker.rs): 风控锁内复核
+- PnlManager (pnl_manager.rs): 盈亏管理模块
+- MarketStatusDetector (market_status.rs): 市场状态检测
+- PositionExclusionChecker (position_exclusion.rs): 仓位互斥检查
+- ThresholdConstants (thresholds.rs): 阈值常量集中管理
+- OrderCheck (order_check.rs): 订单风控检查器
+- 日线指标 (channel.rs): kline_1d, ema_100/200, rsi_daily
 
 ## v0.8 编译修复 (补充)
 
