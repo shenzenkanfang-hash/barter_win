@@ -1,0 +1,89 @@
+================================================================================
+代码审查报告 - Phase 6 集成
+================================================================================
+生成时间: 2026-03-20
+审查阶段: Phase 6 Integration 代码审查
+
+================================================================================
+1. 代码结构审查 - PASS
+================================================================================
+
+模块组织:
+- account/    - error.rs, types.rs, lib.rs ✓
+- market/    - error.rs, types.rs, kline.rs, websocket.rs, lib.rs ✓
+- indicator/ - error.rs, ema.rs, rsi.rs, pine_color.rs, price_position.rs, lib.rs ✓
+- strategy/  - error.rs, traits.rs, types.rs, lib.rs ✓
+- engine/    - error.rs, types.rs, engine.rs, mode.rs, order.rs, risk.rs, lib.rs ✓
+- src/main.rs ✓
+
+结论: 结构合理，符合模块划分规范。
+
+================================================================================
+2. 依赖关系审查 - WARNING
+================================================================================
+
+潜在问题:
+1. workspace.members = ["crates/*"] 只包含 crates 下的包
+2. 根 package (trading-system) 不在 members 中，但这是允许的 (workspace 可以有隐式根包)
+
+各 crate 依赖:
+- account:  ✓ 无外部依赖 (只用 workspace)
+- market:   ✓ rand 已添加
+- indicator: ✓ rust_decimal_macros 已添加
+- strategy: ✓ 无问题
+- engine:   ✓ 依赖 account, market, indicator, strategy, tracing ✓
+
+================================================================================
+3. 接口一致性审查 - PASS
+================================================================================
+
+检查项:
+- EMA::calculate(Decimal) -> Decimal ✓
+- RSI::calculate(Decimal) -> Decimal ✓
+- KLineSynthesizer::new(String, Period) ✓
+- MarketStream::next_tick() -> Option<Tick> ✓
+- RiskPreChecker::pre_check(...) ✓
+- OrderExecutor::execute_market_order(...) ✓
+- OrderExecutor::execute_limit_order(...) ✓
+
+================================================================================
+4. 类型一致性审查 - PASS
+================================================================================
+
+strategy::Side (Long/Short) -> account::Side (Buy/Sell) ✓ 转换已实现
+strategy::OrderType -> account::OrderType ✓ 转换已实现
+strategy::OrderRequest -> account::Order ✓ 转换已实现
+
+================================================================================
+5. 文档完整性 - PASS
+================================================================================
+
+- CLAUDE.md ✓ 最新 Phase 6 进度
+- STATE.md ✓ 已更新
+- MILESTONES.md ✓ 已更新
+- .planning/phases/06-integration/ ✓ 已创建
+
+================================================================================
+6. 需要验证的问题
+================================================================================
+
+由于编译活动暂停，以下问题需在编译阶段验证:
+
+1. workspace 根 package 配置是否正确
+2. tokio spawn 是否正常工作
+3. rand crate 在 market 中是否正确引入
+4. tracing-subscriber 初始化是否正确
+
+================================================================================
+7. 总结
+================================================================================
+
+代码结构: OK
+依赖关系: OK
+接口一致性: OK
+类型一致性: OK
+文档完整性: OK
+
+建议: 可以进入编译验证阶段。
+
+================================================================================
