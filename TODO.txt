@@ -123,15 +123,16 @@ RiskPreChecker (risk.rs):
 ================================================================================
 
 流水线架构相关:
-- Check 表 (CheckTable) - 待实现
-- 一轮编码机制 (RoundGuard) - 待实现
+- Check 表 (CheckTable) - ✅ 已实现
+- 一轮编码机制 (RoundGuard) - ✅ 已实现
 - 高速通道驱动 - 待实现
 - 慢速通道时间驱动 - 待实现
+- PipelineForm 全流程表单 - ✅ 已实现
 
 SymbolRules 相关:
-- SymbolRules 数据结构 - 待实现
-- SymbolRuleParser - 待实现
-- effective_min_qty 计算 - 待实现
+- SymbolRules 数据结构 - ✅ 已实现
+- effective_min_qty 计算 - ✅ 已实现
+- calculate_open_qty() - ✅ 已实现
 
 ================================================================================
 8. 总结
