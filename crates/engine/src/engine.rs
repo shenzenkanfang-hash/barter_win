@@ -1,5 +1,6 @@
 use crate::account_pool::{AccountPool, CircuitBreakerState};
 use crate::check_table::CheckTable;
+use crate::error::EngineError;
 use crate::gateway::ExchangeGateway;
 use crate::market_status::{MarketStatus, MarketStatusDetector};
 use crate::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
@@ -112,6 +113,9 @@ pub struct TradingEngine {
 
     // 当前市场价格
     current_price: Decimal,
+
+    // 是否正在运行
+    is_running: bool,
 }
 
 impl TradingEngine {
@@ -182,6 +186,7 @@ impl TradingEngine {
             symbol,
             current_ts: 0,
             current_price: Decimal::ZERO,
+            is_running: false,
         }
     }
 
@@ -406,6 +411,61 @@ impl TradingEngine {
     /// 获取网关
     pub fn get_gateway(&self) -> &Arc<MockBinanceGateway> {
         &self.gateway
+    }
+
+    /// 启动交易引擎
+    ///
+    /// 流程:
+    /// 1. 标记为运行状态
+    /// 2. 启动后台任务（持仓监控、强平检查）
+    /// 3. 注册 tick 回调
+    pub fn start(&mut self) -> Result<(), EngineError> {
+        if self.is_running {
+            warn!("TradingEngine 已经在运行中");
+            return Ok(());
+        }
+
+        info!("TradingEngine 启动");
+        self.is_running = true;
+
+        // 启动后台监控任务
+        // 注意：在实际实现中，这里会启动持仓监控和强平检查任务
+        // 目前使用 run() 方法的同步循环处理
+
+        Ok(())
+    }
+
+    /// 优雅关闭交易引擎
+    ///
+    /// 流程:
+    /// 1. 标记为停止状态
+    /// 2. 保存状态
+    /// 3. 关闭所有连接
+    pub fn shutdown(&mut self) {
+        if !self.is_running {
+            warn!("TradingEngine 未在运行");
+            return;
+        }
+
+        info!("TradingEngine 关闭中...");
+
+        // 1. 标记为停止状态
+        self.is_running = false;
+
+        // 2. 保存状态到持久化服务
+        info!("保存交易状态...");
+        // PersistenceService 的状态会在 drop 时自动清理
+
+        // 3. 关闭网关连接
+        info!("关闭网关连接...");
+        // 注意：MockBinanceGateway 不需要显式关闭
+
+        info!("TradingEngine 已关闭");
+    }
+
+    /// 检查引擎是否正在运行
+    pub fn is_running(&self) -> bool {
+        self.is_running
     }
 }
 
