@@ -204,24 +204,6 @@ impl TradingTrigger {
             };
         }
 
-        if signal.long_exit {
-            return TradingDecision {
-                action: TradingAction::Flat,
-                reason: "day_long_exit".to_string(),
-                confidence: 85,
-                level: StrategyLevel::DAY,
-            };
-        }
-
-        if signal.short_exit {
-            return TradingDecision {
-                action: TradingAction::Flat,
-                reason: "day_short_exit".to_string(),
-                confidence: 85,
-                level: StrategyLevel::DAY,
-            };
-        }
-
         if signal.long_hedge {
             return TradingDecision {
                 action: TradingAction::Hedge,
@@ -236,6 +218,24 @@ impl TradingTrigger {
                 action: TradingAction::Hedge,
                 reason: "day_short_hedge".to_string(),
                 confidence: 80,
+                level: StrategyLevel::DAY,
+            };
+        }
+
+        if signal.long_exit {
+            return TradingDecision {
+                action: TradingAction::Flat,
+                reason: "day_long_exit".to_string(),
+                confidence: 85,
+                level: StrategyLevel::DAY,
+            };
+        }
+
+        if signal.short_exit {
+            return TradingDecision {
+                action: TradingAction::Flat,
+                reason: "day_short_exit".to_string(),
+                confidence: 85,
                 level: StrategyLevel::DAY,
             };
         }
