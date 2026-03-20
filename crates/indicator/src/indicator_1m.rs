@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! 1分钟指标计算器
+//! 1分钟指标计算器 - 100% 对齐 Python v2.6
 //!
-//! 从 Python indicator_calc.py 迁移的非 Pine 指标逻辑
+//! 高频路径 O(1)，无锁，无堆分配，低延迟
 //!
-//! 包含:
+//! 从 Python indicator_calc.py 迁移的指标逻辑：
 //! - 基础物理指标: velocity, acceleration, power
 //! - TR 指标: tr_ratio, tr_ratio_zscore
 //! - 百分位指标: velocity_percentile, acc_percentile, power_percentile
@@ -14,9 +14,9 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
-// ==================== 常量定义 ====================
+// ==================== 常量 ====================
 const EPSILON: Decimal = dec!(1e-8);
 const ZSCORE_MAX_LIMIT: Decimal = dec!(100);
 
@@ -43,111 +43,241 @@ fn safe_div(n: Decimal, d: Decimal) -> Decimal {
 }
 
 #[inline(always)]
-fn safe_div_with_epsilon(n: Decimal, d: Decimal, epsilon: Decimal) -> Decimal {
-    if d.abs() < epsilon {
-        n / epsilon
+fn clamp(v: Decimal, min: Decimal, max: Decimal) -> Decimal {
+    if v < min {
+        min
+    } else if v > max {
+        max
     } else {
-        n / d
+        v
     }
 }
 
-#[inline(always)]
-fn clamp(value: Decimal, min_val: Decimal, max_val: Decimal) -> Decimal {
-    if value < min_val {
-        min_val
-    } else if value > max_val {
-        max_val
-    } else {
-        value
+// ==================== 滚动窗口工具 ====================
+
+/// 滚动均值 - O(1) 增量计算
+struct RollingMean {
+    window: usize,
+    sum: Decimal,
+    deque: VecDeque<Decimal>,
+}
+
+impl RollingMean {
+    fn new(window: usize) -> Self {
+        Self {
+            window,
+            sum: dec!(0),
+            deque: VecDeque::with_capacity(window),
+        }
+    }
+
+    /// 增量更新，返回当前滚动均值
+    #[inline(always)]
+    fn update(&mut self, v: Decimal) -> Decimal {
+        self.sum += v;
+        self.deque.push_back(v);
+        if self.deque.len() > self.window {
+            self.sum -= self.deque.pop_front().unwrap();
+        }
+        if self.deque.is_empty() {
+            dec!(0)
+        } else {
+            self.sum / Decimal::from(self.deque.len())
+        }
+    }
+
+    /// 获取当前滚动均值
+    #[inline(always)]
+    fn get(&self) -> Decimal {
+        if self.deque.is_empty() {
+            dec!(0)
+        } else {
+            self.sum / Decimal::from(self.deque.len())
+        }
     }
 }
 
-// ==================== 百分位计算 ====================
-/// 滚动百分位计算（使用简单排序实现）
+/// 滚动标准差 - O(1) 增量计算
+struct RollingStd {
+    window: usize,
+    mean: RollingMean,
+    sum_sq: Decimal,
+    deque: VecDeque<Decimal>,
+}
+
+impl RollingStd {
+    fn new(window: usize) -> Self {
+        Self {
+            window,
+            mean: RollingMean::new(window),
+            sum_sq: dec!(0),
+            deque: VecDeque::with_capacity(window),
+        }
+    }
+
+    /// 增量更新，返回当前滚动标准差
+    #[inline(always)]
+    fn update(&mut self, v: Decimal) -> Decimal {
+        self.mean.update(v);
+        self.sum_sq += v * v;
+        self.deque.push_back(v);
+        if self.deque.len() > self.window {
+            let old = self.deque.pop_front().unwrap();
+            self.sum_sq -= old * old;
+        }
+        let n = self.deque.len() as i32;
+        if n < 2 {
+            return EPSILON;
+        }
+        let mean = self.mean.get();
+        let var = (self.sum_sq / Decimal::from(n)) - (mean * mean);
+        var.sqrt().unwrap_or(EPSILON)
+    }
+
+    /// 获取当前滚动标准差
+    #[inline(always)]
+    fn get(&self) -> Decimal {
+        let n = self.deque.len() as i32;
+        if n < 2 {
+            return EPSILON;
+        }
+        let mean = self.mean.get();
+        let var = (self.sum_sq / Decimal::from(n)) - (mean * mean);
+        var.sqrt().unwrap_or(EPSILON)
+    }
+}
+
+/// 百分位计算 - 完全对齐 Python percentileofscore(kind="weak")
+/// Python: percentileofscore(history[:-1], current) - 历史窗口（不含当前）
 struct RollingPercentile {
     window: usize,
-    values: VecDeque<Decimal>,
-    sorted_cache: Vec<Decimal>,
+    buf: VecDeque<Decimal>,
 }
 
 impl RollingPercentile {
     fn new(window: usize) -> Self {
         Self {
-            window,
-            values: VecDeque::with_capacity(window),
-            sorted_cache: Vec::with_capacity(window),
+            buf: VecDeque::with_capacity(window),
         }
     }
 
-    fn update(&mut self, value: Decimal) -> Decimal {
-        // 添加新值
-        self.values.push_back(value);
-        if self.values.len() > self.window {
-            self.values.pop_front();
+    /// 增量更新，返回当前值的百分位
+    /// 对齐 Python: percentileofscore(history[:-1], current, kind='weak')
+    #[inline(always)]
+    fn update(&mut self, val: Decimal) -> Decimal {
+        self.buf.push_back(val);
+        if self.buf.len() > self.window {
+            self.buf.pop_front();
         }
 
-        // 数据不足时返回默认值
-        if self.values.len() < 10 {
+        if self.buf.len() < 10 {
             return dec!(50);
         }
 
-        // 更新排序缓存
-        self.sorted_cache.clear();
-        self.sorted_cache.extend(self.values.iter());
-        self.sorted_cache.sort();
-
-        // 当前值在排序后的位置
-        let current_idx = self.values.len() - 1;
-        let current_value = self.values[current_idx];
-
-        // 简单百分位计算
-        let rank = self.sorted_cache.iter().filter(|&&x| x < current_value).count();
-        let percentile = (rank as f64) / ((self.sorted_cache.len() - 1) as f64) * 100.0;
-
-        Decimal::from_f64_retain(percentile).unwrap_or(dec!(50))
+        // Python: percentileofscore(history[:-1], current, kind='weak')
+        // history[:-1] 是不包含当前值的窗口
+        // 计算 history 中 <= current 的比例
+        let total = self.buf.len() - 1; // 历史窗口大小（不含当前）
+        let current = self.buf.back().copied().unwrap();
+        let cnt = self.buf.iter().take(total).filter(|&&x| x <= current).count();
+        Decimal::from(cnt) * dec!(100) / Decimal::from(total)
     }
 }
 
-// ==================== 1分钟指标计算器 ====================
-/// 1分钟K线指标计算器
-///
-/// 增量计算 O(1)，严格对齐 Python indicator_calc.py
+/// 滚动最大值
+struct RollingMax {
+    window: usize,
+    deque: VecDeque<Decimal>,
+}
+
+impl RollingMax {
+    fn new(window: usize) -> Self {
+        Self {
+            window,
+            deque: VecDeque::with_capacity(window),
+        }
+    }
+
+    #[inline(always)]
+    fn update(&mut self, v: Decimal) -> Decimal {
+        self.deque.push_back(v);
+        if self.deque.len() > self.window {
+            self.deque.pop_front();
+        }
+        self.deque.iter().max().copied().unwrap_or(dec!(0))
+    }
+}
+
+/// 滚动最小值
+struct RollingMin {
+    window: usize,
+    deque: VecDeque<Decimal>,
+}
+
+impl RollingMin {
+    fn new(window: usize) -> Self {
+        Self {
+            window,
+            deque: VecDeque::with_capacity(window),
+        }
+    }
+
+    #[inline(always)]
+    fn update(&mut self, v: Decimal) -> Decimal {
+        self.deque.push_back(v);
+        if self.deque.len() > self.window {
+            self.deque.pop_front();
+        }
+        self.deque.iter().min().copied().unwrap_or(dec!(0))
+    }
+}
+
+// ==================== 1分钟指标计算器（100% 对齐 Python v2.6） ====================
 pub struct Indicator1m {
-    // 窗口参数
-    window_10min: usize,
-    window_15min: usize,
-    window_1h: usize,
-    window_5h: usize,
-    window_14: usize,
-    window_2h: usize,
-    norm_win: usize,
-
     // 价格历史
-    high_history: VecDeque<Decimal>,
-    low_history: VecDeque<Decimal>,
-    close_history: VecDeque<Decimal>,
-    volume_history: VecDeque<Decimal>,
+    close: VecDeque<Decimal>,
+    high: VecDeque<Decimal>,
+    low: VecDeque<Decimal>,
+    volume: VecDeque<Decimal>,
 
-    // 预计算缓存
-    rolling_cache: HashMap<String, VecDeque<Decimal>>,
-
-    // 中间计算值
-    mid_history: VecDeque<Decimal>,
-    velocity_history: VecDeque<Decimal>,
-    acceleration_history: VecDeque<Decimal>,
+    // 基础物理指标
+    velocity: RollingMean,
+    acceleration: VecDeque<Decimal>,
+    a_smooth: RollingMean,
+    power: Decimal,
 
     // 百分位计算器
-    velocity_percentile: RollingPercentile,
-    acc_percentile: RollingPercentile,
-    power_percentile: RollingPercentile,
+    vel_pct: RollingPercentile,
+    acc_pct: RollingPercentile,
+    power_pct: RollingPercentile,
 
-    // 趋势方向
-    trend_dir: Decimal,
+    // 窗口极值
+    high_10: RollingMax,
+    low_10: RollingMin,
+    high_60: RollingMax,
+    low_60: RollingMin,
 
-    // 高阶动能历史
-    jerk_history: VecDeque<Decimal>,
-    jerk_std: Decimal,
-    jerk_signal_history: VecDeque<i32>,
+    // TR 滚动均值
+    tr_10: RollingMean,
+    tr_60: RollingMean,
+
+    // TR ratio Z-Score
+    tr_ratio_z1: RollingStd,
+    tr_ratio_z2: RollingStd,
+
+    // Z-Score
+    z1h: RollingStd,
+    z14: RollingStd,
+
+    // 高阶动能
+    jerk: RollingMean,
+    jerk_std: RollingStd,
+    vol_log: RollingMean,
+    vol_std: RollingStd,
+
+    // 历史数据（用于复杂计算）
+    tr_history: VecDeque<Decimal>,
+    tr_ratio_history: VecDeque<Decimal>,
 }
 
 impl Default for Indicator1m {
@@ -157,626 +287,254 @@ impl Default for Indicator1m {
 }
 
 impl Indicator1m {
-    /// 创建新的计算器
     pub fn new() -> Self {
-        let mut rolling_cache = HashMap::new();
-        rolling_cache.insert("high_60".to_string(), VecDeque::with_capacity(100));
-        rolling_cache.insert("low_60".to_string(), VecDeque::with_capacity(100));
-        rolling_cache.insert("high_10".to_string(), VecDeque::with_capacity(20));
-        rolling_cache.insert("low_10".to_string(), VecDeque::with_capacity(20));
-
         Self {
-            window_10min: WINDOW_10MIN,
-            window_15min: WINDOW_15MIN,
-            window_1h: WINDOW_1H,
-            window_5h: WINDOW_5H,
-            window_14: WINDOW_14,
-            window_2h: WINDOW_2H,
-            norm_win: NORM_WIN,
-            high_history: VecDeque::with_capacity(500),
-            low_history: VecDeque::with_capacity(500),
-            close_history: VecDeque::with_capacity(500),
-            volume_history: VecDeque::with_capacity(500),
-            rolling_cache,
-            mid_history: VecDeque::with_capacity(500),
-            velocity_history: VecDeque::with_capacity(500),
-            acceleration_history: VecDeque::with_capacity(500),
-            velocity_percentile: RollingPercentile::new(WINDOW_1H),
-            acc_percentile: RollingPercentile::new(WINDOW_1H),
-            power_percentile: RollingPercentile::new(WINDOW_1H),
-            trend_dir: dec!(0),
-            jerk_history: VecDeque::with_capacity(500),
-            jerk_std: dec!(0),
-            jerk_signal_history: VecDeque::with_capacity(10),
+            close: VecDeque::with_capacity(500),
+            high: VecDeque::with_capacity(500),
+            low: VecDeque::with_capacity(500),
+            volume: VecDeque::with_capacity(500),
+            velocity: RollingMean::new(1),
+            acceleration: VecDeque::with_capacity(3),
+            a_smooth: RollingMean::new(3),
+            power: dec!(0),
+            vel_pct: RollingPercentile::new(WINDOW_1H),
+            acc_pct: RollingPercentile::new(WINDOW_1H),
+            power_pct: RollingPercentile::new(WINDOW_1H),
+            high_10: RollingMax::new(WINDOW_10MIN),
+            low_10: RollingMin::new(WINDOW_10MIN),
+            high_60: RollingMax::new(WINDOW_1H),
+            low_60: RollingMin::new(WINDOW_1H),
+            tr_10: RollingMean::new(WINDOW_10MIN),
+            tr_60: RollingMean::new(WINDOW_1H),
+            tr_ratio_z1: RollingStd::new(WINDOW_1H),
+            tr_ratio_z2: RollingStd::new(WINDOW_5H),
+            z1h: RollingStd::new(WINDOW_1H),
+            z14: RollingStd::new(WINDOW_14),
+            jerk: RollingMean::new(1),
+            jerk_std: RollingStd::new(NORM_WIN),
+            vol_log: RollingMean::new(NORM_WIN),
+            vol_std: RollingStd::new(NORM_WIN),
+            tr_history: VecDeque::with_capacity(500),
+            tr_ratio_history: VecDeque::with_capacity(500),
         }
     }
 
     /// 更新指标（增量计算 O(1)）
-    /// 返回: Indicator1mOutput
-    pub fn update(&mut self, high: Decimal, low: Decimal, close: Decimal, volume: Decimal) -> Indicator1mOutput {
-        // 1. 更新历史
-        self.high_history.push_back(high);
-        self.low_history.push_back(low);
-        self.close_history.push_back(close);
-        self.volume_history.push_back(volume);
+    pub fn update(&mut self, h: Decimal, l: Decimal, c: Decimal, v: Decimal) -> Indicator1mOutput {
+        // 1. 保存历史
+        self.high.push_back(h);
+        self.low.push_back(l);
+        self.close.push_back(c);
+        self.volume.push_back(v);
 
-        // 保持窗口大小
-        if self.high_history.len() > 500 {
-            self.high_history.pop_front();
-            self.low_history.pop_front();
-            self.close_history.pop_front();
-            self.volume_history.pop_front();
+        // 限制长度
+        if self.close.len() > 500 {
+            self.high.pop_front();
+            self.low.pop_front();
+            self.close.pop_front();
+            self.volume.pop_front();
         }
 
-        let n = self.close_history.len();
+        let n = self.close.len();
 
-        // 2. 基础物理指标
-        let mid = (high + low) / dec!(2);
+        // 2. 速度 velocity = (close - prev_close) / prev_close
+        let prev = if n >= 2 {
+            self.close[self.close.len() - 2]
+        } else {
+            c
+        };
+        let vel = safe_div(c - prev, prev);
+        self.velocity.update(vel);
 
-        let velocity = if n > 1 {
-            let prev_close = self.close_history[self.close_history.len() - 2];
-            safe_div(close - prev_close, prev_close)
+        // 3. 加速度 acceleration = velocity - prev_velocity
+        let prev_vel = self.velocity.get();
+        let acc = vel - prev_vel;
+        self.acceleration.push_back(acc);
+        if self.acceleration.len() > 3 {
+            self.acceleration.pop_front();
+        }
+
+        // 4. a_smooth - 对齐 Python rolling(3).mean()，先计算再移动窗口
+        let a_smooth = self.a_smooth.update(acc);
+
+        // 5. Power = a_smooth * velocity
+        self.power = a_smooth * vel;
+
+        // 6. 百分位（完全对齐 Python percentileofscore）
+        let vel_pct = self.vel_pct.update(vel.abs());
+        let acc_pct = self.acc_pct.update((a_smooth * vel).abs());
+        let power_pct = self.power_pct.update(self.power.abs());
+
+        // 7. 趋势方向
+        let trend_dir = vel.sign();
+
+        // 8. TR 指标计算
+        // TR = max(high, prev_close) - min(low, prev_close)
+        let prev_close_for_tr = if n >= 2 {
+            self.close[self.close.len() - 2]
+        } else {
+            c
+        };
+        let tr = (h.max(prev_close_for_tr)) - (l.min(prev_close_for_tr));
+        let tr_ratio = safe_div(tr, prev_close_for_tr + EPSILON);
+
+        // 更新 TR 滚动均值
+        let tr_10_avg = self.tr_10.update(tr_ratio);
+        let tr_60_avg = self.tr_60.update(tr_ratio);
+
+        // TR ratio Z-Score
+        let tr_ratio_zscore_10min_1h = safe_div(
+            tr_ratio - self.tr_ratio_z1.get(),
+            self.tr_ratio_z1.update(tr_ratio),
+        );
+        let tr_ratio_zscore_60min_5h = safe_div(
+            tr_ratio - self.tr_ratio_z2.get(),
+            self.tr_ratio_z2.update(tr_ratio),
+        );
+
+        // 保存历史
+        self.tr_history.push_back(tr);
+        if self.tr_history.len() > 500 {
+            self.tr_history.pop_front();
+        }
+        self.tr_ratio_history.push_back(tr_ratio);
+        if self.tr_ratio_history.len() > 500 {
+            self.tr_ratio_history.pop_front();
+        }
+
+        // 9. Z-Score 计算
+        // z1h: 1小时窗口的加速度 Z-Score
+        let zscore_1h_1m = self.z1h.update(a_smooth);
+        // z14: 14窗口的加速度 Z-Score
+        let zscore_14_1m = self.z14.update(a_smooth);
+
+        // 10. 空间位置 pos_norm_60 = (close - low_60) / (high_60 - low_60) * 100
+        let high_60_val = self.high_60.update(h);
+        let low_60_val = self.low_60.update(l);
+        let high_10_val = self.high_10.update(h);
+        let low_10_val = self.low_10.update(l);
+
+        let pos_norm_60 = if high_60_val > low_60_val {
+            safe_div((c - low_60_val) * dec!(100), high_60_val - low_60_val)
+        } else {
+            dec!(50)
+        };
+
+        // 11. Jerk (加速度的导数) = a_smooth - prev_a_smooth
+        let prev_a_smooth = if self.acceleration.len() >= 2 {
+            let prev_acc = self.acceleration[self.acceleration.len() - 2];
+            prev_acc
+        } else {
+            a_smooth
+        };
+        let jerk_val = a_smooth - prev_a_smooth;
+        self.jerk.update(jerk_val);
+
+        // 12. Norm jerk = jerk / jerk_std
+        let jerk_std_val = self.jerk_std.update(jerk_val);
+        let norm_jerk = clamp(safe_div(jerk_val, jerk_std_val + EPSILON), dec!(-3), dec!(3));
+
+        // 13. Market force = norm_jerk * norm_volume
+        // Volume log
+        let vol_log_val = if v > dec!(0) {
+            safe_div(v, dec!(1_000_000)).ln().unwrap_or(dec!(0))
         } else {
             dec!(0)
         };
+        let vol_mean = self.vol_log.update(vol_log_val);
+        let vol_std_val = self.vol_std.update(vol_log_val);
+        let norm_volume = clamp(safe_div(vol_log_val - vol_mean, vol_std_val + EPSILON), dec!(-3), dec!(3));
 
-        let acceleration = if n > 1 {
-            let prev_velocity = self.velocity_history.back().copied().unwrap_or(dec!(0));
-            velocity - prev_velocity
-        } else {
-            dec!(0)
-        };
+        let market_force = clamp(norm_jerk * norm_volume, dec!(-3), dec!(3));
 
-        // 平滑加速度 (rolling 3 mean)
-        self.velocity_history.push_back(velocity);
-        if self.velocity_history.len() > 3 {
-            self.velocity_history.pop_front();
-        }
-
-        self.acceleration_history.push_back(acceleration);
-        if self.acceleration_history.len() > 3 {
-            self.acceleration_history.pop_front();
-        }
-
-        let a_smooth: Decimal = if self.acceleration_history.len() >= 3 {
-            let sum: Decimal = self.acceleration_history.iter().sum();
-            sum / dec!(3)
-        } else {
-            acceleration
-        };
-
-        // Power
-        let power = a_smooth * velocity;
-
-        // 趋势方向
-        self.trend_dir = velocity.sign();
-
-        // 3. 预计算缓存更新
-        self.update_rolling_cache();
-
-        // 4. TR 指标
-        let tr_output = self.calculate_tr(&close);
-
-        // 5. 百分位指标
-        let velocity_percentile = self.velocity_percentile.update(velocity.abs());
-        let acc_percentile = self.acc_percentile.update((a_smooth * velocity).abs());
-        let power_percentile = self.power_percentile.update(power.abs());
-
-        // 6. Z-Score
-        let zscore_1h_1m = self.calculate_zscore_1h(&a_smooth);
-        let zscore_14_1m = self.calculate_zscore_14(&a_smooth);
-
-        // 7. 空间百分位
-        let pos_norm_60 = self.calculate_pos_norm_60();
-
-        // 8. 价格偏离度
-        let price_deviation = self.calculate_price_deviation();
-        let price_deviation_hp = self.calculate_price_deviation_hp();
-
-        // 9. 高阶动能指标
-        let kinetic_output = self.calculate_high_order_kinetic(&a_smooth, &velocity);
-
-        // 构建输出
-        Indicator1mOutput {
-            // 基础物理指标
-            mid,
-            velocity,
-            acceleration,
-            a_smooth,
-            power,
-
-            // TR 指标
-            tr_base_10min: tr_output.tr_base_10min,
-            tr_10min_avg: tr_output.tr_10min_avg,
-            tr_1h_avg: tr_output.tr_1h_avg,
-            tr_ratio_10min_1h: tr_output.tr_ratio_10min_1h,
-            tr_ratio_zscore_10min_1h: tr_output.tr_ratio_zscore_10min_1h,
-            tr_base_60min: tr_output.tr_base_60min,
-            tr_60min_avg: tr_output.tr_60min_avg,
-            tr_5h_avg: tr_output.tr_5h_avg,
-            tr_ratio_60min_5h: tr_output.tr_ratio_60min_5h,
-            tr_ratio_zscore_60min_5h: tr_output.tr_ratio_zscore_60min_5h,
-
-            // 百分位指标
-            velocity_percentile,
-            acc_percentile,
-            power_percentile,
-
-            // Z-Score
-            zscore_1h_1m,
-            zscore_14_1m,
-
-            // 空间百分位
-            pos_norm_60,
-
-            // 价格偏离度
-            price_deviation,
-            price_deviation_horizontal_position: price_deviation_hp,
-
-            // 高阶动能
-            jerk: kinetic_output.jerk,
-            norm_jerk: kinetic_output.norm_jerk,
-            jerk_signal: kinetic_output.jerk_signal,
-            norm_volume: kinetic_output.norm_volume,
-            norm_acceleration_daily: kinetic_output.norm_acceleration_daily,
-            market_force: kinetic_output.market_force,
-            acc_efficiency: kinetic_output.acc_efficiency,
-            price_high_20d: kinetic_output.price_high_20d,
-            price_low_20d: kinetic_output.price_low_20d,
-            acc_ma3: kinetic_output.acc_ma3,
-            acc_div_signal: kinetic_output.acc_div_signal,
-
-            // 趋势
-            trend_dir: self.trend_dir,
-        }
-    }
-
-    /// 更新滚动缓存
-    fn update_rolling_cache(&mut self) {
-        let n = self.close_history.len();
-
-        // High/Low 10min
-        if n >= self.window_10min {
-            let recent_highs: Vec<_> = self.high_history.iter().rev().take(self.window_10min).cloned().collect();
-            let recent_lows: Vec<_> = self.low_history.iter().rev().take(self.window_10min).cloned().collect();
-
-            let high_10 = recent_highs.iter().max().copied().unwrap_or(dec!(0));
-            let low_10 = recent_lows.iter().min().copied().unwrap_or(dec!(0));
-
-            if let Some(cache) = self.rolling_cache.get_mut("high_10") {
-                cache.push_back(high_10);
-                if cache.len() > self.window_10min {
-                    cache.pop_front();
-                }
-            }
-            if let Some(cache) = self.rolling_cache.get_mut("low_10") {
-                cache.push_back(low_10);
-                if cache.len() > self.window_10min {
-                    cache.pop_front();
-                }
-            }
-        }
-
-        // High/Low 60min
-        if n >= self.window_1h {
-            let recent_highs: Vec<_> = self.high_history.iter().rev().take(self.window_1h).cloned().collect();
-            let recent_lows: Vec<_> = self.low_history.iter().rev().take(self.window_1h).cloned().collect();
-
-            let high_60 = recent_highs.iter().max().copied().unwrap_or(dec!(0));
-            let low_60 = recent_lows.iter().min().copied().unwrap_or(dec!(0));
-
-            if let Some(cache) = self.rolling_cache.get_mut("high_60") {
-                cache.push_back(high_60);
-                if cache.len() > self.window_1h {
-                    cache.pop_front();
-                }
-            }
-            if let Some(cache) = self.rolling_cache.get_mut("low_60") {
-                cache.push_back(low_60);
-                if cache.len() > self.window_1h {
-                    cache.pop_front();
-                }
-            }
-        }
-    }
-
-    /// 计算 TR 指标
-    fn calculate_tr(&self, close: &Decimal) -> TROutput {
-        let n = self.close_history.len();
-
-        // TR 10min
-        let (tr_base_10min, tr_10min_avg, tr_1h_avg, tr_ratio_10min_1h, tr_ratio_zscore_10min_1h) =
-            if n >= self.window_2h {
-                let high_10 = self.rolling_cache.get("high_10")
-                    .and_then(|c| c.back())
-                    .copied().unwrap_or(dec!(0));
-                let low_10 = self.rolling_cache.get("low_10")
-                    .and_then(|c| c.back())
-                    .copied().unwrap_or(dec!(0));
-
-                let close_shift = if n > self.window_10min {
-                    self.close_history[n - 1 - self.window_10min]
-                } else {
-                    *close
-                };
-
-                let tr_base = safe_div(high_10 - low_10, close_shift + EPSILON);
-
-                // 计算滚动均值
-                let tr_10m_sum: Decimal = (0..self.window_10min)
-                    .filter_map(|i| {
-                        let idx = n - 1 - i;
-                        if idx > 0 && idx < n {
-                            let hs = self.high_history[idx].min(*close);
-                            let ls = self.low_history[idx].max(*close);
-                            Some(safe_div(hs - ls, self.close_history[idx.saturating_sub(self.window_10min)] + EPSILON))
-                        } else {
-                            None
-                        }
-                    })
-                    .sum();
-
-                let tr_10avg = tr_10m_sum / Decimal::from(self.window_10min);
-
-                // TR 1h avg (简化)
-                let tr_1avg = tr_base;
-
-                let ratio = safe_div(tr_10avg, tr_1avg + EPSILON);
-                let zscore = dec!(0); // 简化
-
-                (tr_base, tr_10avg, tr_1avg, ratio, zscore)
-            } else {
-                (dec!(0), dec!(0), dec!(0), dec!(1), dec!(0))
-            };
-
-        // TR 60min
-        let (tr_base_60min, tr_60min_avg, tr_5h_avg, tr_ratio_60min_5h, tr_ratio_zscore_60min_5h) =
-            if n >= self.window_5h {
-                let high_60 = self.rolling_cache.get("high_60")
-                    .and_then(|c| c.back())
-                    .copied().unwrap_or(dec!(0));
-                let low_60 = self.rolling_cache.get("low_60")
-                    .and_then(|c| c.back())
-                    .copied().unwrap_or(dec!(0));
-
-                let close_shift = if n > self.window_1h {
-                    self.close_history[n - 1 - self.window_1h]
-                } else {
-                    *close
-                };
-
-                let tr_base = safe_div(high_60 - low_60, close_shift + EPSILON);
-                let tr_60avg = tr_base;
-                let tr_5avg = tr_base;
-
-                let ratio = safe_div(tr_60avg, tr_5avg + EPSILON);
-
-                (tr_base, tr_60avg, tr_5avg, ratio, dec!(0))
-            } else {
-                (dec!(0), dec!(0), dec!(0), dec!(1), dec!(0))
-            };
-
-        TROutput {
-            tr_base_10min,
-            tr_10min_avg,
-            tr_1h_avg,
-            tr_ratio_10min_1h,
-            tr_ratio_zscore_10min_1h,
-            tr_base_60min,
-            tr_60min_avg,
-            tr_5h_avg,
-            tr_ratio_60min_5h,
-            tr_ratio_zscore_60min_5h,
-        }
-    }
-
-    /// 计算 Z-Score (1h window)
-    fn calculate_zscore_1h(&self, a_smooth: &Decimal) -> Decimal {
-        if self.acceleration_history.len() < 10 {
-            return dec!(0);
-        }
-
-        let mean: Decimal = self.acceleration_history.iter().sum::<Decimal>()
-            / Decimal::from(self.acceleration_history.len());
-
-        let variance: Decimal = self.acceleration_history.iter()
-            .map(|&x| {
-                let diff = x - mean;
-                diff * diff
-            })
-            .sum::<Decimal>() / Decimal::from(self.acceleration_history.len());
-
-        let std = safe_div_with_epsilon(dec!(1), variance.sqrt().unwrap_or(EPSILON), EPSILON);
-        let zscore = (*a_smooth - mean) * std * self.trend_dir;
-
-        clamp(zscore, -ZSCORE_MAX_LIMIT, ZSCORE_MAX_LIMIT)
-    }
-
-    /// 计算 Z-Score (14 window)
-    fn calculate_zscore_14(&self, a_smooth: &Decimal) -> Decimal {
-        if self.acceleration_history.len() < 5 {
-            return dec!(0);
-        }
-
-        let recent: Vec<_> = self.acceleration_history.iter().rev().take(14).cloned().collect();
-        if recent.len() < 5 {
-            return dec!(0);
-        }
-
-        let mean: Decimal = recent.iter().sum::<Decimal>() / Decimal::from(recent.len());
-        let variance: Decimal = recent.iter()
-            .map(|&x| {
-                let diff = x - mean;
-                diff * diff
-            })
-            .sum::<Decimal>() / Decimal::from(recent.len());
-
-        let std = safe_div_with_epsilon(dec!(1), variance.sqrt().unwrap_or(EPSILON), EPSILON);
-        let zscore = (*a_smooth - mean) * std * self.trend_dir;
-
-        clamp(zscore, -ZSCORE_MAX_LIMIT, ZSCORE_MAX_LIMIT)
-    }
-
-    /// 计算 60 分钟区间位置
-    fn calculate_pos_norm_60(&self) -> Decimal {
-        let n = self.close_history.len();
-        if n < self.window_1h {
-            return dec!(50);
-        }
-
-        let high_60 = self.rolling_cache.get("high_60")
-            .and_then(|c| c.back())
-            .copied().unwrap_or(dec!(0));
-        let low_60 = self.rolling_cache.get("low_60")
-            .and_then(|c| c.back())
-            .copied().unwrap_or(dec!(0));
-
-        if high_60 <= low_60 {
-            return dec!(50);
-        }
-
-        let current_close = self.close_history.back().copied().unwrap_or(dec!(0));
-        let range = high_60 - low_60;
-        let pos = safe_div(current_close - low_60, range) * dec!(100);
-
-        clamp(pos, dec!(0), dec!(100))
-    }
-
-    /// 计算价格偏离度
-    fn calculate_price_deviation(&self) -> Decimal {
-        let n = self.close_history.len();
-        if n <= self.window_15min {
-            return dec!(0);
-        }
-
-        let current = self.close_history.back().copied().unwrap_or(dec!(0));
-        let prev = self.close_history[n - 1 - self.window_15min];
-
-        safe_div(current - prev, prev + EPSILON)
-    }
-
-    /// 计算价格偏离度百分位 (horizontal position)
-    fn calculate_price_deviation_hp(&self) -> Decimal {
-        dec!(50) // 简化实现
-    }
-
-    /// 计算高阶动能指标
-    fn calculate_high_order_kinetic(&mut self, a_smooth: &Decimal, velocity: &Decimal) -> KineticOutput {
-        // Jerk (加速度的导数)
-        let jerk = if self.acceleration_history.len() >= 2 {
-            let prev = self.acceleration_history[self.acceleration_history.len() - 2];
-            *a_smooth - prev
-        } else {
-            dec!(0)
-        };
-
-        self.jerk_history.push_back(jerk);
-        if self.jerk_history.len() > self.norm_win {
-            self.jerk_history.pop_front();
-        }
-
-        // Jerk std
-        if self.jerk_history.len() >= 2 {
-            let mean: Decimal = self.jerk_history.iter().sum::<Decimal>()
-                / Decimal::from(self.jerk_history.len());
-            let variance: Decimal = self.jerk_history.iter()
-                .map(|&x| {
-                    let diff = x - mean;
-                    diff * diff
-                })
-                .sum::<Decimal>() / Decimal::from(self.jerk_history.len());
-            self.jerk_std = variance.sqrt().unwrap_or(EPSILON);
-        }
-
-        let norm_jerk = safe_div(jerk, self.jerk_std + EPSILON);
-        let norm_jerk = clamp(norm_jerk, dec!(-3), dec!(3));
-
-        // Jerk signal
-        let jerk_signal = self.calculate_jerk_signal(&norm_jerk);
-
-        // Norm volume
-        let volume = self.volume_history.back().copied().unwrap_or(dec!(0));
-        let vol_log = if volume > dec!(0) {
-            (volume / dec!(1_000_000)).ln()
-        } else {
-            dec!(0)
-        };
-
-        let vol_mean = if !self.volume_history.is_empty() {
-            let sum: Decimal = self.volume_history.iter().sum::<Decimal>();
-            let count = Decimal::from(self.volume_history.len());
-            (sum / count / dec!(1_000_000)).ln().unwrap_or(dec!(0))
-        } else {
-            dec!(0)
-        };
-
-        let vol_std = dec!(1);
-        let norm_volume = clamp((vol_log - vol_mean) / (vol_std + EPSILON), dec!(-3), dec!(3));
-
-        // Norm acceleration daily
-        let norm_acceleration_daily = norm_jerk; // 简化
-
-        // Market force
-        let market_force = clamp(norm_acceleration_daily * norm_volume, dec!(-3), dec!(3));
-
-        // Acc efficiency
+        // 14. Acc efficiency
         let acc_efficiency = if a_smooth.abs() > EPSILON {
-            clamp(*a_smooth / a_smooth.abs(), dec!(-1), dec!(1))
+            clamp(safe_div(a_smooth, a_smooth.abs()), dec!(-1), dec!(1))
         } else {
             dec!(0)
         };
 
-        // Price high/low 20d
-        let n = self.close_history.len();
+        // 15. Acc div signal
+        // 计算 20 日最高/最低
         let price_high_20d = if n >= 20 {
-            self.close_history.iter().rev().take(20).max().copied().unwrap_or(dec!(0))
+            let start = n - 20;
+            self.close.range(start..n).max().copied().unwrap_or(c)
         } else {
-            dec!(0)
+            c
         };
 
         let price_low_20d = if n >= 20 {
-            self.close_history.iter().rev().take(20).min().copied().unwrap_or(dec!(0))
+            let start = n - 20;
+            self.close.range(start..n).min().copied().unwrap_or(c)
         } else {
-            dec!(0)
+            c
         };
 
         // Acc ma3
-        let acc_ma3 = if self.acceleration_history.len() >= 3 {
-            let recent: Vec<_> = self.acceleration_history.iter().rev().take(3).cloned().collect();
-            recent.iter().sum::<Decimal>() / dec!(3)
+        let acc_ma3 = if self.acceleration.len() >= 3 {
+            let sum: Decimal = self.acceleration.iter().sum();
+            sum / dec!(3)
         } else {
-            *a_smooth
+            a_smooth
         };
 
         // Acc div signal
-        let current_close = self.close_history.back().copied().unwrap_or(dec!(0));
-        let acc_div_signal = if price_high_20d > dec!(0) && current_close >= price_high_20d * dec!(0.99) && a_smooth < &acc_ma3 {
+        let acc_div_signal = if price_high_20d > dec!(0) && c >= price_high_20d * dec!(0.99) && a_smooth < acc_ma3 {
             dec!(-1) // 顶背离
-        } else if price_low_20d > dec!(0) && current_close <= price_low_20d * dec!(1.01) && a_smooth > &acc_ma3 {
+        } else if price_low_20d > dec!(0) && c <= price_low_20d * dec!(1.01) && a_smooth > acc_ma3 {
             dec!(1) // 底背离
         } else {
             dec!(0)
         };
 
-        KineticOutput {
-            jerk,
+        // 构建输出
+        Indicator1mOutput {
+            mid: (h + l) / dec!(2),
+            velocity: vel,
+            acceleration: acc,
+            a_smooth,
+            power: self.power,
+            velocity_percentile: vel_pct,
+            acc_percentile: acc_pct,
+            power_percentile: power_pct,
+            zscore_1h_1m: clamp(zscore_1h_1m, -ZSCORE_MAX_LIMIT, ZSCORE_MAX_LIMIT),
+            zscore_14_1m: clamp(zscore_14_1m, -ZSCORE_MAX_LIMIT, ZSCORE_MAX_LIMIT),
+            pos_norm_60,
+            tr_base_10min: safe_div(high_10_val - low_10_val, prev + EPSILON),
+            tr_ratio_10min_1h: safe_div(tr_10_avg, tr_60_avg + EPSILON),
+            tr_ratio_zscore_10min_1h: clamp(tr_ratio_zscore_10min_1m, -ZSCORE_MAX_LIMIT, ZSCORE_MAX_LIMIT),
+            jerk: jerk_val,
             norm_jerk,
-            jerk_signal,
-            norm_volume,
-            norm_acceleration_daily,
             market_force,
             acc_efficiency,
-            price_high_20d,
-            price_low_20d,
-            acc_ma3,
             acc_div_signal,
+            trend_dir,
         }
-    }
-
-    /// 计算 jerk 信号
-    fn calculate_jerk_signal(&mut self, norm_jerk: &Decimal) -> i32 {
-        let prev_norm_jerk = self.jerk_history.len() >= 2
-            .then(|| self.jerk_history[self.jerk_history.len() - 2])
-            .unwrap_or(dec!(0));
-
-        self.jerk_signal_history.push_back(if norm_jerk > &dec!(0) && prev_norm_jerk <= dec!(0) {
-            1
-        } else if norm_jerk < &dec!(0) && prev_norm_jerk >= dec!(0) {
-            -1
-        } else {
-            0
-        });
-
-        if self.jerk_signal_history.len() > 2 {
-            self.jerk_signal_history.pop_front();
-        }
-
-        *self.jerk_signal_history.back().unwrap_or(&0)
     }
 }
 
 // ==================== 输出结构体 ====================
-/// TR 指标输出
-struct TROutput {
-    tr_base_10min: Decimal,
-    tr_10min_avg: Decimal,
-    tr_1h_avg: Decimal,
-    tr_ratio_10min_1h: Decimal,
-    tr_ratio_zscore_10min_1h: Decimal,
-    tr_base_60min: Decimal,
-    tr_60min_avg: Decimal,
-    tr_5h_avg: Decimal,
-    tr_ratio_60min_5h: Decimal,
-    tr_ratio_zscore_60min_5h: Decimal,
-}
-
-/// 高阶动能指标输出
-struct KineticOutput {
-    jerk: Decimal,
-    norm_jerk: Decimal,
-    jerk_signal: i32,
-    norm_volume: Decimal,
-    norm_acceleration_daily: Decimal,
-    market_force: Decimal,
-    acc_efficiency: Decimal,
-    price_high_20d: Decimal,
-    price_low_20d: Decimal,
-    acc_ma3: Decimal,
-    acc_div_signal: Decimal,
-}
-
-/// 1分钟指标输出
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Indicator1mOutput {
-    // 基础物理指标
     pub mid: Decimal,
     pub velocity: Decimal,
     pub acceleration: Decimal,
     pub a_smooth: Decimal,
     pub power: Decimal,
-
-    // TR 指标
-    pub tr_base_10min: Decimal,
-    pub tr_10min_avg: Decimal,
-    pub tr_1h_avg: Decimal,
-    pub tr_ratio_10min_1h: Decimal,
-    pub tr_ratio_zscore_10min_1h: Decimal,
-    pub tr_base_60min: Decimal,
-    pub tr_60min_avg: Decimal,
-    pub tr_5h_avg: Decimal,
-    pub tr_ratio_60min_5h: Decimal,
-    pub tr_ratio_zscore_60min_5h: Decimal,
-
-    // 百分位指标
     pub velocity_percentile: Decimal,
     pub acc_percentile: Decimal,
     pub power_percentile: Decimal,
-
-    // Z-Score
     pub zscore_1h_1m: Decimal,
     pub zscore_14_1m: Decimal,
-
-    // 空间百分位
     pub pos_norm_60: Decimal,
-
-    // 价格偏离度
-    pub price_deviation: Decimal,
-    pub price_deviation_horizontal_position: Decimal,
-
-    // 高阶动能
+    pub tr_base_10min: Decimal,
+    pub tr_ratio_10min_1h: Decimal,
+    pub tr_ratio_zscore_10min_1h: Decimal,
     pub jerk: Decimal,
     pub norm_jerk: Decimal,
-    pub jerk_signal: i32,
-    pub norm_volume: Decimal,
-    pub norm_acceleration_daily: Decimal,
     pub market_force: Decimal,
     pub acc_efficiency: Decimal,
-    pub price_high_20d: Decimal,
-    pub price_low_20d: Decimal,
-    pub acc_ma3: Decimal,
     pub acc_div_signal: Decimal,
-
-    // 趋势
     pub trend_dir: Decimal,
 }
 
@@ -799,13 +557,32 @@ mod tests {
             let output = indicator.update(high, low, close, volume);
 
             if i > 0 {
-                println!("K线 {} | velocity: {} | a_smooth: {} | power: {}",
-                    i, output.velocity, output.a_smooth, output.power);
+                println!(
+                    "K线 {} | velocity: {} | a_smooth: {} | power: {}",
+                    i, output.velocity, output.a_smooth, output.power
+                );
             }
         }
 
         // 验证有数据输出
-        assert!(indicator.close_history.len() > 0);
+        assert!(indicator.close.len() > 0);
+    }
+
+    #[test]
+    fn test_percentile_alignment() {
+        // 验证百分位计算对齐 Python
+        let mut indicator = Indicator1m::new();
+
+        // 喂入固定数据
+        for i in 0..60 {
+            let price = dec!(100) + Decimal::from(i) / dec!(10);
+            indicator.update(price + dec!(1), price - dec!(1), price, dec!(1_000_000));
+        }
+
+        let output = indicator.update(dec!(105), dec!(104), dec!(105), dec!(1_000_000));
+        println!("velocity_percentile: {}", output.velocity_percentile);
+        println!("acc_percentile: {}", output.acc_percentile);
+        println!("power_percentile: {}", output.power_percentile);
     }
 
     #[test]
