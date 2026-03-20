@@ -2,6 +2,7 @@ use crate::EngineError;
 use crate::account_pool::AccountPool;
 use crate::position_manager::{Direction, LocalPositionManager};
 use crate::strategy_pool::StrategyPool;
+use crate::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, LocalPositionRecord, RiskEventRecord, format_decimal};
 use fnv::FnvHashMap;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
@@ -252,6 +253,8 @@ pub struct MockBinanceGateway {
     trades: RwLock<Vec<MockTrade>>,
     risk_config: RiskConfig,
     csv_writer: CsvWriter,
+    // 事件记录器 (可选)
+    event_recorder: Option<Arc<dyn EventRecorder>>,
     // 内部持仓管理器 (用于实际持仓计算)
     position_manager: LocalPositionManager,
     // 账户池 (用于风控)
@@ -287,6 +290,7 @@ impl MockBinanceGateway {
             trades: RwLock::new(Vec::new()),
             risk_config,
             csv_writer,
+            event_recorder: None,
             position_manager: LocalPositionManager::new(),
             account_pool,
             strategy_pool,
@@ -294,6 +298,11 @@ impl MockBinanceGateway {
             next_order_id: RwLock::new(1),
             next_trade_id: RwLock::new(1),
         }
+    }
+
+    /// 设置事件记录器
+    pub fn set_event_recorder(&mut self, recorder: Arc<dyn EventRecorder>) {
+        self.event_recorder = Some(recorder);
     }
 
     /// 下单
@@ -324,6 +333,15 @@ impl MockBinanceGateway {
                 &reason.to_string(),
                 self.account.read().available,
                 self.account.read().margin_ratio(),
+            );
+            // 记录风控事件到 SQLite
+            self.record_risk_event_internal(
+                "REJECT",
+                &req.symbol,
+                &order_id,
+                &reason.to_string(),
+                "ORDER_REJECTED",
+                &format!("订单被拒绝: {}", reason),
             );
             return Ok(self.reject_order(order_id, req, reason, format!("风控拒绝: {}", reason)));
         }
@@ -494,6 +512,9 @@ impl MockBinanceGateway {
             "订单成交: {} {} {}@{} 手续费:{}",
             order_id, req.side, filled_qty, filled_price, commission
         );
+
+        // 记录事件到 SQLite (仓位变动时)
+        self.record_position_change(&account, &positions, &req.symbol, ts);
 
         OrderResult {
             order_id: order_id.to_string(),
@@ -739,6 +760,16 @@ impl MockBinanceGateway {
                     symbol, realized_pnl, trade.commission
                 );
 
+                // 记录强制平仓事件到 SQLite
+                self.record_risk_event_internal(
+                    "LIQUIDATION",
+                    symbol,
+                    &order_id,
+                    "MARGIN_BELOW_MAINTENANCE",
+                    "FORCE_LIQUIDATION",
+                    &format!("强制平仓完成 盈亏:{}", realized_pnl),
+                );
+
                 return OrderResult {
                     order_id,
                     status: OrderStatus::Filled,
@@ -770,6 +801,84 @@ impl MockBinanceGateway {
             frozen_margin: account.frozen_margin,
             unrealized_pnl: account.unrealized_pnl,
             margin_ratio: account.margin_ratio(),
+        }
+    }
+
+    /// 记录仓位变动事件
+    fn record_position_change(
+        &self,
+        account: &MockAccount,
+        positions: &FnvHashMap<String, MockPosition>,
+        symbol: &str,
+        ts: i64,
+    ) {
+        if let Some(ref recorder) = self.event_recorder {
+            // 记录账户快照
+            recorder.record_account_snapshot(AccountSnapshotRecord {
+                id: None,
+                ts,
+                account_id: account.account_id.clone(),
+                total_equity: format_decimal(&account.total_equity),
+                available: format_decimal(&account.available),
+                frozen_margin: format_decimal(&account.frozen_margin),
+                unrealized_pnl: format_decimal(&account.unrealized_pnl),
+                margin_ratio: format_decimal(&account.margin_ratio()),
+            });
+
+            // 记录该品种的交易所持仓
+            if let Some(pos) = positions.get(symbol) {
+                if pos.long_qty > Decimal::ZERO {
+                    recorder.record_exchange_position(ExchangePositionRecord {
+                        id: None,
+                        ts,
+                        symbol: symbol.to_string(),
+                        side: "long".to_string(),
+                        qty: format_decimal(&pos.long_qty),
+                        avg_price: format_decimal(&pos.long_avg_price),
+                        unrealized_pnl: format_decimal(&pos.unrealized_pnl),
+                        margin_used: format_decimal(&pos.margin_used),
+                    });
+                }
+                if pos.short_qty > Decimal::ZERO {
+                    recorder.record_exchange_position(ExchangePositionRecord {
+                        id: None,
+                        ts,
+                        symbol: symbol.to_string(),
+                        side: "short".to_string(),
+                        qty: format_decimal(&pos.short_qty),
+                        avg_price: format_decimal(&pos.short_avg_price),
+                        unrealized_pnl: format_decimal(&pos.unrealized_pnl),
+                        margin_used: format_decimal(&pos.margin_used),
+                    });
+                }
+            }
+        }
+    }
+
+    /// 记录风控事件
+    pub fn record_risk_event_internal(
+        &self,
+        event_type: &str,
+        symbol: &str,
+        order_id: &str,
+        reason: &str,
+        action_taken: &str,
+        details: &str,
+    ) {
+        if let Some(ref recorder) = self.event_recorder {
+            let account = self.account.read();
+            recorder.record_risk_event(RiskEventRecord {
+                id: None,
+                ts: current_timestamp(),
+                event_type: event_type.to_string(),
+                symbol: symbol.to_string(),
+                order_id: order_id.to_string(),
+                reason: reason.to_string(),
+                available_before: format_decimal(&account.available),
+                margin_ratio_before: format_decimal(&account.margin_ratio()),
+                action_taken: action_taken.to_string(),
+                details: details.to_string(),
+            });
         }
     }
 }
