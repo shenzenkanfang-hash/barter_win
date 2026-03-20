@@ -219,6 +219,7 @@ pub struct OrderResult {
     pub status: OrderStatus,
     pub filled_qty: Decimal,
     pub filled_price: Decimal,
+    pub commission: Decimal,
     pub reject_reason: Option<RejectReason>,
     pub message: String,
 }
@@ -522,6 +523,7 @@ impl MockBinanceGateway {
             status: OrderStatus::Filled,
             filled_qty,
             filled_price,
+            commission,
             reject_reason: None,
             message: "成交成功".to_string(),
         }
@@ -561,6 +563,7 @@ impl MockBinanceGateway {
             status: OrderStatus::Rejected,
             filled_qty: Decimal::ZERO,
             filled_price: Decimal::ZERO,
+            commission: Decimal::ZERO,
             reject_reason: Some(reason),
             message,
         }
@@ -777,6 +780,7 @@ impl MockBinanceGateway {
                     status: OrderStatus::Filled,
                     filled_qty: total_qty,
                     filled_price: current_price,
+                    commission,
                     reject_reason: None,
                     message: format!("强制平仓完成 盈亏:{}", realized_pnl),
                 };
@@ -788,6 +792,7 @@ impl MockBinanceGateway {
             status: OrderStatus::Cancelled,
             filled_qty: Decimal::ZERO,
             filled_price: Decimal::ZERO,
+            commission: Decimal::ZERO,
             reject_reason: None,
             message: "无持仓需要平".to_string(),
         }
@@ -1204,6 +1209,27 @@ impl SignalSynthesisLayer {
             pine_color: format!("{:?}", state.pine_color),
             details: details.to_string(),
         }
+    }
+}
+
+// ============================================================================
+// ExchangeGateway trait 实现
+// ============================================================================
+
+impl crate::gateway::ExchangeGateway for MockBinanceGateway {
+    /// 下单
+    fn place_order(&self, req: OrderRequest) -> Result<OrderResult, EngineError> {
+        MockBinanceGateway::place_order(self, req)
+    }
+
+    /// 获取账户信息
+    fn get_account(&self) -> Result<MockAccount, EngineError> {
+        Ok(MockBinanceGateway::get_account(self))
+    }
+
+    /// 获取持仓
+    fn get_position(&self, symbol: &str) -> Result<Option<MockPosition>, EngineError> {
+        Ok(MockBinanceGateway::get_position(self, symbol))
     }
 }
 

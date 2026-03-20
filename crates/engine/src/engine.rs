@@ -1,6 +1,8 @@
 use crate::account_pool::{AccountPool, CircuitBreakerState};
 use crate::check_table::CheckTable;
+use crate::gateway::ExchangeGateway;
 use crate::market_status::{MarketStatus, MarketStatusDetector};
+use crate::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
 use crate::mode::ModeSwitcher;
 use crate::order::OrderExecutor;
 use crate::order_check::OrderCheck;
@@ -18,6 +20,7 @@ use indicator::{EMA, RSI};
 use market::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::sync::Arc;
 use std::time::Duration;
 use strategy::types::{OrderRequest, Side};
 use strategy::StrategyId;
@@ -34,6 +37,8 @@ use tracing::{info, warn};
 /// - PositionExclusionChecker: 仓位互斥检查
 /// - OrderCheck: 订单预占检查
 /// - PersistenceService: 持久化服务
+/// - MockBinanceGateway: 交易所网关 (订单执行)
+/// - OrderExecutor: 订单执行器 (集成网关和风控)
 pub struct TradingEngine {
     // 市场数据
     market_stream: Box<dyn MarketStream>,
@@ -89,6 +94,9 @@ pub struct TradingEngine {
     // 阈值常量
     thresholds: ThresholdConstants,
 
+    // 交易所网关
+    gateway: Arc<MockBinanceGateway>,
+
     // 订单执行
     order_executor: OrderExecutor,
 
@@ -118,6 +126,35 @@ impl TradingEngine {
         symbol: String,
         initial_balance: Decimal,
     ) -> Self {
+        // 创建 MockBinanceGateway
+        let gateway = Arc::new(MockBinanceGateway::new(
+            initial_balance,
+            RiskConfig::production(),
+            CsvWriter::default(),
+        ));
+
+        // 创建风控预检器
+        let risk_checker = Arc::new(RiskPreChecker::new(
+            Decimal::try_from(0.95).unwrap(),
+            Decimal::try_from(1000.0).unwrap(),
+        ));
+
+        // 创建账户保证金池
+        let account_pool = AccountPool::with_config(
+            initial_balance,
+            Decimal::try_from(0.20).unwrap(),
+            Decimal::try_from(0.10).unwrap(),
+        );
+
+        // 创建策略资金池
+        let strategy_pool = StrategyPool::new();
+
+        // 创建订单执行器
+        let order_executor = OrderExecutor::new(
+            gateway.clone() as Arc<dyn ExchangeGateway>,
+            risk_checker.clone(),
+        );
+
         Self {
             market_stream,
             kline_1m: KLineSynthesizer::new(symbol.clone(), Period::Minute(1)),
@@ -125,10 +162,7 @@ impl TradingEngine {
             ema_fast: EMA::new(12),
             ema_slow: EMA::new(26),
             rsi: RSI::new(14),
-            risk_checker: RiskPreChecker::new(
-                Decimal::try_from(0.95).unwrap(),
-                Decimal::try_from(1000.0).unwrap(),
-            ),
+            risk_checker,
             risk_rechecker: RiskReChecker::new(),
             mode_switcher: ModeSwitcher::new(),
             market_detector: MarketStatusDetector::new(),
@@ -136,17 +170,14 @@ impl TradingEngine {
             order_check: OrderCheck::new(),
             position_manager: LocalPositionManager::new(),
             pnl_manager: PnlManager::new(),
-            account_pool: AccountPool::with_config(
-                initial_balance,
-                Decimal::try_from(0.20).unwrap(),
-                Decimal::try_from(0.10).unwrap(),
-            ),
-            strategy_pool: StrategyPool::new(),
+            account_pool,
+            strategy_pool,
             persistence: PersistenceService::new(),
             round_guard: RoundGuard::new(),
             check_table: CheckTable::new(),
             thresholds: ThresholdConstants::production(),
-            order_executor: OrderExecutor::new(),
+            gateway,
+            order_executor,
             strategy_id: StrategyId("main".to_string()),
             symbol,
             current_ts: 0,
@@ -252,51 +283,56 @@ impl TradingEngine {
     }
 
     /// 执行订单 (带锁内复核)
-    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<(), crate::EngineError> {
+    ///
+    /// 使用 OrderExecutor 执行订单，包含：
+    /// 1. 风控预检 (锁外)
+    /// 2. 调用 gateway 执行订单
+    /// 3. 更新持仓
+    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::mock_binance_gateway::OrderResult, crate::EngineError> {
         let order_value = order.qty * order.price.unwrap_or(order.qty);
 
-        // 1. 风控预检 (锁外) - 使用 AccountPool
-        self.risk_checker.pre_check(
-            &order.symbol,
-            self.account_pool.available(),
-            order_value,
-            self.account_pool.total_equity(),
-        )?;
-
-        // 2. 预占保证金
+        // 1. 预占保证金
         self.strategy_pool.reserve_margin("main", order_value)
             .map_err(|e| crate::EngineError::RiskCheckFailed(e))?;
 
-        // 3. 一轮编码作用域 (RAII 自动管理)
+        // 2. 一轮编码作用域 (RAII 自动管理)
         let _round_scope = RoundGuardScope::new(&self.round_guard);
 
-        // 4. 风控锁内复核
-        self.risk_rechecker.re_check(
-            self.account_pool.available(),
-            order_value,
-            self.current_price,
-            self.current_price,
-            VolatilityMode::Normal, // 默认使用正常模式
-        )?;
-
-        // 5. 执行订单
-        match order.order_type {
+        // 3. 执行订单 (内部包含风控预检)
+        let result = match order.order_type {
             strategy::types::OrderType::Market => {
-                self.order_executor.execute_market_order(&order)?;
+                self.order_executor.execute_market_order(
+                    &order.symbol,
+                    order.side,
+                    order.qty,
+                    order.price.unwrap_or(self.current_price),
+                )?
             }
             strategy::types::OrderType::Limit => {
-                self.order_executor.execute_limit_order(&order)?;
+                self.order_executor.execute_limit_order(
+                    &order.symbol,
+                    order.side,
+                    order.qty,
+                    order.price.unwrap_or(self.current_price),
+                )?
             }
+        };
+
+        // 4. 如果订单成功，更新持仓
+        if result.status == crate::mock_binance_gateway::OrderStatus::Filled {
+            let direction = match order.side {
+                Side::Long => Direction::Long,
+                Side::Short => Direction::Short,
+            };
+            self.position_manager.open_position(
+                direction,
+                result.filled_qty,
+                result.filled_price,
+                self.current_ts,
+            );
         }
 
-        // 6. 更新持仓
-        let direction = match order.side {
-            Side::Long => Direction::Long,
-            Side::Short => Direction::Short,
-        };
-        self.position_manager.open_position(direction, order.qty, order.price.unwrap_or(order.qty), self.current_ts);
-
-        Ok(())
+        Ok(result)
     }
 
     /// 获取市场状态
@@ -355,6 +391,21 @@ impl TradingEngine {
         }
 
         info!("TradingEngine 超时退出");
+    }
+
+    /// 获取网关账户信息
+    pub fn get_gateway_account(&self) -> crate::mock_binance_gateway::MockAccount {
+        self.gateway.get_account()
+    }
+
+    /// 获取网关持仓信息
+    pub fn get_gateway_position(&self, symbol: &str) -> Option<crate::mock_binance_gateway::MockPosition> {
+        self.gateway.get_position(symbol)
+    }
+
+    /// 获取网关
+    pub fn get_gateway(&self) -> &Arc<MockBinanceGateway> {
+        &self.gateway
     }
 }
 

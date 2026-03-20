@@ -1,47 +1,167 @@
 use crate::error::EngineError;
+use crate::gateway::ExchangeGateway;
+use crate::mock_binance_gateway::OrderResult;
+use crate::risk::RiskPreChecker;
+use parking_lot::RwLock;
+use rust_decimal::Decimal;
+use std::sync::Arc;
 use strategy::types::{OrderRequest, OrderType, Side};
 
 /// 订单执行器
 ///
 /// 负责将经过风控的订单发送到交易所执行。
-/// 目前仅做结构验证，实际交易执行需对接交易所API。
-pub struct OrderExecutor;
+///
+/// 设计原则:
+/// - 高频路径无锁：风控预检在锁外执行
+/// - 增量计算 O(1)：订单执行后直接更新持仓
+///
+/// 线程安全: gateway 和 risk_checker 都是线程安全的
+pub struct OrderExecutor {
+    gateway: Arc<dyn ExchangeGateway>,
+    risk_checker: Arc<RiskPreChecker>,
+}
 
 impl OrderExecutor {
-    pub fn new() -> Self {
-        Self
+    /// 创建新的订单执行器
+    pub fn new(gateway: Arc<dyn ExchangeGateway>, risk_checker: Arc<RiskPreChecker>) -> Self {
+        Self { gateway, risk_checker }
     }
 
+    /// 执行交易决策
+    ///
+    /// 流程:
+    /// 1. RiskPreChecker 锁外预检
+    /// 2. 构造 OrderRequest
+    /// 3. 调用 gateway.place_order()
+    /// 4. 返回订单结果
+    pub fn execute(
+        &self,
+        symbol: &str,
+        side: Side,
+        qty: Decimal,
+        price: Decimal,
+        order_type: OrderType,
+    ) -> Result<OrderResult, EngineError> {
+        // 1. 构造订单请求
+        let req = OrderRequest {
+            symbol: symbol.to_string(),
+            side,
+            order_type,
+            qty,
+            price: Some(price),
+        };
+
+        // 2. 获取账户信息用于风控预检
+        let account = self.gateway.get_account()?;
+        let order_value = qty * price;
+
+        // 3. 风控预检 (锁外执行)
+        self.risk_checker.pre_check(
+            symbol,
+            account.available,
+            order_value,
+            account.total_equity,
+        )?;
+
+        // 4. 调用网关执行订单
+        self.gateway.place_order(req)
+    }
+
+    /// 执行市价单
     pub fn execute_market_order(
         &self,
-        order: &OrderRequest,
-    ) -> Result<(), EngineError> {
-        match order.side {
-            Side::Long => {
-                // 执行买入开多
-                Ok(())
-            }
-            Side::Short => {
-                // 执行卖出开空
-                Ok(())
-            }
-        }
+        symbol: &str,
+        side: Side,
+        qty: Decimal,
+        price: Decimal,
+    ) -> Result<OrderResult, EngineError> {
+        self.execute(symbol, side, qty, price, OrderType::Market)
     }
 
+    /// 执行限价单
     pub fn execute_limit_order(
         &self,
-        order: &OrderRequest,
-    ) -> Result<(), EngineError> {
-        match order.order_type {
-            OrderType::Limit => {
-                // 执行限价单
-                Ok(())
+        symbol: &str,
+        side: Side,
+        qty: Decimal,
+        price: Decimal,
+    ) -> Result<OrderResult, EngineError> {
+        self.execute(symbol, side, qty, price, OrderType::Limit)
+    }
+
+    /// 从交易决策执行订单
+    pub fn execute_from_decision(
+        &self,
+        decision: &strategy::types::TradingDecision,
+    ) -> Result<OrderResult, EngineError> {
+        use strategy::types::{TradingAction, Side};
+
+        match decision.action {
+            TradingAction::OpenLong => {
+                self.execute_market_order(
+                    &decision.symbol,
+                    Side::Long,
+                    decision.qty,
+                    decision.price,
+                )
             }
-            OrderType::Market => {
-                // 市场单不进入这里
-                Err(EngineError::OrderExecutionFailed(
-                    "Market order should use execute_market_order".to_string(),
-                ))
+            TradingAction::OpenShort => {
+                self.execute_market_order(
+                    &decision.symbol,
+                    Side::Short,
+                    decision.qty,
+                    decision.price,
+                )
+            }
+            TradingAction::CloseLong => {
+                // 平多 - 获取当前持仓数量
+                let position = self.gateway.get_position(&decision.symbol)?;
+                if let Some(pos) = position {
+                    let qty = pos.long_qty;
+                    if qty > Decimal::ZERO {
+                        self.execute_market_order(
+                            &decision.symbol,
+                            Side::Short,
+                            qty,
+                            decision.price,
+                        )
+                    } else {
+                        Err(EngineError::OrderExecutionFailed("No long position to close".to_string()))
+                    }
+                } else {
+                    Err(EngineError::OrderExecutionFailed("Position not found".to_string()))
+                }
+            }
+            TradingAction::CloseShort => {
+                // 平空 - 获取当前持仓数量
+                let position = self.gateway.get_position(&decision.symbol)?;
+                if let Some(pos) = position {
+                    let qty = pos.short_qty;
+                    if qty > Decimal::ZERO {
+                        self.execute_market_order(
+                            &decision.symbol,
+                            Side::Long,
+                            qty,
+                            decision.price,
+                        )
+                    } else {
+                        Err(EngineError::OrderExecutionFailed("No short position to close".to_string()))
+                    }
+                } else {
+                    Err(EngineError::OrderExecutionFailed("Position not found".to_string()))
+                }
+            }
+            TradingAction::NoAction => {
+                // 无操作
+                Ok(OrderResult {
+                    order_id: String::new(),
+                    status: crate::mock_binance_gateway::OrderStatus::Cancelled,
+                    filled_qty: Decimal::ZERO,
+                    filled_price: Decimal::ZERO,
+                    commission: Decimal::ZERO,
+                    reject_reason: None,
+                    message: "No action".to_string(),
+                })
             }
         }
     }

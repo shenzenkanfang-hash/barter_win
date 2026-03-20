@@ -5,6 +5,7 @@ pub mod channel;
 pub mod check_table;
 pub mod engine;
 pub mod error;
+pub mod gateway;
 pub mod market_status;
 pub mod mock_binance_gateway;
 pub mod mode;
@@ -28,6 +29,7 @@ pub use channel::{ChannelType, VolatilityChannel};
 pub use check_table::{CheckEntry, CheckTable};
 pub use engine::TradingEngine;
 pub use error::EngineError;
+pub use gateway::ExchangeGateway;
 pub use market_status::{MarketStatus, MarketStatusDetector, PinIntensity, PinDetection};
 pub use mock_binance_gateway::{
     ChannelState, GatewayChannelType as MockChannelType, ExitSignal, MockAccount, MockBinanceGateway,
