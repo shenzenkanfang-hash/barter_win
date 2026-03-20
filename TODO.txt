@@ -1,8 +1,8 @@
 ================================================================================
-代码审查报告 - Phase 6 集成
+代码审查报告 - Phase 6 集成 (更新)
 ================================================================================
 生成时间: 2026-03-20
-审查阶段: Phase 6 Integration 代码审查
+审查阶段: Phase 6 Integration 代码审查 (第二轮)
 
 ================================================================================
 1. 代码结构审查 - PASS
@@ -10,80 +10,124 @@
 
 模块组织:
 - account/    - error.rs, types.rs, lib.rs ✓
-- market/    - error.rs, types.rs, kline.rs, websocket.rs, lib.rs ✓
+- market/    - error.rs, types.rs, kline.rs, websocket.rs, binance_ws.rs, lib.rs ✓
 - indicator/ - error.rs, ema.rs, rsi.rs, pine_color.rs, price_position.rs, lib.rs ✓
 - strategy/  - error.rs, traits.rs, types.rs, lib.rs ✓
-- engine/    - error.rs, types.rs, engine.rs, mode.rs, order.rs, risk.rs, lib.rs ✓
+- engine/    - error.rs, engine.rs, mode.rs, order.rs, risk.rs, lib.rs ✓
 - src/main.rs ✓
 
 结论: 结构合理，符合模块划分规范。
 
 ================================================================================
-2. 依赖关系审查 - WARNING
+2. 依赖关系审查 - PASS
 ================================================================================
 
-潜在问题:
-1. workspace.members = ["crates/*"] 只包含 crates 下的包
-2. 根 package (trading-system) 不在 members 中，但这是允许的 (workspace 可以有隐式根包)
+workspace 配置:
+- resolver = "3" ✓
+- members = ["crates/*"] ✓
 
 各 crate 依赖:
-- account:  ✓ 无外部依赖 (只用 workspace)
-- market:   ✓ rand 已添加
+- account:  ✓ 无外部依赖
+- market:   ✓ 依赖完整
 - indicator: ✓ rust_decimal_macros 已添加
 - strategy: ✓ 无问题
-- engine:   ✓ 依赖 account, market, indicator, strategy, tracing ✓
+- engine:   ✓ 依赖 account, market, indicator, strategy ✓
 
 ================================================================================
 3. 接口一致性审查 - PASS
 ================================================================================
 
 检查项:
-- EMA::calculate(Decimal) -> Decimal ✓
-- RSI::calculate(Decimal) -> Decimal ✓
-- KLineSynthesizer::new(String, Period) ✓
+- EMA::calculate(Decimal) -> Decimal ✓ O(1)增量
+- RSI::calculate(Decimal) -> Decimal ✓ O(1)增量
+- KLineSynthesizer::update(Tick) -> Option<KLine> ✓ O(1)增量
+- PineColorDetector::detect(macd, signal, rsi) -> PineColor ✓ RSI极值优先
 - MarketStream::next_tick() -> Option<Tick> ✓
-- RiskPreChecker::pre_check(...) ✓
+- RiskPreChecker::pre_check(...) ✓ 品种注册+波动率模式
 - OrderExecutor::execute_market_order(...) ✓
 - OrderExecutor::execute_limit_order(...) ✓
 
 ================================================================================
-4. 类型一致性审查 - PASS
+4. 类型一致性审查 - WARNING
 ================================================================================
 
-strategy::Side (Long/Short) -> account::Side (Buy/Sell) ✓ 转换已实现
-strategy::OrderType -> account::OrderType ✓ 转换已实现
-strategy::OrderRequest -> account::Order ✓ 转换已实现
+发现不一致问题:
+
+问题1: Side 类型定义冲突
+- account::types::Side = Buy/Sell (交易方向)
+- strategy::types::Side = Long/Short (持仓方向)
+
+这是两个不同概念，需要统一:
+- Buy/Sell: 交易所订单方向
+- Long/Short: 策略持仓方向
+
+建议: 保持分离，通过转换函数处理
+
+问题2: engine::types::types.rs 不存在
+- engine crate 没有 types.rs
+- types 定义在 strategy crate 中
 
 ================================================================================
-5. 文档完整性 - PASS
+5. 设计文档整合 - PASS
 ================================================================================
 
-- CLAUDE.md ✓ 最新 Phase 6 进度
-- STATE.md ✓ 已更新
-- MILESTONES.md ✓ 已更新
-- .planning/phases/06-integration/ ✓ 已创建
+已整合旧代码逻辑到 docs/2026-03-20-trading-system-rust-design.md:
+- 17.3.7 风控引擎三层架构 (AccountPool/StrategyPool/OrderCheck)
+- 17.3.8 盈亏管理模块 (PnlManager)
+- 17.3.9 交易对规则模块 (SymbolRules)
 
 ================================================================================
-6. 需要验证的问题
+6. 核心模块检查 - PASS
 ================================================================================
 
-由于编译活动暂停，以下问题需在编译阶段验证:
+EMA (ema.rs):
+- O(1)增量计算 ✓
+- k = 2/(period+1) ✓
 
-1. workspace 根 package 配置是否正确
-2. tokio spawn 是否正常工作
-3. rand crate 在 market 中是否正确引入
-4. tracing-subscriber 初始化是否正确
+RSI (rsi.rs):
+- O(1)增量计算 ✓
+- 标准RSI公式 ✓
+- 注意: engine.rs 中 RSI 输入是 EMA差值 (非标准用法，可能是设计意图)
+
+PineColor (pine_color.rs):
+- RSI极值优先判断 (>=70 或 <=30) ✓
+- MACD判断趋势颜色 ✓
+
+KLineSynthesizer (kline.rs):
+- O(1)增量更新 ✓
+- Period::Minute(u8) + Period::Day ✓
+
+RiskPreChecker (risk.rs):
+- 品种注册检查 ✓
+- 波动率模式检查 ✓
+- 资金/持仓比例检查 ✓
 
 ================================================================================
-7. 总结
+7. 待实现模块 (基于设计文档)
+================================================================================
+
+流水线架构相关:
+- Check 表 (CheckTable) - 待实现
+- 一轮编码机制 (RoundGuard) - 待实现
+- 高速通道驱动 - 待实现
+- 慢速通道时间驱动 - 待实现
+
+SymbolRules 相关:
+- SymbolRules 数据结构 - 待实现
+- SymbolRuleParser - 待实现
+- effective_min_qty 计算 - 待实现
+
+================================================================================
+8. 总结
 ================================================================================
 
 代码结构: OK
 依赖关系: OK
-接口一致性: OK
-类型一致性: OK
-文档完整性: OK
+接口一致性: OK (有小问题待确认)
+类型一致性: 有问题需确认 Side 定义
+设计文档: OK
+核心算法: OK
 
-建议: 可以进入编译验证阶段。
+建议: 确认 Side 类型分离是否有意设计，然后可以开始实现阶段。
 
 ================================================================================
