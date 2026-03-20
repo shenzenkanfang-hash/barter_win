@@ -3,6 +3,7 @@
 pub mod binance_ws;
 pub mod error;
 pub mod kline;
+pub mod kline_persistence;
 pub mod orderbook;
 pub mod symbol_registry;
 pub mod types;
@@ -12,6 +13,7 @@ pub mod websocket;
 pub use binance_ws::{BinanceTradeStream, BinanceWsConnector};
 pub use error::MarketError;
 pub use kline::KLineSynthesizer;
+pub use kline_persistence::KlinePersistence;
 pub use orderbook::OrderBook;
 pub use symbol_registry::SymbolRegistry;
 pub use types::{KLine, Period, Tick, VolatilityStats};
