@@ -29,15 +29,25 @@ pub struct VolatilityChannel {
     kline_1m: KLineSynthesizer,
     /// 15分钟K线合成器
     kline_15m: KLineSynthesizer,
+    /// 日线K线合成器 (用于长周期趋势判断)
+    kline_1d: KLineSynthesizer,
 
-    /// EMA快线
+    /// EMA快线 (12)
     ema_fast: EMA,
-    /// EMA慢线
+    /// EMA慢线 (26)
     ema_slow: EMA,
-    /// RSI
+    /// 日线 EMA 快线 (100) - 用于长周期趋势
+    ema_100: EMA,
+    /// 日线 EMA 慢线 (200) - 用于长周期趋势
+    ema_200: EMA,
+    /// RSI (14)
     rsi: RSI,
+    /// 日线 RSI (14) - 用于长周期超买超卖
+    rsi_daily: RSI,
     /// 价格位置
     price_position: PricePosition,
+    /// 日线价格位置
+    price_position_daily: PricePosition,
 
     /// 当前通道类型
     current_channel: ChannelType,
@@ -60,10 +70,15 @@ impl VolatilityChannel {
             strategy_id,
             kline_1m: KLineSynthesizer::new(symbol.clone(), Period::Minute(1)),
             kline_15m: KLineSynthesizer::new(symbol.clone(), Period::Minute(15)),
+            kline_1d: KLineSynthesizer::new(symbol.clone(), Period::Day),
             ema_fast: EMA::new(12),
             ema_slow: EMA::new(26),
+            ema_100: EMA::new(100),   // 日线快线
+            ema_200: EMA::new(200),   // 日线慢线
             rsi: RSI::new(14),
+            rsi_daily: RSI::new(14),  // 日线RSI
             price_position: PricePosition::new(14),
+            price_position_daily: PricePosition::new(14),
             current_channel: ChannelType::Slow,
             check_table: CheckTable::new(),
             round_guard: Arc::new(RoundGuard::new()),
@@ -76,9 +91,10 @@ impl VolatilityChannel {
     ///
     /// 返回: (是否完成K线, 当前表单, 是否进入高速通道)
     pub fn on_tick(&mut self, tick: &Tick) -> (bool, Option<PipelineForm>, bool) {
-        // 1. 更新K线
+        // 1. 更新K线 (包括日线)
         let completed_1m = self.kline_1m.update(tick);
         self.kline_15m.update(tick);
+        let completed_1d = self.kline_1d.update(tick);
 
         // 2. 获取当前K线数据
         let current_kline = match self.kline_1m.current_kline() {
@@ -87,6 +103,9 @@ impl VolatilityChannel {
                 return (false, None, false);
             }
         };
+
+        // 获取日线数据 (用于长周期趋势判断)
+        let daily_kline = self.kline_1d.current_kline();
 
         // 3. 更新指标
         let price = tick.price;
