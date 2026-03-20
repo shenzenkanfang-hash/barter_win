@@ -213,7 +213,7 @@ impl StrategyPool {
                 continue;
             }
 
-            let priority_ratio = allocation.priority as Decimal
+            let priority_ratio = Decimal::from(allocation.priority)
                 / Decimal::from(total_priority);
             let new_allocated = total_funds * priority_ratio;
 

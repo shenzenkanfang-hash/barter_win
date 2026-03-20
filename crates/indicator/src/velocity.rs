@@ -89,9 +89,9 @@ impl VelocityPercentile {
             return dec!(0);
         }
 
-        let count = history.len() as Decimal;
-        let below = history.iter().filter(|&&v| v < value).count() as Decimal;
-        let equal = history.iter().filter(|&&v| v == value).count() as Decimal;
+        let count = Decimal::from(history.len());
+        let below = Decimal::from(history.iter().filter(|&&v| v < value).count());
+        let equal = Decimal::from(history.iter().filter(|&&v| v == value).count());
 
         // 排名百分位
         ((below + equal * dec!(0.5)) / count) * dec!(100)

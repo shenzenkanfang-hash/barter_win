@@ -314,7 +314,7 @@ impl VolatilityChannel {
     }
 
     /// 获取大周期指标 (TR Ratio, 区间位置)
-    pub fn get_big_cycle_indicators(&self) -> Option<indicator::BigCycleIndicators> {
+    pub fn get_big_cycle_indicators(&mut self) -> Option<indicator::BigCycleIndicators> {
         if !self.big_cycle.is_ready() {
             return None;
         }

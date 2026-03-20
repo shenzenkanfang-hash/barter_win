@@ -1,4 +1,5 @@
 use rust_decimal::Decimal;
+use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 use std::collections::VecDeque;
 
@@ -76,7 +77,7 @@ impl ZScore {
         };
 
         if self.count > 1 {
-            self.std = (new_std_sq / Decimal::from(self.count - 1)).sqrt();
+            self.std = (new_std_sq / Decimal::from(self.count - 1)).sqrt().unwrap_or(dec!(0));
         } else {
             self.std = dec!(0);
         }

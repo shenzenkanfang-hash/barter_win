@@ -28,7 +28,7 @@ tracing-subscriber = { workspace = true }
 
 [workspace.dependencies]
 parking_lot = "0.12"
-rust_decimal = "1.36"
+rust_decimal = { version = "1.36", features = ["maths"] }
 rust_decimal_macros = "1.36"
 thiserror = "2.0"
 tracing = "0.1"

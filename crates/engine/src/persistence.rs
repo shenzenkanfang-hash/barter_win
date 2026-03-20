@@ -281,7 +281,7 @@ impl PersistenceService {
             low: kline.low,
             close: kline.close,
             volume: kline.volume,
-            timestamp: kline.timestamp,
+            timestamp: kline.timestamp.timestamp(),
         };
         self.save_kline(&kline.symbol, "1d", kline_data);
     }
