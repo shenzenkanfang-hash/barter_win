@@ -25,7 +25,17 @@ Status: v0.8 Issue Fix Complete
 
 ## Next Action
 
-(v0.8 完成 - 问题修复总结归档)
+(v0.8 编译修复完成 - 待用户决定下一步)
+
+## v0.8 编译修复 (补充)
+
+修复内容:
+- KLineSynthesizer 添加 current_kline() accessor
+- PricePosition::new(14) 正确参数
+- 清理未使用导入 (chrono::Utc, OrderType, Side)
+- symbol_rules.rs step_size() 循环实现
+
+编译验证: cargo check 通过，无警告
 
 ## v0.8 问题修复
 
