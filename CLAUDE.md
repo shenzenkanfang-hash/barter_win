@@ -242,10 +242,17 @@ Phase 6: Integration (进行中)
 **当前角色**: 开发者 (Developer)
 **角色文件**: C:\Users\char\.claude\roles\engineering\高级开发者.txt
 
-**当前任务**: Phase A 线程安全修复
-- AccountPool: 添加 RwLock 保护 (进行中)
-- StrategyPool: 添加 RwLock 保护 (待办)
-- OrderCheck: 添加 RwLock 保护 (待办)
-- PnlManager: Vec→HashSet + RwLock (待办)
+**当前任务**: Phase A 线程安全修复 - 已完成
+- AccountPool: RwLock<AccountInfo> ✅
+- StrategyPool: RwLock<HashMap> ✅
+- OrderCheck: RwLock<HashMap> ✅
+- PnlManager: RwLock<HashMap> + HashSet ✅
+- PositionManager: RwLock<LocalPosition> ✅
+- CheckTable: RwLock<FnvHashMap> ✅
+
+**下一步待办**:
+1. Phase A.5: FundPool → AccountPool 合并
+2. Phase B: SymbolRegistry + 多品种流水线
+3. 统一编译验证
 
 ================================================================================
