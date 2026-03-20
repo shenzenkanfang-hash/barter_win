@@ -674,17 +674,20 @@ impl DataFeeder {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
+    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn test_tick_callback_registration() {
         let feeder = DataFeeder::new_test_dispatcher();
 
-        let mut received_ticks: Vec<Tick> = Vec::new();
+        let received_ticks = Arc::new(Mutex::new(Vec::new()));
 
         // 注册回调
+        let ticks_clone = received_ticks.clone();
         feeder.on_tick(move |tick| {
-            received_ticks.push(tick);
+            ticks_clone.lock().unwrap().push(tick);
         });
 
         // 创建测试 Tick
@@ -702,9 +705,10 @@ mod tests {
         feeder.process_tick(tick.clone());
 
         // 验证回调被调用
-        assert_eq!(received_ticks.len(), 1);
-        assert_eq!(received_ticks[0].symbol, "BTCUSDT");
-        assert_eq!(received_ticks[0].price, dec!(50000));
+        let ticks = received_ticks.lock().unwrap();
+        assert_eq!(ticks.len(), 1);
+        assert_eq!(ticks[0].symbol, "BTCUSDT");
+        assert_eq!(ticks[0].price, dec!(50000));
     }
 
     #[test]
@@ -717,7 +721,7 @@ mod tests {
         for i in 0..5 {
             let tick = Tick {
                 symbol: "ETHUSDT".to_string(),
-                price: dec!(2000 + i as i64 * 10),
+                price: Decimal::from(2000 + (i as i64) * 10),
                 qty: dec!(1.0),
                 timestamp: base_time,
                 kline_1m: None,
@@ -748,7 +752,8 @@ mod tests {
         assert!(feeder.start().is_ok());
 
         let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
-        assert!(feeder.subscribe(&symbols).is_ok());
+        // 使用完整的 trait 方法调用来避免与 struct 的 subscribe 方法冲突
+        assert!(MarketDataFeeder::subscribe(&feeder, &symbols).is_ok());
 
         // get_tick 返回 None（因为 DataFeeder 通过回调分发）
         assert!(feeder.get_tick("BTCUSDT").is_none());
@@ -758,15 +763,17 @@ mod tests {
     fn test_multiple_callbacks() {
         let feeder = DataFeeder::new_test_dispatcher();
 
-        let mut count1 = 0;
-        let mut count2 = 0;
+        let count1 = Arc::new(AtomicUsize::new(0));
+        let count2 = Arc::new(AtomicUsize::new(0));
 
+        let count1_clone = count1.clone();
         feeder.on_tick(move |_| {
-            count1 += 1;
+            count1_clone.fetch_add(1, Ordering::Relaxed);
         });
 
+        let count2_clone = count2.clone();
         feeder.on_tick(move |_| {
-            count2 += 1;
+            count2_clone.fetch_add(1, Ordering::Relaxed);
         });
 
         let tick = Tick {
@@ -782,7 +789,7 @@ mod tests {
         feeder.process_tick(tick);
 
         // 两个回调都被调用
-        assert_eq!(count1, 1);
-        assert_eq!(count2, 1);
+        assert_eq!(count1.load(Ordering::Relaxed), 1);
+        assert_eq!(count2.load(Ordering::Relaxed), 1);
     }
 }
