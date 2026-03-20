@@ -2,17 +2,21 @@
 
 ## Current Position
 
-Milestone: v1.1 - MockBinanceGateway + SignalSynthesisLayer
-Status: Phase 08 In Progress
-Current: SQLite + CSV 模块实现完成，测试通过
+Milestone: v1.2 - Market Data Layer Enhancement
+Status: Complete
+Current: DataFeeder/KlinePersistence/SymbolRegistry/VolatilityDetector/OrderBook 已实现
 
 ## Completed Milestones
 
 - v0.1-v0.10: All development phases complete
 - v1.0: Integration & Testing - SHIPPED 2026-03-20
-  - All modules implemented
-  - Compilation verified (cargo check --all)
-  - Git tag v1.0.0 created
+- v1.1: MockBinanceGateway + SignalSynthesisLayer - SHIPPED 2026-03-21
+  - MockBinanceGateway (账户/持仓/订单/保证金/风控)
+  - SignalSynthesisLayer (通道退出逻辑)
+  - SQLite 持久化 + CSV 输出
+- v1.2: Market Data Layer Enhancement - SHIPPED 2026-03-21
+  - DataFeeder / KlinePersistence / SymbolRegistry
+  - VolatilityDetector / OrderBook / Pine v5
 
 ## Completed
 
@@ -43,7 +47,7 @@ Current: SQLite + CSV 模块实现完成，测试通过
 
 (None)
 
-## v1.1 完成进度 (更新: 2026-03-20)
+## v1.1 完成进度 (更新: 2026-03-21)
 
 ### 已完成 ✓
 - [x] SQLite 持久化模块 (sqlite_persistence.rs)
@@ -54,16 +58,23 @@ Current: SQLite + CSV 模块实现完成，测试通过
 - [x] 编译通过 (cargo check --all)
 - [x] 测试通过 (mock_binance_gateway 4/4)
 - [x] symbol_rules/thresholds 测试修复 (13 tests pass)
-
-### 待完成
 - [x] 指标对比验证 (Rust vs Python)
-  - indicator_compare.rs: 从币安获取1000根日线
-  - BigCycleCalculator getter 方法
-  - 输出 indicator_comparison_btcusdt.csv (1001行)
+
+## v1.2 完成进度 (更新: 2026-03-21)
+
+### 已完成 ✓
+- [x] DataFeeder: 核心数据分发器
+- [x] KlinePersistence: K线 Redis 持久化
+- [x] SymbolRegistry: 品种注册中心
+- [x] VolatilityDetector: 波动率检测器
+- [x] OrderBook: 订单簿模块 (L1/L2)
+- [x] WebSocket 重连指数退避机制
+- [x] Pine v5 完整指标模块
+- [x] 大量单元测试
 
 ## Next Action
 
-继续完成剩余测试用例 + 指标对比验证
+规划 v1.3 里程碑 - 等待用户指示
 
 ## v0.10 Enhancement 完成
 

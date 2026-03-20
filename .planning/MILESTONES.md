@@ -161,9 +161,30 @@
 **Deliverables:**
 - MockBinanceGateway: 模拟账户/持仓/订单/保证金，与币安风控一致
 - Signal Synthesis Layer: 通道退出逻辑 (tr_ratio < 1, ma5_close + PineColor)
+- SQLite 持久化 (SqliteRecordService: 6张表)
+- CSV 输出 (IndicatorCsvWriter)
 - Complete test coverage for all modules
-- Indicator comparison (Rust vs Python)
 
-**Status**: PLANNING
+**Status**: ✅ COMPLETE (2026-03-21)
 
 **Phase Directory:** `.planning/phases/08-v1.1-mock-binance/`
+
+---
+
+## v1.2: Market Data Layer Enhancement
+
+**Goal**: 市场数据层增强 - 数据分发、持久化、订单簿
+
+**Deliverables:**
+- DataFeeder: 核心数据分发器，统一分发 KLine/Tick/OrderBook 数据
+- KlinePersistence: K线 Redis 持久化，支持断线恢复
+- SymbolRegistry: 品种注册中心，统一管理交易对信息
+- VolatilityDetector: 波动率检测器，实时计算波动率指标
+- OrderBook: 订单簿模块，支持 L1/L2 行情
+- WebSocket 重连指数退避机制
+- Pine v5 完整指标模块
+- Complete unit tests
+
+**Status**: ✅ COMPLETE (2026-03-21)
+
+**Phase Directory:** `.planning/phases/09-v1.2-market-data/`
