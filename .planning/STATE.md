@@ -3,7 +3,7 @@
 ## Current Position
 
 Phase: 7 (Enhancement) - COMPLETE
-Status: v0.9 Enhancement Complete
+Status: v0.10 Enhancement Complete
 
 ## Completed
 
@@ -33,7 +33,21 @@ Status: v0.9 Enhancement Complete
 
 ## Next Action
 
-(v0.9 改进完成 - 待用户决定下一步: 编译验证/测试/新功能)
+(v0.10 改进完成 - 待用户决定下一步: 编译验证/测试/新功能)
+
+## v0.10 Enhancement 完成
+
+新增模块:
+- AccountPool (account_pool.rs): 账户保证金池，熔断保护
+  - CircuitBreakerState (Normal/Partial/Full)
+  - AccountInfo, AccountPool
+- PersistenceService (persistence.rs): 持久化服务
+  - TradeRecord, PositionSnapshot, KLineCache
+  - PersistenceService
+- StrategyPool (strategy_pool.rs): 策略资金池，支持再平衡
+  - StrategyAllocation, StrategyPool
+- VelocityPercentile (velocity.rs): 速度百分位指标
+  - VelocityPercentile, PriceDeviation, Momentum
 
 ## v0.9 Enhancement 完成
 
