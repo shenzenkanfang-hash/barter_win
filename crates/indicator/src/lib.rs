@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod big_cycle;
 pub mod ema;
 pub mod error;
 pub mod pine_color;
@@ -9,6 +10,7 @@ pub mod tr_ratio;
 pub mod velocity;
 pub mod z_score;
 
+pub use big_cycle::{BigCycleCalculator, BigCycleConfig, BigCycleIndicators, PineColorBig, TRRatioSignal};
 pub use ema::EMA;
 pub use error::IndicatorError;
 pub use pine_color::{PineColor, PineColorDetector};
