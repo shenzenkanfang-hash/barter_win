@@ -18,6 +18,21 @@ pub enum ChannelType {
     High,
 }
 
+impl std::fmt::Display for ChannelType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChannelType::Slow => write!(f, "Slow"),
+            ChannelType::High => write!(f, "High"),
+        }
+    }
+}
+
+/// Checkpoint 回调 - 用于通道切换时保存状态
+pub trait ChannelCheckpointCallback: Send + Sync {
+    /// 通道切换时调用
+    fn on_channel_switch(&self, symbol: &str, channel: ChannelType, is_high_vol: bool, high_vol_start: Option<i64>);
+}
+
 /// 波动率通道 - 管理高速/慢速通道切换
 pub struct VolatilityChannel {
     /// 品种
@@ -37,16 +52,20 @@ pub struct VolatilityChannel {
     /// EMA慢线 (26)
     ema_slow: EMA,
     /// 日线 EMA 快线 (100) - 用于长周期趋势
+    #[allow(dead_code)]
     ema_100: EMA,
     /// 日线 EMA 慢线 (200) - 用于长周期趋势
+    #[allow(dead_code)]
     ema_200: EMA,
     /// RSI (14)
     rsi: RSI,
     /// 日线 RSI (14) - 用于长周期超买超卖
+    #[allow(dead_code)]
     rsi_daily: RSI,
     /// 价格位置
     price_position: PricePosition,
     /// 日线价格位置
+    #[allow(dead_code)]
     price_position_daily: PricePosition,
 
     /// 大周期计算器 (TR Ratio, 区间位置, PineColor)
@@ -63,6 +82,11 @@ pub struct VolatilityChannel {
     volatility_threshold_1m: Decimal,
     /// 波动率阈值: 15min >= 13% 进入高速
     volatility_threshold_15m: Decimal,
+
+    /// 高波动窗口开始时间戳
+    high_vol_window_start: Option<i64>,
+    /// Checkpoint 回调 (可选)
+    checkpoint_callback: Option<Box<dyn ChannelCheckpointCallback>>,
 }
 
 impl VolatilityChannel {
@@ -88,7 +112,15 @@ impl VolatilityChannel {
             round_guard: Arc::new(RoundGuard::new()),
             volatility_threshold_1m: dec!(0.03),  // 3%
             volatility_threshold_15m: dec!(0.13), // 13%
+            high_vol_window_start: None,
+            checkpoint_callback: None,
         }
+    }
+
+    /// 设置 Checkpoint 回调
+    pub fn with_checkpoint_callback(mut self, callback: Box<dyn ChannelCheckpointCallback>) -> Self {
+        self.checkpoint_callback = Some(callback);
+        self
     }
 
     /// 处理 Tick 数据
@@ -136,6 +168,24 @@ impl VolatilityChannel {
         let form = if completed_1m.is_some() || is_high_freq != (self.current_channel == ChannelType::High) {
             let channel_changed = is_high_freq != (self.current_channel == ChannelType::High);
             if channel_changed {
+                // 更新高波动窗口时间戳
+                let is_high_vol = is_high_freq;
+                if is_high_vol {
+                    self.high_vol_window_start = Some(tick.timestamp.timestamp());
+                } else {
+                    self.high_vol_window_start = None;
+                }
+
+                // 调用 checkpoint 回调
+                if let Some(ref callback) = self.checkpoint_callback {
+                    callback.on_channel_switch(
+                        &self.symbol,
+                        self.current_channel,
+                        is_high_vol,
+                        self.high_vol_window_start,
+                    );
+                }
+
                 self.current_channel = if is_high_freq {
                     ChannelType::High
                 } else {
@@ -307,6 +357,11 @@ impl VolatilityChannel {
     /// 获取当前通道类型
     pub fn current_channel(&self) -> ChannelType {
         self.current_channel
+    }
+
+    /// 获取高波动窗口开始时间戳
+    pub fn high_vol_window_start(&self) -> Option<i64> {
+        self.high_vol_window_start
     }
 
     /// 获取大周期计算器
