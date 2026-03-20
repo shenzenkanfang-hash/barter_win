@@ -121,7 +121,7 @@ impl AccountPool {
     // ========== 状态查询 ==========
 
     /// 获取账户信息 (读锁)
-    pub fn account(&self) -> std::sync::RwLockReadGuard<'_, AccountInfo> {
+    pub fn account(&self) -> parking_lot::RwLockReadGuard<'_, AccountInfo> {
         self.account.read()
     }
 

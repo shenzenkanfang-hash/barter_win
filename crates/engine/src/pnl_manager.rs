@@ -9,23 +9,23 @@ use std::collections::{HashMap, HashSet};
 /// 负责计算和管理已实现盈亏、未实现盈亏，以及累计盈利。
 /// 支持低波动/高波动品种互斥机制和解救机制。
 ///
-/// 线程安全: 使用 RwLock 保护 unrealized_pnl，HashSet 保护波动品种集合
+/// 线程安全: 使用 RwLock 保护所有字段
 ///
 /// 设计依据: 设计文档 17.3.8
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PnlManager {
-    /// 累计盈利 (浮盈)
-    cumulative_profit: Decimal,
-    /// 已结算盈利 (实盈)
-    realized_profit: Decimal,
+    /// 累计盈利 (浮盈) (RwLock 保护)
+    cumulative_profit: RwLock<Decimal>,
+    /// 已结算盈利 (实盈) (RwLock 保护)
+    realized_profit: RwLock<Decimal>,
     /// 未实现盈亏映射 (使用 RwLock 保护)
     unrealized_pnl: RwLock<HashMap<String, Decimal>>,
     /// 低波动品种集合 (HashSet: O(1) 查找)
     low_volatility_symbols: RwLock<HashSet<String>>,
     /// 高波动品种集合 (HashSet: O(1) 查找)
     high_volatility_symbols: RwLock<HashSet<String>>,
-    /// 最后更新时间戳
-    last_update_ts: i64,
+    /// 最后更新时间戳 (RwLock 保护)
+    last_update_ts: RwLock<i64>,
 }
 
 impl Default for PnlManager {
@@ -38,12 +38,12 @@ impl PnlManager {
     /// 创建盈亏管理器
     pub fn new() -> Self {
         Self {
-            cumulative_profit: dec!(0),
-            realized_profit: dec!(0),
+            cumulative_profit: RwLock::new(dec!(0)),
+            realized_profit: RwLock::new(dec!(0)),
             unrealized_pnl: RwLock::new(HashMap::new()),
             low_volatility_symbols: RwLock::new(HashSet::new()),
             high_volatility_symbols: RwLock::new(HashSet::new()),
-            last_update_ts: 0,
+            last_update_ts: RwLock::new(0),
         }
     }
 
@@ -85,22 +85,18 @@ impl PnlManager {
     ///
     /// 盈利时增加，亏损时减少。
     pub fn update_cumulative_profit(&self, pnl: Decimal) {
-        // 注意: 这个操作需要原子化，但简单加减可以先读取再写入
-        // 如果需要严格原子性，可以使用 atomic 或其他机制
-        let _guard = self.unrealized_pnl.write();
-        // 这里简化处理，实际应该用原子操作或锁保护
-        std::mem::size_of_val(&[_guard]);
-        // 重新设计: 直接修改 cumulative_profit
+        let mut guard = self.cumulative_profit.write();
+        *guard += pnl;
     }
 
     /// 获取累计盈利
     pub fn get_cumulative_profit(&self) -> Decimal {
-        self.cumulative_profit
+        *self.cumulative_profit.read()
     }
 
     /// 获取已实现盈利
     pub fn get_realized_profit(&self) -> Decimal {
-        self.realized_profit
+        *self.realized_profit.read()
     }
 
     /// 更新单个品种的未实现盈亏 (写锁)
@@ -192,7 +188,7 @@ impl PnlManager {
         }
 
         // 查找第一个可解救的低波动品种
-        let low_vol_symbols = self.low_volatility_symbols.read().clone();
+        let low_vol_symbols: HashSet<String> = self.low_volatility_symbols.read().clone();
         for low_vol_sym in low_vol_symbols {
             let low_vol_pnl = self.get_unrealized_pnl(&low_vol_sym);
             // 只解救亏损的低波动品种
@@ -206,24 +202,24 @@ impl PnlManager {
         None
     }
 
-    /// 结算已实现盈亏
+    /// 结算已实现盈亏 (写锁)
     ///
     /// 将已实现盈亏加入实盈，累计盈利相应调整。
     pub fn settle_realized_pnl(&self, pnl: Decimal) {
-        // 注意: 这个操作需要原子化
-        // 这里简化处理，实际应该用原子操作
-        let _ = pnl;
-        // 实现应该在锁内更新
+        let mut realized = self.realized_profit.write();
+        *realized += pnl;
+        let mut cumulative = self.cumulative_profit.write();
+        *cumulative += pnl;
     }
 
-    /// 设置更新时间戳
+    /// 设置更新时间戳 (写锁)
     pub fn set_last_update_ts(&self, ts: i64) {
-        self.last_update_ts = ts;
+        *self.last_update_ts.write() = ts;
     }
 
-    /// 获取更新时间戳
+    /// 获取更新时间戳 (读锁)
     pub fn get_last_update_ts(&self) -> i64 {
-        self.last_update_ts
+        *self.last_update_ts.read()
     }
 
     /// 重置管理器 (写锁)
@@ -231,15 +227,14 @@ impl PnlManager {
         self.unrealized_pnl.write().clear();
         self.low_volatility_symbols.write().clear();
         self.high_volatility_symbols.write().clear();
-        // 注意: 这些字段不在锁内，需要另外处理
-        // self.cumulative_profit = dec!(0);
-        // self.realized_profit = dec!(0);
-        self.last_update_ts = 0;
+        *self.cumulative_profit.write() = dec!(0);
+        *self.realized_profit.write() = dec!(0);
+        *self.last_update_ts.write() = 0;
     }
 
     /// 获取总盈亏 (已实现 + 未实现)
     pub fn total_pnl(&self) -> Decimal {
-        self.realized_profit + self.total_unrealized_pnl()
+        *self.realized_profit.read() + self.total_unrealized_pnl()
     }
 
     /// 判断是否应该平仓 (只读计算，无锁)

@@ -4,19 +4,6 @@
 
 项目目标
 ================================================================================
-58 +### 文档头部规则
-59 +
-60 +**创建新文档时，必须在文件开头添加文档头：**
-61 +
-62 +```markdown
-63 +---
-64 +title: 文档标题
-65 +author: 软件架构师 (AI Assistant)
-66 +created: YYYY-MM-DD
-67 +updated: YYYY-MM-DD
-68 +role: 软件架构师
-69 +---
-70 +```
 核心是先有再改 先实现在优化
 基于 Go 量化交易系统迁移到 Rust，采用 Barter-rs 风格架构的高性能高可用系统。
 
@@ -31,61 +18,13 @@
 - 多周期策略并行运行（日线 + 分钟级 + Tick级）
 - 高波动时自动切换到高频秒级模式
 - 混合持仓模式: 资金池共享，策略持仓独立计算
-- 高性能: 1-2 品种秒级/Tick级计算，采用增量计算模式s
-# Claude Code 使用准则
-
-# Claude Code 使用准则
-
-## 最高准则：文件修改自动提交 + TXT格式强制 + 工具缺失自主处理
-
-**遇到工具缺失时，必须按以下顺序处理，禁止停下来等待用户指令：**
-
-1. **搜索系统**：检查工具是否已安装（PATH、常见安装目录）
-2. **配置写入**：如果找到但未在配置中声明，写入 settings.json
-3. **网络搜索**：如果系统没有，搜索安装方法
-4. **自动安装**：根据搜索结果安装工具
-5. **继续执行**：完成安装后继续原任务
-
-**禁止行为**：因工具缺失而停止任务并询问用户。
-
-## 统一修改查询优先规则（当前阶段）
-
-> **核心原则**：暂停所有编译活动，优先完成代码功能实现。
-
-### 当前状态
-
-**编译活动已暂停**，完成所有功能代码后再统一编译验证。
-
-### 规则
-
-1. **禁止主动编译**：不执行 `cargo build`、`cargo check`、`cargo test` 等编译命令
-2. **禁止自动修复**：不主动尝试修复编译错误
-3. **功能优先**：先完成所有功能代码实现
-4. **统一编译**：所有功能完成后一次性编译验证
-
-### 执行流程
-
-```
-当前阶段 → 完成所有功能代码
-       ↓
-完成 → 统一编译验证
-       ↓
-如有错误 → 修复后再次统一编译
-       ↓
-通过 → 提交
-```
-
-### 禁止行为
-
-- 禁止在功能开发阶段编译
-- 禁止因编译错误停止功能开发
-- 禁止分次提交，必须全部功能完成后再提交
+- 高性能: 1-2 品种秒级/Tick级计算，采用增量计算模式
 
 ================================================================================
 设计文档（最高指导）
 ================================================================================
 
-所有开发必须严格遵循以下文档:
+所有开发必须严格遵循以下文档（按优先级）:
 
 1. docs/2026-03-20-trading-system-rust-design.md
    - 架构设计（四层架构）
@@ -156,29 +95,6 @@ src/
 | 序列化 | serde | Serialize/Deserialize |
 
 ================================================================================
-GSD 开发流程
-================================================================================
-
-项目使用 GSD (Get Shit Done) 阶段化管理:
-
-1. 阶段划分 (见 .planning/ROADMAP.md)
-   - Phase 1: Foundation (错误类型、核心结构)
-   - Phase 2: Market Data (WebSocket、K线合成)
-   - Phase 3: Indicator (EMA、RSI、Pine颜色)
-   - Phase 4: Strategy (策略决策)
-   - Phase 5: Engine (风控、执行)
-
-2. 每个阶段的文件结构
-   .planning/phases/XX-name/
-   ├── XX-CONTEXT.md    # 阶段上下文和边界
-   └── XX-PLAN.md      # 具体任务和验收标准
-
-3. 开发顺序
-   - 每个阶段按 Wave 并行化任务
-   - 阶段完成必须更新 .planning/STATE.md
-   - 所有代码修改后自动 git commit
-
-================================================================================
 代码规范（强制）
 ================================================================================
 
@@ -204,55 +120,48 @@ GSD 开发流程
 当前进度
 ================================================================================
 
-Phase 1 (Foundation): 完成
-- TradingError 错误类型
-- Order、Position、FundPool 核心结构
-
-Phase 2 (Market Data): 完成
-- Tick、KLine、Period 类型
-- KLineSynthesizer (O(1)增量合成)
-- MarketConnector、MarketStream traits
-
-Phase 3 (Indicator): 完成
-- EMA (O(1)增量计算)
-- RSI (相对强弱指数)
-- PineColor (趋势颜色检测)
-- PricePosition (价格位置)
-
-Phase 4 (Strategy): 完成
-- Strategy trait
-- Signal、TradingMode、OrderRequest 类型
-
-Phase 5 (Engine): 完成
-- RiskPreChecker (风控预检)
-- OrderExecutor (订单执行)
-- ModeSwitcher (模式切换)
-
-Phase 6: Integration (进行中)
-- TradingEngine 主引擎
-- MockMarketStream/MockMarketConnector
-- main.rs 程序入口
-- 类型转换模块 (Side, OrderType)
-- 完整交易流程串联
+| Phase | 状态 | 说明 |
+|-------|------|------|
+| Phase 1: Foundation | 完成 | TradingError, Order, Position |
+| Phase 2: Market Data | 完成 | Tick, KLine, KLineSynthesizer, MarketConnector |
+| Phase 3: Indicator | 完成 | EMA, RSI, PineColor, PricePosition |
+| Phase 4: Strategy | 完成 | Strategy trait, Signal, TradingMode |
+| Phase 5: Engine | 完成 | RiskPreChecker, OrderExecutor, ModeSwitcher |
+| Phase 6: Integration | 完成 | TradingEngine, main.rs |
+| Phase 7: Enhancement | 完成 | RiskReChecker, PnlManager, MarketStatusDetector等 |
+| Phase A: 线程安全修复 | 完成 | parking_lot::RwLock 保护 |
+| Phase A.5 | 进行中 | FundPool → AccountPool 合并 |
 
 ================================================================================
 角色定位
 ================================================================================
 
-**当前角色**: 开发者 (Developer)
-**角色文件**: C:\Users\char\.claude\roles\engineering\高级开发者.txt
+当前角色（固定）: 产品经理
 
-**当前任务**: Phase A 线程安全修复 - 已完成
-- AccountPool: RwLock<AccountInfo> ✅
-- StrategyPool: RwLock<HashMap> ✅
-- OrderCheck: RwLock<HashMap> ✅
-- PnlManager: RwLock<HashMap> + HashSet ✅
-- PositionManager: RwLock<LocalPosition> ✅
-- CheckTable: RwLock<FnvHashMap> ✅
+根据系统 CLAUDE.md 规则，产品经理是固定角色，不随任务状态变化。
+启动时加载: C:/Users/char/.claude/roles/product/产品经理.txt
 
-**下一步待办**:
-1. Phase A.5: FundPool → AccountPool 合并
-2. Phase B: SymbolRegistry + 多品种流水线
-3. 统一编译验证
+产品经理职责:
+- 主持项目开发流程
+- 协调各角色（架构师、开发者、测试工程师）
+- 管理阶段进度
+- 与用户通信的唯一入口
+
+子代理派发规则:
+- 分析阶段: claude -p "读取工作流程优化器角色，执行analyze任务"
+- 设计阶段: claude -p "读取软件架构师角色，执行design任务"
+- 执行阶段: claude -p "读取开发者角色，执行execute任务"
+- 验证阶段: claude -p "读取测试工程师角色，执行verify任务"
+- 评审阶段: claude -p "读取代码评审角色，执行validate任务"
+
+================================================================================
+编译活动规则
+================================================================================
+
+根据系统 CLAUDE.md 规则:
+- 开发阶段禁止编译: 不执行 cargo build/check/test
+- 功能优先: 先完成所有功能代码实现
+- 编译归属测试工程师: verify 阶段由测试工程师执行编译验证
+- 自动提交: 每次修改或创建文件后自动 git commit
 
 ================================================================================
