@@ -264,4 +264,16 @@ mod tests {
         let notifier = TelegramNotifier::default();
         assert!(!notifier.is_configured());
     }
+
+    #[tokio::test]
+    #[ignore] // 需要网络连接，CI环境中跳过
+    async fn test_telegram_send_real() {
+        let notifier = TelegramNotifier::new(
+            "8635953698:AAFckAaPlihQSpyTukUB7x3thM4lbzdab_Y".to_string(),
+            "942620579".to_string(),
+        );
+
+        let result = notifier.send("🧪 *测试消息*\n\nTelegram 通知功能正常！").await;
+        assert!(result.is_ok(), "Telegram send failed: {:?}", result);
+    }
 }
