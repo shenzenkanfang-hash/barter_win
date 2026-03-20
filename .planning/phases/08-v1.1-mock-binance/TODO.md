@@ -4,17 +4,17 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
 
 ## A. MockBinanceGateway - 模拟币安网关
 --------------------------------------------------------------------------------
-[ ] 创建 engine/src/mock_binance_gateway.rs
-[ ] 实现 MockAccount 模拟账户
-[ ] 实现 MockPosition 模拟持仓
-[ ] 实现 MockOrder 模拟订单
-[ ] 实现 MockMargin 模拟保证金计算
-[ ] 实现风控检查（与币安一致）
-    [ ] check_account_balance() 可用余额检查
-    [ ] check_position_limit() 持仓限制检查
-    [ ] check_margin_sufficient() 保证金充足检查
-    [ ] check_forced_liquidation() 强制平仓检查
-[ ] 实现立即成交机制（Market Order）
+[x] 创建 engine/src/mock_binance_gateway.rs
+[x] 实现 MockAccount 模拟账户
+[x] 实现 MockPosition 模拟持仓
+[x] 实现 MockOrder 模拟订单
+[x] 实现 MockMargin 模拟保证金计算
+[x] 实现风控检查（与币安一致）
+    [x] check_account_balance() 可用余额检查
+    [x] check_position_limit() 持仓限制检查
+    [x] check_margin_sufficient() 保证金充足检查
+    [x] check_forced_liquidation() 强制平仓检查
+[x] 实现立即成交机制（Market Order）
 [ ] CSV 输出
     [ ] trades.csv 交易记录
     [ ] positions.csv 持仓变化
@@ -33,9 +33,9 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
   2. 退出高速：tr_ratio < 1 → 回到慢速通道
   3. 日线趋势平仓：ma5_close位置 + Pine颜色
 
-[ ] 实现 tr_ratio < 1 退出条件判断
-[ ] 实现日线趋势平仓条件(ma5_close + PineColor)
-[ ] 实现通道状态变化记录
+[x] 实现 tr_ratio < 1 退出条件判断
+[x] 实现日线趋势平仓条件(ma5_close + PineColor)
+[x] 实现通道状态变化记录
 [ ] 输出 trigger_log.csv
 
 ## C. 完整测试用例
@@ -55,10 +55,10 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
 [ ] 引擎层测试
     [ ] VolatilityChannel 通道切换测试
     [ ] TradingEngine 集成测试
-[ ] MockBinanceGateway 测试
-    [ ] 正常交易流程测试
-    [ ] 风控拒绝场景测试
-    [ ] 强制平仓场景测试
+[x] MockBinanceGateway 测试
+    [x] 正常交易流程测试
+    [x] 风控拒绝场景测试
+    [x] 强制平仓场景测试
 
 ## D. 指标对比验证
 --------------------------------------------------------------------------------
