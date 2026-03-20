@@ -188,3 +188,17 @@
 **Status**: ✅ COMPLETE (2026-03-21)
 
 **Phase Directory:** `.planning/phases/09-v1.2-market-data/`
+
+---
+
+## v1.3: Indicator Module Cleanup
+
+**Goal**: 简化指标库，删除零散指标，保留核心模块
+
+**Deliverables:**
+- 保留 `pine_indicator_full.rs` - Pine v5 完整指标 (PineColorDetector, EMA, RMA, DominantCycleRSI)
+- 保留 `day_cycle.rs` - 大周期指标 (BigCycleCalculator)
+- 新增 `indicator_1m.rs` - 1分钟指标（非 Pine 逻辑）
+- 删除零散指标: ema.rs, rsi.rs, pine_color.rs, price_position.rs, tr_ratio.rs, velocity.rs, z_score.rs, big_cycle.rs, error.rs
+
+**Status**: ✅ COMPLETE (2026-03-21)
