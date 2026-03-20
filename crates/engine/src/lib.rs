@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod checkpoint;
 pub mod account_pool;
 pub mod channel;
 pub mod check_table;
@@ -26,6 +27,7 @@ pub mod telegram_notifier;
 pub mod thresholds;
 
 pub use account_pool::{AccountInfo, AccountPool, CircuitBreakerState};
+pub use checkpoint::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
 pub use channel::{ChannelType, VolatilityChannel};
 pub use check_table::{CheckEntry, CheckTable};
 pub use engine::TradingEngine;
