@@ -425,8 +425,9 @@ mod tests {
         assert_eq!(pool.circuit_state(), CircuitBreakerState::Full);
         assert!(!pool.can_trade(dec!(1000)));
 
-        // 恢复阶段：盈利 6% (超过恢复阈值 5%)
-        pool.update_equity(dec!(6000), 1000 + 300); // 超过冷却时间
+        // 恢复阶段：盈利 14500 (cumulative_profit 变为 +2500)
+        // loss_ratio = -0.025 <= -0.025 (recovery_threshold)，恢复到 Normal
+        pool.update_equity(dec!(14500), 1000 + 300); // 超过冷却时间
         assert_eq!(pool.circuit_state(), CircuitBreakerState::Normal);
         assert!(pool.can_trade(dec!(1000)));
     }

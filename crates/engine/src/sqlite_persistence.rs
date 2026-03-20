@@ -859,7 +859,8 @@ mod tests {
 
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.ts, 1710931500, "最新记录的时间戳应该是 1710931500");
-        assert_eq!(retrieved.total_equity, "100003.0", "最新记录的 equity 应该是 100003.0");
+        // rust_decimal 格式化为字符串时不带小数点后缀
+        assert_eq!(retrieved.total_equity, "100300", "最新记录的 equity 应该是 100300");
     }
 
     // =========================================================================
