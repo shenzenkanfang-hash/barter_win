@@ -48,6 +48,10 @@ Status: v0.10 Enhancement Complete
   - StrategyAllocation, StrategyPool
 - VelocityPercentile (velocity.rs): 速度百分位指标
   - VelocityPercentile, PriceDeviation, Momentum
+- BigCycleCalculator (big_cycle.rs): 大周期指标计算器
+  - TR Ratio (tr_ratio_5d_20d, tr_ratio_20d_60d)
+  - 区间位置 (pos_norm_20, ma5_in_20d_ma5_pos, ma20_in_60d_ma20_pos)
+  - PineColor (三种参数组合: 100/200, 20/50, 12/26)
 
 ## v0.9 Enhancement 完成
 
