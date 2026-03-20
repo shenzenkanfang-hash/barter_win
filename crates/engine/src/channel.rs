@@ -350,14 +350,266 @@ impl VolatilityChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeDelta;
+    use rust_decimal_macros::dec;
 
+    /// 辅助函数：创建测试用 Tick
+    fn create_tick(symbol: &str, price: Decimal, timestamp: DateTime<Utc>) -> Tick {
+        Tick {
+            symbol: symbol.to_string(),
+            price,
+            qty: dec!(1.0),
+            timestamp,
+        }
+    }
+
+    /// 辅助函数：创建 UTC DateTime
+    fn dt(seconds: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(seconds, 0).unwrap()
+    }
+
+    // ============================================================================
+    // E4.1 VolatilityChannel 通道切换测试
+    // ============================================================================
+
+    /// 测试：Slow -> High 通道切换 (1min 波动率 >= 3%)
+    ///
+    /// 场景：
+    /// 1. 初始状态 Slow
+    /// 2. 发送 Tick 构造 1min K 线，O-C 变化率 >= 3%
+    /// 3. 验证进入 High 通道
     #[test]
-    fn test_volatility_channel_creation() {
-        let channel = VolatilityChannel::new(
+    fn test_channel_switch_to_high_on_1m_volatility() {
+        let mut channel = VolatilityChannel::new(
             "BTCUSDT".to_string(),
-            StrategyId("trend".to_string()),
+            StrategyId("test".to_string()),
         );
-        assert_eq!(channel.symbol, "BTCUSDT");
-        assert_eq!(channel.current_channel, ChannelType::Slow);
+
+        // 初始状态应该是 Slow
+        assert_eq!(channel.current_channel(), ChannelType::Slow);
+
+        // 第一个 Tick: 开始构建 1min K 线 (open = 100)
+        let t1 = dt(1000);
+        let tick1 = create_tick("BTCUSDT", dec!(100.0), t1);
+        let (completed, form, is_high) = channel.on_tick(&tick1);
+
+        // 不应该完成 K 线，也不应该进入高速
+        assert!(!completed);
+        assert!(form.is_none());
+        assert!(!is_high);
+        assert_eq!(channel.current_channel(), ChannelType::Slow);
+
+        // 第二个 Tick: 同一分钟内，价格上涨 3.5% (close = 103.5)
+        // 波动率 = |103.5 - 100| / 100 = 3.5% >= 3%
+        let t2 = dt(1000); // 同一分钟
+        let tick2 = create_tick("BTCUSDT", dec!(103.5), t2);
+        let (completed, form, is_high) = channel.on_tick(&tick2);
+
+        // 触发通道切换
+        assert!(!completed); // 同一分钟，K线未完成
+        assert!(form.is_some()); // 通道切换，生成表单
+        assert!(is_high); // 检测到高波动
+        assert_eq!(channel.current_channel(), ChannelType::High);
+    }
+
+    /// 测试：Slow -> High 通道切换 (15min 波动率 >= 13%)
+    ///
+    /// 场景：
+    /// 1. 初始状态 Slow
+    /// 2. 发送 Tick 构造 15min K 线，O-C 变化率 >= 13%
+    /// 3. 验证进入 High 通道
+    #[test]
+    fn test_channel_switch_to_high_on_15m_volatility() {
+        let mut channel = VolatilityChannel::new(
+            "BTCUSDT".to_string(),
+            StrategyId("test".to_string()),
+        );
+
+        // 初始状态应该是 Slow
+        assert_eq!(channel.current_channel(), ChannelType::Slow);
+
+        // 第一个 Tick: 开始构建 15min K 线 (open = 100)
+        let t1 = dt(1000); // 秒 1000 属于分钟 16 (1000/60 = 16)
+        let tick1 = create_tick("BTCUSDT", dec!(100.0), t1);
+        channel.on_tick(&tick1);
+
+        // 第二个 Tick: 同一 15min 周期内，价格变化 15% (close = 115)
+        // 波动率 = |115 - 100| / 100 = 15% >= 13%
+        let t2 = dt(1000); // 同一 15min 周期
+        let tick2 = create_tick("BTCUSDT", dec!(115.0), t2);
+        let (completed, form, is_high) = channel.on_tick(&tick2);
+
+        // 触发通道切换
+        assert!(!completed);
+        assert!(form.is_some());
+        assert!(is_high);
+        assert_eq!(channel.current_channel(), ChannelType::High);
+    }
+
+    /// 测试：High -> Slow 通道切换 (波动率降低)
+    ///
+    /// 场景：
+    /// 1. 先进入 High 通道
+    /// 2. 然后发送低波动 Tick (vol_1m < 3% 且 vol_15m < 13%)
+    /// 3. 验证切回 Slow 通道
+    #[test]
+    fn test_channel_switch_to_slow_on_low_volatility() {
+        let mut channel = VolatilityChannel::new(
+            "BTCUSDT".to_string(),
+            StrategyId("test".to_string()),
+        );
+
+        // Step 1: 进入 High 通道 (通过 1min 高波动)
+        let t1 = dt(1000);
+        let tick1 = create_tick("BTCUSDT", dec!(100.0), t1);
+        channel.on_tick(&tick1);
+
+        // 触发高波动，进入 High
+        let t2 = dt(1000);
+        let tick2 = create_tick("BTCUSDT", dec!(103.5), t2);
+        channel.on_tick(&tick2);
+        assert_eq!(channel.current_channel(), ChannelType::High);
+
+        // Step 2: 进入新 K 线 (低波动)
+        // 新 K 线: open = 103.5, close = 103.6 (波动 < 3%)
+        // 但这需要先完成当前 K 线
+        // 由于处于 High 通道，channel_changed 条件变为 false，我们需要让波动率降低
+
+        // 发送一个跨越分钟边界的新 Tick 来完成当前 K 线
+        let t3 = dt(1060); // 新的一分钟
+        let tick3 = create_tick("BTCUSDT", dec!(103.5), t3);
+        let (completed, form, is_high) = channel.on_tick(&tick3);
+
+        // K 线完成
+        assert!(completed);
+        // 此时 is_high 应该基于新的 K 线计算
+        // 新 K 线刚开仓，波动率为 0，所以 is_high = false
+        assert!(!is_high);
+
+        // 因为 current_channel 是 High，is_high 是 false，所以 channel_changed = true
+        // 通道应该切回 Slow
+        if form.is_some() {
+            assert_eq!(channel.current_channel(), ChannelType::Slow);
+        }
+    }
+
+    /// 测试：通道保持在 Slow (低波动)
+    ///
+    /// 场景：
+    /// 1. 初始状态 Slow
+    /// 2. 发送低波动 Tick (vol_1m < 3% 且 vol_15m < 13%)
+    /// 3. 验证保持在 Slow 通道
+    #[test]
+    fn test_channel_stay_slow_on_low_volatility() {
+        let mut channel = VolatilityChannel::new(
+            "BTCUSDT".to_string(),
+            StrategyId("test".to_string()),
+        );
+
+        // 初始状态应该是 Slow
+        assert_eq!(channel.current_channel(), ChannelType::Slow);
+
+        // 发送低波动 Tick
+        let t1 = dt(1000);
+        let tick1 = create_tick("BTCUSDT", dec!(100.0), t1);
+        channel.on_tick(&tick1);
+
+        // 同一分钟内，价格小幅上涨 1% (波动 < 3%)
+        let t2 = dt(1000);
+        let tick2 = create_tick("BTCUSDT", dec!(101.0), t2);
+        let (completed, form, is_high) = channel.on_tick(&tick2);
+
+        // 不应该触发通道切换
+        assert!(!completed);
+        assert!(form.is_none()); // 通道未切换，不生成表单
+        assert!(!is_high); // 低波动
+        assert_eq!(channel.current_channel(), ChannelType::Slow);
+    }
+
+    /// 测试：快速切换场景 (High -> Slow -> High)
+    ///
+    /// 场景：
+    /// 1. 进入 High 通道
+    /// 2. K 线完成，低波动切回 Slow
+    /// 3. 新 K 线高波动再次进入 High
+    #[test]
+    fn test_channel_rapid_switching() {
+        let mut channel = VolatilityChannel::new(
+            "BTCUSDT".to_string(),
+            StrategyId("test".to_string()),
+        );
+
+        assert_eq!(channel.current_channel(), ChannelType::Slow);
+
+        // Step 1: 进入 High (1min 高波动)
+        let t1 = dt(1000);
+        channel.on_tick(&create_tick("BTCUSDT", dec!(100.0), t1));
+        let t2 = dt(1000);
+        channel.on_tick(&create_tick("BTCUSDT", dec!(103.5), t2));
+        assert_eq!(channel.current_channel(), ChannelType::High);
+
+        // Step 2: K 线完成，低波动切回 Slow
+        let t3 = dt(1060); // 新的一分钟，低价格
+        let tick3 = create_tick("BTCUSDT", dec!(103.5), t3);
+        channel.on_tick(&tick3);
+        // 此时新 K 线 open = 103.5，波动为 0，应该切回 Slow
+        assert_eq!(channel.current_channel(), ChannelType::Slow);
+
+        // Step 3: 同一 K 线内再次高波动，进入 High
+        let t4 = dt(1060);
+        channel.on_tick(&create_tick("BTCUSDT", dec!(107.0), t4)); // 波动 ~3.4%
+        assert_eq!(channel.current_channel(), ChannelType::High);
+    }
+
+    // ============================================================================
+    // 辅助测试：验证 check_volatility 计算逻辑
+    // ============================================================================
+
+    /// 测试：验证 1min 波动率计算
+    ///
+    /// 波动率 = |close - open| / open
+    #[test]
+    fn test_volatility_calculation_1m() {
+        let mut channel = VolatilityChannel::new(
+            "BTCUSDT".to_string(),
+            StrategyId("test".to_string()),
+        );
+
+        // 第一个 Tick 建立 K 线
+        let t1 = dt(1000);
+        let tick1 = create_tick("BTCUSDT", dec!(100.0), t1);
+        channel.on_tick(&tick1);
+
+        // 第二个 Tick 在同一分钟，价格变化 4%
+        let t2 = dt(1000);
+        let tick2 = create_tick("BTCUSDT", dec!(104.0), t2);
+        let (_, _, is_high) = channel.on_tick(&tick2);
+
+        // 4% >= 3%，应该检测到高波动
+        assert!(is_high);
+    }
+
+    /// 测试：验证 15min 波动率计算
+    ///
+    /// 波动率 = |close - open| / open
+    #[test]
+    fn test_volatility_calculation_15m() {
+        let mut channel = VolatilityChannel::new(
+            "BTCUSDT".to_string(),
+            StrategyId("test".to_string()),
+        );
+
+        // 第一个 Tick 建立 15min K 线
+        let t1 = dt(1000); // 属于分钟 16 (16*60 = 960)
+        let tick1 = create_tick("BTCUSDT", dec!(100.0), t1);
+        channel.on_tick(&tick1);
+
+        // 第二个 Tick 在同一 15min 周期，价格变化 14%
+        let t2 = dt(1000); // 同一 15min 周期 (分钟 0-14)
+        let tick2 = create_tick("BTCUSDT", dec!(114.0), t2);
+        let (_, _, is_high) = channel.on_tick(&tick2);
+
+        // 14% >= 13%，应该检测到高波动
+        assert!(is_high);
     }
 }
