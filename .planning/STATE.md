@@ -51,7 +51,7 @@ Status: v0.8 Issue Fix Complete
 
 ### v0.8 设计文档整合: 旧代码逻辑归档
 
-新增文档: `docs/2026-03-20-trading-system-rust-design.md` 第十七章 (17.3.7-17.3.8)
+新增文档: `docs/2026-03-20-trading-system-rust-design.md` 第十七章 (17.3.7-17.3.9)
 
 整合内容:
 - 17.3.7 风控引擎三层架构 (AccountPool/StrategyPool/OrderCheck)
@@ -62,6 +62,10 @@ Status: v0.8 Issue Fix Complete
   - 低波动/高波动品种互斥机制
   - rescue_low_volatility_symbols() 解救机制
   - 浮盈/实盈区分，累计盈利
+- 17.3.9 交易对规则模块 (SymbolRules)
+  - SymbolRules: 交易对规则数据模型
+  - effective_min_qty: 实际有效最小开仓数量
+  - calculate_open_qty(): 基于名义价值计算合规数量
 
 设计决策:
 - 品种规则需要专门的 SymbolRules 小模块处理

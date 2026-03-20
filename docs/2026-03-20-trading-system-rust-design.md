@@ -1829,4 +1829,116 @@ RescueResult 结构:
 - 记录解救历史
 ```
 
+--------------------------------------------------------------------------------
+17.3.9 交易对规则模块 (SymbolRules)
+--------------------------------------------------------------------------------
+
+本文档描述基于旧代码 `symbol_rule_service.py` 的交易对规则模块设计。
+
+### 17.3.9.1 核心组件
+
+| 组件 | 类型 | 说明 |
+|------|------|------|
+| SymbolRules | 数据模型 | 交易对规则不可变对象 |
+| SymbolRuleParser | 解析器 | 从Redis读取并解析交易对规则 |
+| LeverageCommissionCache | 缓存管理器 | 杠杆档位/手续费数据缓存 |
+
+### 17.3.9.2 SymbolRules 数据模型
+
+```
+@dataclass(frozen=True)
+struct SymbolRules {
+    symbol:             String,  // 交易对名称
+    price_precision:    u8,      // 价格精度
+    quantity_precision: u8,      // 数量精度
+    tick_size:          f64,     // 最小价格变动
+    min_qty:            f64,     // 交易所原始最小数量
+    min_notional:       f64,     // 最小名义价值
+    max_notional:       f64,     // 最大名义价值
+    leverage:           u32,     // 杠杆倍数
+    maker_fee:          f64,     // 挂单手续费率
+    taker_fee:          f64,     // 吃单手续费率
+    close_min_ratio:    f64,     // 平仓最小盈亏比阈值
+    min_value_threshold:f64,     // 下单最小名义价值阈值
+    update_ts:          i64,     // 规则更新时间戳
+}
+```
+
+关键属性:
+| 属性 | 说明 |
+|------|------|
+| effective_min_qty | 实际有效最小开仓数量（自动计算） |
+| step_size | 数量最小步进 = 10^(-quantity_precision) |
+
+### 17.3.9.3 effective_min_qty 计算逻辑
+
+原始最小数量(min_qty)不能直接使用，需计算实际有效最小开仓数量:
+
+```
+1. 理论最小数量 = max(min_notional / tick_size, min_qty)
+2. 按数量精度取整
+3. 校验取整后仍满足最小名义价值
+```
+
+### 17.3.9.4 核心方法
+
+**round_price()**: 价格取整
+- 按 tick_size 步进取整
+- 按 price_precision 精度取舍
+
+**round_qty()**: 数量取整
+- 使用 effective_min_qty 确保不低于最低数量
+- 按 quantity_precision 精度取舍
+
+**validate_order()**: 订单校验
+- 检查数量 >= effective_min_qty
+- 检查名义价值 >= min_value_threshold
+
+**calculate_open_qty()**: 基于名义价值计算合规开仓数量
+- 使用 Decimal 保证高精度计算
+- 确保数量 >= effective_min_qty
+- 按步进取整，最终验证名义价值达标
+
+### 17.3.9.5 SymbolRuleParser 解析器
+
+职责:
+1. 从Redis读取主交易对规则 (symbol_rules Hash)
+2. 获取杠杆档位和手续费率 (优先缓存，1小时刷新)
+3. 解析转换为标准 SymbolRules 对象
+
+缓存策略:
+| 数据类型 | 缓存Key | 刷新间隔 |
+|----------|---------|----------|
+| 主规则 | symbol_rules | 实时 |
+| 杠杆档位 | leverage_brackets | 1小时 |
+| 手续费率 | commission_info | 1小时 |
+
+### 17.3.9.6 Redis Key 设计
+
+| Key | 类型 | 说明 |
+|-----|------|------|
+| symbol_rules | Hash | 主交易对规则 |
+| leverage_brackets | Hash | 杠杆档位缓存 |
+| commission_info | Hash | 手续费率缓存 |
+
+### 17.3.9.7 使用示例
+
+```rust
+// 获取交易对规则
+let parser = SymbolRuleParser::new();
+let rules = parser.get_symbol_rules("BTCUSDT").unwrap();
+
+// 价格取整
+let price = rules.round_price(68000.123456);  // → 68000.12
+
+// 数量取整
+let qty = rules.round_qty(0.0001);  // → 有效最小数量
+
+// 订单校验
+let is_valid = rules.validate_order(price, qty);
+
+// 基于名义价值计算开仓数量
+let qty = rules.calculate_open_qty(10.0, 68000.0);  // 10 USDT @ 68000
+```
+
 ================================================================================
