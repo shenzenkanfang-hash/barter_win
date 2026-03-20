@@ -10,7 +10,7 @@ GSD-Phase: planning
 一、项目概述
 ================================================================================
 
-目标：串联整个交易流程，实现 Tick 接收 → 指标计算 → 策略信号 → 风控预检 → 下单执行 → 持仓更新的全链路闭环。
+目标：串联整个交易流程，实现 事件驱动流程：接收 → 指标计算 → 策略信号 → 风控预检 → 下单执行 → 持仓更新的全链路闭环。
 
 运行模式：实时模拟（连接 Binance WebSocket）
 数据来源：Binance WebSocket 实时行情
@@ -27,7 +27,7 @@ GSD-Phase: planning
 |                    TradingEngine (主引擎)                  |
 +----------------------------------------------------------+
 |  on_tick(tick)                                            |
-|    1. DataFeeder 广播 Tick                                |
+|    1. DataFeeder 广播事件                                |
 |    2. 指标层计算 (TR/Pine颜色/价格位置)                    |
 |    3. Strategy 生成信号                                   |
 |    4. SignalSynthesisLayer 合成信号                        |
@@ -77,13 +77,13 @@ Binance WebSocket
 
 阶段 1: DataFeeder + 指标层集成
 --------------------------------------------------------------------------------
-目标: Tick 数据接收并驱动指标实时计算
+目标: 事件驱动指标实时计算
 
 任务:
 1. 实现 DataFeeder 结构体
    - 建立 Binance WebSocket 连接 (wss://stream.binance.com:9443/ws)
    - 订阅 KLine stream (1m)
-   - 实现 Tick 数据分发
+   - 实现事件数据分发
 
 2. 实现 VolatilityDetector
    - 计算 1m 波动率
@@ -101,7 +101,7 @@ Binance WebSocket
 任务:
 1. 实现 Strategy trait
    - on_kline_close(): K线完成时生成信号
-   - on_tick(): Tick 级快速判断
+   - on_event(): 事件级快速判断
 
 2. 实现 SignalSynthesisLayer
    - 综合多信号源
@@ -146,7 +146,7 @@ Binance WebSocket
    - 事件循环
 
 3. 端到端测试
-   - 接收真实 Tick 数据
+   - 接收真实事件数据
    - 验证指标计算
    - 验证信号生成
    - 验证订单执行
@@ -163,7 +163,7 @@ pub trait MarketDataFeeder: Send + Sync {
     fn start(&self) -> Result<(), TradeError>;
     fn subscribe(&self, symbols: &[String]) -> Result<(), TradeError>;
     fn on_tick<F>(&self, callback: F)
-    where F: Fn(Tick) + Send + 'static;
+    where F: Fn(Event) + Send + 'static;
 }
 
 4.2 TradingEngine
@@ -202,7 +202,7 @@ impl TradingEngine {
 4.3 Tick 结构
 
 #[derive(Debug, Clone)]
-pub struct Tick {
+pub struct Event {
     pub symbol: String,
     pub price: Decimal,
     pub volume: Decimal,
@@ -218,7 +218,7 @@ pub struct Tick {
 
 5.1 高频路径无锁
 
-- Tick 接收、指标更新、策略判断全部无锁
+- 事件接收、指标更新、策略判断全部无锁
 - 锁仅用于下单和资金更新
 - RiskPreChecker 在锁外执行所有检查
 
@@ -231,7 +231,7 @@ pub struct Tick {
 5.3 事件驱动
 
 - K线完成时触发策略信号
-- Tick 驱动价格位置指标
+- 事件驱动价格位置指标
 - 波动率变化触发通道切换
 
 ================================================================================
@@ -247,7 +247,7 @@ pub struct Tick {
 
 6.2 集成测试
 
-- Tick → 指标 → 信号 全流程
+- 事件 → 指标 → 信号 全流程
 - 信号 → 风控 → 下单 全流程
 - 订单 → 持仓 → 资金 全流程
 
