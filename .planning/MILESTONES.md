@@ -75,3 +75,73 @@
 - End-to-end compilation
 
 **Status**: COMPLETE (代码实现完成,待编译验证)
+
+---
+
+## v0.7: Pipeline Architecture
+
+**Goal**: Species-level pipeline parallel architecture
+
+- Check table (CheckTable)
+- Round guard (one-round encoding)
+- PipelineForm (full flow form)
+- SymbolRules (trading pair rules)
+- VolatilityChannel (slow/fast channel)
+- Position mutex check
+
+**Status**: COMPLETE
+
+---
+
+## v0.8: Risk Control Enhancement
+
+**Goal**: Three-layer risk architecture
+
+- AccountPool: Account margin pool with circuit breaker
+- StrategyPool: Strategy margin pool with rebalancing
+- OrderCheck: Order risk checker with Lua script
+- PnlManager: Profit/loss management
+- RiskReChecker: Lock-in risk re-check
+
+**Status**: COMPLETE
+
+---
+
+## v0.9: Strategy Enhancement
+
+**Goal**: Strategy state machine
+
+- TrendStrategy: Trend strategy state machine
+- PinStrategy: Martin/pin strategy state machine
+- ZScore indicator framework
+- TRRatio indicator framework
+- MarketStatusDetector: Market status detection
+
+**Status**: COMPLETE
+
+---
+
+## v0.10: Persistence & Indicators
+
+**Goal**: Persistence service and advanced indicators
+
+- PersistenceService: Trade record, position snapshot
+- AccountPool: Account margin pool with circuit breaker
+- StrategyPool: Strategy fund pool with rebalancing
+- VelocityPercentile: Velocity percentile indicator
+- PriceDeviation: Price deviation indicator
+- Momentum: Momentum indicator
+
+**Status**: COMPLETE
+
+---
+
+## v1.0: Integration & Testing (Next)
+
+**Goal**: Full system integration and compilation verification
+
+- Compile and verify all modules
+- Adjust indicator calculations based on Python code
+- Integration testing with mock data
+
+**Status**: PENDING
