@@ -31,7 +31,7 @@ pub use account_pool::{AccountInfo, AccountPool, CircuitBreakerState};
 pub use checkpoint::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
 pub use channel::{ChannelType, VolatilityChannel};
 pub use check_table::{CheckEntry, CheckTable};
-pub use pipeline::{Pipeline, Processor};
+pub use pipeline::{Pipeline, Processor, MockIndicatorProcessor, MockStrategyProcessor, MockRiskProcessor};
 pub use engine::TradingEngine;
 pub use error::EngineError;
 pub use gateway::ExchangeGateway;

@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
-use crate::checkpoint::{CheckpointLogger, Stage, StageResult};
-use crate::check_table::CheckTable;
+use crate::checkpoint::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
+use crate::check_table::{CheckEntry, CheckTable};
+use indicator::PineColor;
 use market::types::Tick;
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use strategy::types::{OrderRequest, Side, Signal};
 
@@ -162,6 +164,145 @@ impl CheckpointLogger for NoOpLogger {
     fn log_checkpoint(&self, _: &str, _: &[StageResult], _: Option<Stage>) {}
 }
 
+/// Mock 指标处理器 - 可配置结果
+pub struct MockIndicatorProcessor {
+    should_pass: bool,
+    details: String,
+    blocked_reason: Option<String>,
+}
+
+impl MockIndicatorProcessor {
+    pub fn new_pass(details: &str) -> Self {
+        Self {
+            should_pass: true,
+            details: details.to_string(),
+            blocked_reason: None,
+        }
+    }
+
+    pub fn new_blocking(reason: &str) -> Self {
+        Self {
+            should_pass: false,
+            details: String::new(),
+            blocked_reason: Some(reason.to_string()),
+        }
+    }
+}
+
+impl Processor for MockIndicatorProcessor {
+    fn process(&mut self, _check_table: &mut CheckTable, tick: &Tick) -> StageResult {
+        if self.should_pass {
+            StageResult::pass(Stage::Indicator, &self.details)
+        } else {
+            StageResult::fail(Stage::Indicator, self.blocked_reason.as_deref().unwrap_or("指标失败"))
+        }
+    }
+}
+
+/// Mock 策略处理器 - 可配置结果，并写入 CheckTable
+pub struct MockStrategyProcessor {
+    should_pass: bool,
+    signal: Signal,
+    details: String,
+    blocked_reason: Option<String>,
+}
+
+impl MockStrategyProcessor {
+    /// 创建通过的策略处理器
+    pub fn new_pass(signal: Signal, details: &str) -> Self {
+        Self {
+            should_pass: true,
+            signal,
+            details: details.to_string(),
+            blocked_reason: None,
+        }
+    }
+
+    /// 创建失败的策略处理器
+    pub fn new_blocking(reason: &str) -> Self {
+        Self {
+            should_pass: false,
+            signal: Signal::LongEntry, // 默认值
+            details: String::new(),
+            blocked_reason: Some(reason.to_string()),
+        }
+    }
+
+    /// HOLD 信号（不产生订单）
+    pub fn new_hold() -> Self {
+        Self {
+            should_pass: true,
+            signal: Signal::LongExit, // 或其他非 Entry 信号
+            details: "Signal=HOLD".to_string(),
+            blocked_reason: None,
+        }
+    }
+}
+
+impl Processor for MockStrategyProcessor {
+    fn process(&mut self, check_table: &mut CheckTable, tick: &Tick) -> StageResult {
+        if !self.should_pass {
+            return StageResult::fail(Stage::Strategy, self.blocked_reason.as_deref().unwrap_or("策略失败"));
+        }
+
+        // 写入 CheckEntry（只有 pass 时才写入）
+        let entry = CheckEntry {
+            symbol: tick.symbol.clone(),
+            strategy_id: "main".to_string(),
+            period: "1m".to_string(),
+            ema_signal: self.signal,
+            rsi_value: dec!(50),
+            pine_color: indicator::PineColor::Neutral,
+            price_position: dec!(50),
+            final_signal: self.signal,
+            target_price: tick.price,
+            quantity: dec!(0.1),
+            risk_flag: false,
+            timestamp: tick.timestamp,
+            round_id: check_table.next_round_id(),
+            is_high_freq: false,
+        };
+        check_table.fill(entry);
+
+        StageResult::pass(Stage::Strategy, &self.details)
+    }
+}
+
+/// Mock 风控处理器 - 可配置结果
+pub struct MockRiskProcessor {
+    should_pass: bool,
+    details: String,
+    blocked_reason: Option<String>,
+}
+
+impl MockRiskProcessor {
+    pub fn new_pass(details: &str) -> Self {
+        Self {
+            should_pass: true,
+            details: details.to_string(),
+            blocked_reason: None,
+        }
+    }
+
+    pub fn new_blocking(reason: &str) -> Self {
+        Self {
+            should_pass: false,
+            details: String::new(),
+            blocked_reason: Some(reason.to_string()),
+        }
+    }
+}
+
+impl Processor for MockRiskProcessor {
+    fn process(&mut self, _check_table: &mut CheckTable, _tick: &Tick) -> StageResult {
+        if self.should_pass {
+            StageResult::pass(Stage::RiskPre, &self.details)
+        } else {
+            StageResult::fail(Stage::RiskPre, self.blocked_reason.as_deref().unwrap_or("风控失败"))
+        }
+    }
+}
+
 /// 默认的指标处理器
 pub struct DefaultIndicatorProcessor;
 
@@ -216,8 +357,193 @@ impl Processor for DefaultRiskProcessor {
 mod tests {
     use super::*;
 
+    fn make_tick(symbol: &str, price: Decimal) -> Tick {
+        Tick {
+            symbol: symbol.to_string(),
+            price,
+            qty: dec!(1.0),
+            timestamp: chrono::Utc::now(),
+            kline_1m: None,
+            kline_15m: None,
+            kline_1d: None,
+        }
+    }
+
+    // ========== 完整流程测试 ==========
+
     #[test]
-    fn test_pipeline_with_noop_logger() {
+    fn test_pipeline_long_entry_signal() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger::new()),
+            Box::new(MockIndicatorProcessor::new_pass("EMA12=49500 EMA26=50000 RSI=55")),
+            Box::new(MockStrategyProcessor::new_pass(Signal::LongEntry, "Signal=BUY")),
+            Box::new(MockRiskProcessor::new_pass("margin_ratio=10%")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // 完整流程通过，生成 Long 订单
+        let result = pipeline.process(&tick);
+        assert!(result.is_some());
+        let order = result.unwrap();
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.side, Side::Long);
+        assert_eq!(order.price, Some(dec!(50000)));
+        assert_eq!(order.qty, dec!(0.1));
+    }
+
+    #[test]
+    fn test_pipeline_short_entry_signal() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger::new()),
+            Box::new(MockIndicatorProcessor::new_pass("EMA12=50500 EMA26=50000 RSI=45")),
+            Box::new(MockStrategyProcessor::new_pass(Signal::ShortEntry, "Signal=SELL")),
+            Box::new(MockRiskProcessor::new_pass("margin_ratio=10%")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // 完整流程通过，生成 Short 订单
+        let result = pipeline.process(&tick);
+        assert!(result.is_some());
+        let order = result.unwrap();
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.side, Side::Short);
+    }
+
+    #[test]
+    fn test_pipeline_hedge_signal() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger::new()),
+            Box::new(MockIndicatorProcessor::new_pass("EMA12=49000 EMA26=50000")),
+            Box::new(MockStrategyProcessor::new_pass(Signal::LongHedge, "Hedge=BUY")),
+            Box::new(MockRiskProcessor::new_pass("OK")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // LongHedge 信号，生成 Long 订单
+        let result = pipeline.process(&tick);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().side, Side::Long);
+    }
+
+    #[test]
+    fn test_pipeline_hold_signal_no_order() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger::new()),
+            Box::new(MockIndicatorProcessor::new_pass("EMA12=50000")),
+            Box::new(MockStrategyProcessor::new_hold()), // HOLD 信号
+            Box::new(MockRiskProcessor::new_pass("OK")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // Strategy 返回 HOLD，不生成订单
+        let result = pipeline.process(&tick);
+        assert!(result.is_none());
+    }
+
+    // ========== 阶段失败拦截测试 ==========
+
+    #[test]
+    fn test_pipeline_indicator_blocked() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger::new()),
+            Box::new(MockIndicatorProcessor::new_blocking("EMA 计算超时")),
+            Box::new(MockStrategyProcessor::new_pass(Signal::LongEntry, "Signal=BUY")),
+            Box::new(MockRiskProcessor::new_pass("OK")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // Indicator 失败，Pipeline 停止，不生成订单
+        let result = pipeline.process(&tick);
+        assert!(result.is_none());
+
+        // CheckTable 不应有数据（因为 Strategy 未执行）
+        assert!(pipeline.check_table().get("BTCUSDT", "main", "1m").is_none());
+    }
+
+    #[test]
+    fn test_pipeline_strategy_blocked() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger::new()),
+            Box::new(MockIndicatorProcessor::new_pass("EMA12=49500")),
+            Box::new(MockStrategyProcessor::new_blocking("TR_RATIO < 1")),
+            Box::new(MockRiskProcessor::new_pass("OK")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // Strategy 失败，Pipeline 停止
+        let result = pipeline.process(&tick);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_pipeline_risk_blocked() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(NoOpLogger::new()),
+            Box::new(MockIndicatorProcessor::new_pass("EMA12=49500")),
+            Box::new(MockStrategyProcessor::new_pass(Signal::LongEntry, "Signal=BUY")),
+            Box::new(MockRiskProcessor::new_blocking("保证金不足")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // RiskPre 失败，Pipeline 停止
+        let result = pipeline.process(&tick);
+        assert!(result.is_none());
+    }
+
+    // ========== ConsoleCheckpointLogger 日志测试 ==========
+
+    #[test]
+    fn test_pipeline_with_console_logger() {
+        let mut pipeline = Pipeline::new(
+            "ETHUSDT".to_string(),
+            Box::new(ConsoleCheckpointLogger::new()),
+            Box::new(MockIndicatorProcessor::new_pass("EMA=3000")),
+            Box::new(MockStrategyProcessor::new_pass(Signal::LongEntry, "Signal=BUY")),
+            Box::new(MockRiskProcessor::new_pass("OK")),
+        );
+
+        let tick = make_tick("ETHUSDT", dec!(3000));
+
+        // Console logger 不会 panic，会输出日志
+        let result = pipeline.process(&tick);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_pipeline_console_logger_blocked() {
+        let mut pipeline = Pipeline::new(
+            "BTCUSDT".to_string(),
+            Box::new(ConsoleCheckpointLogger::new()),
+            Box::new(MockIndicatorProcessor::new_blocking("指标失败")),
+            Box::new(MockStrategyProcessor::new_pass(Signal::LongEntry, "Signal=BUY")),
+            Box::new(MockRiskProcessor::new_pass("OK")),
+        );
+
+        let tick = make_tick("BTCUSDT", dec!(50000));
+
+        // 日志会显示 Blocked at Indicator
+        let result = pipeline.process(&tick);
+        assert!(result.is_none());
+    }
+
+    // ========== 默认处理器测试 ==========
+
+    #[test]
+    fn test_pipeline_with_default_processors() {
         let mut pipeline = Pipeline::new(
             "BTCUSDT".to_string(),
             Box::new(NoOpLogger::new()),
@@ -226,19 +552,10 @@ mod tests {
             Box::new(DefaultRiskProcessor::new()),
         );
 
-        let tick = Tick {
-            symbol: "BTCUSDT".to_string(),
-            price: dec!(50000),
-            qty: dec!(1.0),
-            timestamp: chrono::Utc::now(),
-            kline_1m: None,
-            kline_15m: None,
-            kline_1d: None,
-        };
+        let tick = make_tick("BTCUSDT", dec!(50000));
 
-        // NoOp logger 不会 panic
-        let result = pipeline.process(&tick);
         // Default processor 返回 HOLD，所以没有订单
+        let result = pipeline.process(&tick);
         assert!(result.is_none());
     }
 }
