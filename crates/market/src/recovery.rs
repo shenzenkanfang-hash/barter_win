@@ -11,10 +11,10 @@
 //! - 高波动窗口标记
 //! - 最后 checkpoint 时间戳
 
-use parking_lot::Mutex;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use crate::error::MarketError;
 
 /// Checkpoint 数据 - 用于快速恢复交易判断
@@ -58,7 +58,7 @@ impl RedisRecovery {
         let key = format!("checkpoint:{}", data.symbol);
         let json = serde_json::to_string(data)
             .map_err(|e| MarketError::SerializeError(e.to_string()))?;
-        let mut conn = self.redis.lock();
+        let mut conn = self.redis.lock().await;
         let _: () = conn.set::<_, _, ()>(&key, &json).await
             .map_err(|e| MarketError::RedisError(e.to_string()))?;
         Ok(())
@@ -67,24 +67,24 @@ impl RedisRecovery {
     /// 加载 checkpoint
     pub async fn load_checkpoint(&self, symbol: &str) -> Result<Option<CheckpointData>, MarketError> {
         let key = format!("checkpoint:{}", symbol);
-        let mut conn = self.redis.lock();
+        let mut conn = self.redis.lock().await;
         let data: Option<String> = conn.get(&key).await
             .map_err(|e| MarketError::RedisError(e.to_string()))?;
         drop(conn);
         match data {
-            Some(json) => {
-                let checkpoint: CheckpointData = serde_json::from_str(&json)
+            Some(json_str) => {
+                let checkpoint: CheckpointData = serde_json::from_str(&json_str)
                     .map_err(|e| MarketError::SerializeError(e.to_string()))?;
                 Ok(Some(checkpoint))
             }
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
     /// 保存 K线历史（批量）
     pub async fn save_klines(&self, symbol: &str, period: &str, klines_json: &[String]) -> Result<(), MarketError> {
         let key = format!("kline:{}:{}", period, symbol);
-        let mut conn = self.redis.lock();
+        let mut conn = self.redis.lock().await;
         // 先删除旧数据
         let _: () = conn.del::<_, ()>(&key).await
             .map_err(|e| MarketError::RedisError(e.to_string()))?;
@@ -99,7 +99,7 @@ impl RedisRecovery {
     /// 加载 K线历史
     pub async fn load_klines(&self, symbol: &str, period: &str) -> Result<Vec<String>, MarketError> {
         let key = format!("kline:{}:{}", period, symbol);
-        let mut conn = self.redis.lock();
+        let mut conn = self.redis.lock().await;
         let klines: Vec<String> = conn.lrange(&key, 0, -1).await
             .map_err(|e| MarketError::RedisError(e.to_string()))?;
         Ok(klines)
@@ -108,7 +108,7 @@ impl RedisRecovery {
     /// 保存指标快照
     pub async fn save_indicator_snapshot(&self, symbol: &str, snapshot_json: &str) -> Result<(), MarketError> {
         let key = format!("indicator:{}", symbol);
-        let mut conn = self.redis.lock();
+        let mut conn = self.redis.lock().await;
         let _: () = conn.set::<_, _, ()>(&key, snapshot_json).await
             .map_err(|e| MarketError::RedisError(e.to_string()))?;
         Ok(())
@@ -117,7 +117,7 @@ impl RedisRecovery {
     /// 加载指标快照
     pub async fn load_indicator_snapshot(&self, symbol: &str) -> Result<Option<String>, MarketError> {
         let key = format!("indicator:{}", symbol);
-        let mut conn = self.redis.lock();
+        let mut conn = self.redis.lock().await;
         let data: Option<String> = conn.get(&key).await
             .map_err(|e| MarketError::RedisError(e.to_string()))?;
         Ok(data)
@@ -126,7 +126,7 @@ impl RedisRecovery {
     /// 删除 checkpoint（恢复完成后）
     pub async fn clear_checkpoint(&self, symbol: &str) -> Result<(), MarketError> {
         let key = format!("checkpoint:{}", symbol);
-        let mut conn = self.redis.lock();
+        let mut conn = self.redis.lock().await;
         let _: () = conn.del::<_, ()>(&key).await
             .map_err(|e| MarketError::RedisError(e.to_string()))?;
         Ok(())

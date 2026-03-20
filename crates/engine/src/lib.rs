@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod checkpoint;
+pub mod checkpoint_integration;
 pub mod pipeline;
 pub mod account_pool;
 pub mod channel;
