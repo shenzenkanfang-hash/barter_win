@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, Eq, PartialEq, Error)]
 pub enum MarketError {
     #[error("WebSocket连接失败: {0}")]
-    ConnectionFailed(String),
+    WebSocketConnectionFailed(String),
 
     #[error("订阅失败: {0}")]
     SubscribeFailed(String),

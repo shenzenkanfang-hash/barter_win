@@ -11,6 +11,10 @@ edition = "2024"
 name = "trading-system"
 path = "src/main.rs"
 
+[[bin]]
+name = "binance_test"
+path = "binance_test.rs"
+
 [dependencies]
 account = { path = "crates/account" }
 market = { path = "crates/market" }
