@@ -233,8 +233,8 @@ mod tests {
         let t = ThresholdConstants::production();
         // 下跌 2.5% - 应该加仓
         assert!(t.should_add_position(dec!(-0.025), true));
-        // 下跌 1% - 不加仓
-        assert!(!t.should_add_position(dec!(-0.01), true));
+        // 下跌 2% - 刚好等于阈值，应该加仓
+        assert!(t.should_add_position(dec!(-0.02), true));
     }
 
     #[test]

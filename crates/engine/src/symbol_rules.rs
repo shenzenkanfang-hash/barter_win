@@ -55,36 +55,24 @@ impl SymbolRules {
         }
     }
 
-    /// 实际有效最小开仓数量（自动计算）
+    /// 实际有效最小开仓数量（保守估计）
     ///
-    /// 计算逻辑：
-    /// 1. 理论最小数量 = max(min_notional / tick_size, min_qty)
-    /// 2. 按数量精度取整
-    /// 3. 校验取整后仍满足最小名义价值
+    /// 注意：由于没有 reference_price，这里返回满足 min_notional 约束的最低数量
+    /// 的保守估计。实际验证应以 validate_order 中的名义价值检查为准。
     pub fn effective_min_qty(&self) -> Decimal {
-        // 第一步：基于最小名义价值计算理论最小数量
-        let theoretical_min_qty = if self.tick_size > dec!(0) {
-            self.min_notional / self.tick_size
-        } else {
-            self.min_notional
-        };
+        // 基于 min_notional / max_reasonnable_price 的保守估计
+        // 使用一个较大的参考价格 (100000 USDT) 来计算保守的最小数量
+        let reference_price = dec!(100000);
+        let theoretical_min_qty = self.min_notional / reference_price;
 
-        // 第二步：确保不低于交易所原始最小数量
-        let base_min_qty = theoretical_min_qty.max(self.min_qty);
-
-        // 第三步：按数量精度取整（四舍五入）
+        // 按数量精度取整
         let step_size = self.step_size();
-        let rounded_min_qty = (base_min_qty / step_size)
+        let rounded = (theoretical_min_qty / step_size)
             .round()
             * step_size;
 
-        // 第四步：最终校验，确保取整后仍满足最小名义价值
-        let mut result = rounded_min_qty;
-        while result * self.tick_size < self.min_notional {
-            result = result + step_size;
-        }
-
-        result
+        // 确保不低于原始 min_qty
+        rounded.max(self.min_qty)
     }
 
     /// 数量最小步进
