@@ -3,6 +3,7 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+#[derive(Debug, Clone)]
 pub struct OrderBook {
     symbol: String,
     bids: Vec<(Decimal, Decimal)>,  // (price, qty)

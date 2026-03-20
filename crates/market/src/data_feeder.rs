@@ -36,21 +36,21 @@ pub struct DataFeeder {
     broadcaster: broadcast::Sender<DataMessage>,
 
     /// 波动率检测器 (按品种)
-    volatility_detectors: RwLock<FnvHashMap<String, VolatilityDetector>>,
+    volatility_detectors: Arc<RwLock<FnvHashMap<String, VolatilityDetector>>>,
 
     /// 订单簿 (按品种)
-    orderbooks: RwLock<FnvHashMap<String, OrderBook>>,
+    orderbooks: Arc<RwLock<FnvHashMap<String, OrderBook>>>,
 
     /// Depth 订阅管理器
-    depth_subscribed: RwLock<FnvHashSet<String>>,
+    depth_subscribed: Arc<RwLock<FnvHashSet<String>>>,
     default_depth_symbol: String,
 
     /// 品种注册
     symbol_registry: Arc<RwLock<SymbolRegistry>>,
 
-    /// 状态
-    is_initialized: RwLock<bool>,
-    last_data_time: RwLock<std::time::Instant>,
+    /// 状态 - 使用 Arc 包装以支持 clone
+    is_initialized: Arc<RwLock<bool>>,
+    last_data_time: Arc<RwLock<std::time::Instant>>,
 }
 
 /// DataFeeder 输出的数据消息
@@ -79,13 +79,13 @@ impl DataFeeder {
             kline_1d_conn: RwLock::new(None),
             depth_conn: RwLock::new(None),
             broadcaster,
-            volatility_detectors: RwLock::new(FnvHashMap::default()),
-            orderbooks: RwLock::new(FnvHashMap::default()),
-            depth_subscribed: RwLock::new(FnvHashSet::default()),
+            volatility_detectors: Arc::new(RwLock::new(FnvHashMap::default())),
+            orderbooks: Arc::new(RwLock::new(FnvHashMap::default())),
+            depth_subscribed: Arc::new(RwLock::new(FnvHashSet::default())),
             default_depth_symbol: "BTCUSDT".to_string(),
             symbol_registry,
-            is_initialized: RwLock::new(false),
-            last_data_time: RwLock::new(std::time::Instant::now()),
+            is_initialized: Arc::new(RwLock::new(false)),
+            last_data_time: Arc::new(RwLock::new(std::time::Instant::now())),
         })
     }
 
@@ -121,7 +121,6 @@ impl DataFeeder {
         tracing::info!("[DataFeeder] 初始化完成");
 
         // 4. 启动后台任务
-        let is_initialized_ptr = Arc::new(self.is_initialized.read().await.clone());
         let feeder = DataFeederHandle {
             is_initialized: self.is_initialized.clone(),
             last_data_time: self.last_data_time.clone(),
@@ -160,37 +159,40 @@ impl DataFeeder {
 
         // 连接1
         {
-            let mut conn_guard = self.kline_1m_conn_1.write().await;
             let streams: Vec<String> = symbols_1
                 .iter()
                 .map(|s| format!("{}@kline_1m", s.to_lowercase()))
                 .collect();
             let conn = BinanceWsConnector::new_multi(BINANCE_WS_BASE, streams);
+            let mut conn_guard = self.kline_1m_conn_1.write().await;
             *conn_guard = Some(conn);
         }
 
         // 连接2
         {
-            let mut conn_guard = self.kline_1m_conn_2.write().await;
             let streams: Vec<String> = symbols_2
                 .iter()
                 .map(|s| format!("{}@kline_1m", s.to_lowercase()))
                 .collect();
             let conn = BinanceWsConnector::new_multi(BINANCE_WS_BASE, streams);
+            let mut conn_guard = self.kline_1m_conn_2.write().await;
             *conn_guard = Some(conn);
         }
 
-        // 分片订阅
-        if let Some(ref mut conn) = *self.kline_1m_conn_1.write().await {
-            let mut conn = conn.clone();
-            self.subscribe_kline_batch_with_conn(&mut conn, symbols_1, "1m")
-                .await?;
+        // 分片订阅 - 连接1
+        {
+            let mut conn_guard = self.kline_1m_conn_1.write().await;
+            if let Some(ref mut conn) = *conn_guard {
+                Self::do_subscribe_kline_batch(conn, symbols_1, "1m").await?;
+            }
         }
 
-        if let Some(ref mut conn) = *self.kline_1m_conn_2.write().await {
-            let mut conn = conn.clone();
-            self.subscribe_kline_batch_with_conn(&mut conn, symbols_2, "1m")
-                .await?;
+        // 分片订阅 - 连接2
+        {
+            let mut conn_guard = self.kline_1m_conn_2.write().await;
+            if let Some(ref mut conn) = *conn_guard {
+                Self::do_subscribe_kline_batch(conn, symbols_2, "1m").await?;
+            }
         }
 
         Ok(())
@@ -207,19 +209,21 @@ impl DataFeeder {
         );
 
         {
-            let mut conn_guard = self.kline_1d_conn.write().await;
             let streams: Vec<String> = symbols
                 .iter()
                 .map(|s| format!("{}@kline_1d", s.to_lowercase()))
                 .collect();
             let conn = BinanceWsConnector::new_multi(BINANCE_WS_BASE, streams);
+            let mut conn_guard = self.kline_1d_conn.write().await;
             *conn_guard = Some(conn);
         }
 
-        if let Some(ref mut conn) = *self.kline_1d_conn.write().await {
-            let mut conn = conn.clone();
-            self.subscribe_kline_batch_with_conn(&mut conn, symbols, "1d")
-                .await?;
+        // 分片订阅
+        {
+            let mut conn_guard = self.kline_1d_conn.write().await;
+            if let Some(ref mut conn) = *conn_guard {
+                Self::do_subscribe_kline_batch(conn, symbols, "1d").await?;
+            }
         }
 
         Ok(())
@@ -260,9 +264,8 @@ impl DataFeeder {
         Ok(())
     }
 
-    /// 分片订阅 K线
-    async fn subscribe_kline_batch_with_conn(
-        &self,
+    /// 执行分片订阅 K线
+    async fn do_subscribe_kline_batch(
         conn: &mut BinanceWsConnector,
         symbols: &[String],
         interval: &str,
@@ -289,24 +292,36 @@ impl DataFeeder {
 
     /// 添加 Depth 订阅
     pub async fn add_depth_subscription(&self, symbol: &str) -> Result<(), crate::error::MarketError> {
-        let mut subscribed = self.depth_subscribed.write().await;
+        let should_subscribe = {
+            let subscribed = self.depth_subscribed.read().await;
+            !subscribed.contains(symbol)
+        };
 
-        if subscribed.contains(symbol) {
+        if !should_subscribe {
             tracing::debug!("[DataFeeder] {} 已在 Depth 订阅中", symbol);
             return Ok(());
         }
 
         // 订阅
-        if let Some(ref mut conn) = *self.depth_conn.write().await {
-            let stream = format!("{}@depth20@100ms", symbol.to_lowercase());
-            conn.subscribe(&[stream]).await?;
+        {
+            let mut conn_guard = self.depth_conn.write().await;
+            if let Some(ref mut conn) = *conn_guard {
+                let stream = format!("{}@depth20@100ms", symbol.to_lowercase());
+                conn.subscribe(&[stream]).await?;
+            }
         }
 
-        subscribed.insert(symbol.to_string());
+        // 更新已订阅列表
+        {
+            let mut subscribed = self.depth_subscribed.write().await;
+            subscribed.insert(symbol.to_string());
+        }
 
         // 初始化该品种的 OrderBook
-        let mut orderbooks = self.orderbooks.write().await;
-        orderbooks.insert(symbol.to_string(), OrderBook::new(symbol.to_string()));
+        {
+            let mut orderbooks = self.orderbooks.write().await;
+            orderbooks.insert(symbol.to_string(), OrderBook::new(symbol.to_string()));
+        }
 
         tracing::info!("[DataFeeder] 添加 Depth 订阅: {}", symbol);
 
@@ -318,20 +333,30 @@ impl DataFeeder {
         &self,
         symbol: &str,
     ) -> Result<(), crate::error::MarketError> {
-        let mut subscribed = self.depth_subscribed.write().await;
+        let should_unsubscribe = {
+            let subscribed = self.depth_subscribed.read().await;
+            subscribed.contains(symbol)
+        };
 
-        if !subscribed.contains(symbol) {
+        if !should_unsubscribe {
             tracing::debug!("[DataFeeder] {} 不在 Depth 订阅中", symbol);
             return Ok(());
         }
 
         // 退订
-        if let Some(ref mut conn) = *self.depth_conn.write().await {
-            let stream = format!("{}@depth20@100ms", symbol.to_lowercase());
-            conn.unsubscribe(&[stream]).await?;
+        {
+            let mut conn_guard = self.depth_conn.write().await;
+            if let Some(ref mut conn) = *conn_guard {
+                let stream = format!("{}@depth20@100ms", symbol.to_lowercase());
+                conn.unsubscribe(&[stream]).await?;
+            }
         }
 
-        subscribed.remove(symbol);
+        // 更新已订阅列表
+        {
+            let mut subscribed = self.depth_subscribed.write().await;
+            subscribed.remove(symbol);
+        }
 
         tracing::info!("[DataFeeder] 移除 Depth 订阅: {}", symbol);
 
@@ -340,7 +365,7 @@ impl DataFeeder {
 
     /// 返回广播接收器
     pub fn subscribe(&self) -> broadcast::Receiver<DataMessage> {
-        self.broadcaster.subscribe()
+        self.broadcaster.clone().subscribe()
     }
 
     /// 更新波动率检测器
@@ -374,8 +399,8 @@ impl DataFeeder {
 /// DataFeeder 句柄，用于后台任务
 #[derive(Clone)]
 struct DataFeederHandle {
-    is_initialized: RwLock<bool>,
-    last_data_time: RwLock<std::time::Instant>,
+    is_initialized: Arc<RwLock<bool>>,
+    last_data_time: Arc<RwLock<std::time::Instant>>,
 }
 
 impl DataFeederHandle {
@@ -440,13 +465,13 @@ impl Clone for DataFeeder {
             // 广播通道 sender 可以 clone
             broadcaster: self.broadcaster.clone(),
             // per-connection 状态需要重新创建
-            volatility_detectors: RwLock::new(FnvHashMap::default()),
-            orderbooks: RwLock::new(FnvHashMap::default()),
-            depth_subscribed: RwLock::new(FnvHashSet::default()),
+            volatility_detectors: Arc::new(RwLock::new(FnvHashMap::default())),
+            orderbooks: Arc::new(RwLock::new(FnvHashMap::default())),
+            depth_subscribed: Arc::new(RwLock::new(FnvHashSet::default())),
             default_depth_symbol: self.default_depth_symbol.clone(),
             symbol_registry: self.symbol_registry.clone(),
-            is_initialized: RwLock::new(false),
-            last_data_time: RwLock::new(std::time::Instant::now()),
+            is_initialized: self.is_initialized.clone(),
+            last_data_time: self.last_data_time.clone(),
         }
     }
 }

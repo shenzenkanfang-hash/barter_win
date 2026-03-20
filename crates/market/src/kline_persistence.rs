@@ -16,6 +16,7 @@ impl KlinePersistence {
             .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
         let conn = client
             .get_connection_manager()
+            .await
             .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
 
         Ok(Self { redis: conn })
