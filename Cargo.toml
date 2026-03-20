@@ -23,6 +23,14 @@ path = "indicator_compare.rs"
 name = "pine_debug"
 path = "pine_debug.rs"
 
+[[bin]]
+name = "pine_output_csv"
+path = "pine_output_csv.rs"
+
+[[bin]]
+name = "pine_compare"
+path = "pine_compare_with_python_data.rs"
+
 [dependencies]
 account = { path = "crates/account" }
 market = { path = "crates/market" }
