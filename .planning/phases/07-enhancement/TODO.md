@@ -55,6 +55,42 @@ Phase 7 Enhancement 待办清单
 [x] 实现 Default 提供默认值 ✓
 [x] 更新 lib.rs 导出新模块 ✓
 
+## 7.7 Z-Score / TR-Ratio 指标框架
+--------------------------------------------------------------------------------
+[x] 创建 indicator/src/z_score.rs ✓
+[x] 实现 ZScore 结构体 (Welford's 算法) ✓
+[x] 实现 ZScoreSignal 信号枚举 ✓
+[x] 创建 indicator/src/tr_ratio.rs ✓
+[x] 实现 TRRatio 结构体 ✓
+[x] 实现 TRRatioSignal 信号枚举 ✓
+[x] 更新 indicator/lib.rs 导出新模块 ✓
+
+## 7.8 LocalPositionManager 持仓管理器
+--------------------------------------------------------------------------------
+[x] 创建 engine/src/position_manager.rs ✓
+[x] 实现 LocalPositionManager 结构体 ✓
+[x] 实现 open_position() / close_position() ✓
+[x] 实现 unrealized_pnl() 未实现盈亏计算 ✓
+[x] 更新 engine/lib.rs 导出新模块 ✓
+
+## 7.9 TrendStrategy 趋势策略
+--------------------------------------------------------------------------------
+[x] 创建 strategy/src/trend_strategy.rs ✓
+[x] 实现 TrendStrategy 结构体 ✓
+[x] 实现 TrendState 状态机 (Idle/Long/Short) ✓
+[x] 实现 TrendSignal 信号枚举 ✓
+[x] 实现 check_signal() 基于 EMA/PineColor/RSI ✓
+[x] 更新 strategy/lib.rs 导出新模块 ✓
+
+## 7.10 PinStrategy 马丁/插针策略
+--------------------------------------------------------------------------------
+[x] 创建 strategy/src/pin_strategy.rs ✓
+[x] 实现 PinStrategy 结构体 ✓
+[x] 实现 PinState 状态机 (Idle/Opening/Holding/Hedging) ✓
+[x] 实现 PinSignal 信号枚举 ✓
+[x] 实现 check_signal() 基于 Z-Score/TR-Ratio ✓
+[x] 更新 strategy/lib.rs 导出新模块 ✓
+
 ================================================================================
 完成记录
 ================================================================================
@@ -67,5 +103,13 @@ v0.9 阶段新增模块:
 - ThresholdConstants: 阈值常量集中管理 (2026-03-20)
 - 日线指标支持: channel.rs 添加日线 EMA/RSI/PricePosition (2026-03-20)
 - OrderCheck: 订单风控检查器 (2026-03-20)
+- ZScore/TRRatio: 指标框架 (2026-03-20)
+- LocalPositionManager: 持仓管理器 (2026-03-20)
+- TrendStrategy: 趋势策略状态机 (2026-03-20)
+- PinStrategy: 马丁/插针策略状态机 (2026-03-20)
+
+待调整:
+- 指标计算逻辑需根据 D:/量化策略开发/tradingW/backup_old_code/c_data_process/indicator_1m/indicator_calc.py 调整
+- 指标计算逻辑需根据 D:/量化策略开发/tradingW/backup_old_code/c_data_process/indicator_1d/pine_scripts.py 调整
 
 ================================================================================
