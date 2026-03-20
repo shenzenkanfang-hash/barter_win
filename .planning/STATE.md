@@ -2,8 +2,9 @@
 
 ## Current Position
 
-Milestone: v1.0 - SHIPPED
-Status: v1.0.0 Complete (2026-03-20)
+Milestone: v1.1 - MockBinanceGateway + SignalSynthesisLayer
+Status: Phase 08 In Progress
+Current: 执行中 (核心实现完成，待测试工程师验证)
 
 ## Completed Milestones
 
@@ -33,7 +34,10 @@ Status: v1.0.0 Complete (2026-03-20)
   - ThresholdConstants: 阈值常量集中管理
   - OrderCheck: 订单风控检查器
   - 日线指标支持 (channel.rs)
-- Workspace dependencies updated
+- Phase 8: v1.1 (执行中)
+  - MockBinanceGateway: 模拟账户/持仓/订单/保证金/风控
+  - SignalSynthesisLayer: 通道退出逻辑 (tr_ratio<1/日线趋势平仓)
+  - 单元测试: 账户创建/持仓盈亏/通道切换/频率限制
 
 ## Blockers
 
@@ -41,7 +45,7 @@ Status: v1.0.0 Complete (2026-03-20)
 
 ## Next Action
 
-(v0.10 改进完成 - 待用户决定下一步: 编译验证/测试/新功能)
+v1.1 核心实现完成，待测试工程师执行: /gsd:verify-phase 08
 
 ## v0.10 Enhancement 完成
 
