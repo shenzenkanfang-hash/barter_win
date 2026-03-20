@@ -1135,6 +1135,15 @@ mod tests {
         assert!(synthesis.check_enter_high_volatility(dec!(0.15), dec!(0.01)));
         assert!(synthesis.check_enter_high_volatility(dec!(0.01), dec!(0.05)));
 
+        // 先进入高速通道
+        synthesis.update_channel(
+            GatewayChannelType::Fast,
+            dec!(1.5),
+            dec!(0.6),
+            PineColorState::Green,
+            1000,
+        );
+
         // 检查退出高速条件
         assert!(!synthesis.check_exit_high_volatility(dec!(1.5))); // tr_ratio > 1, 不退出
         assert!(synthesis.check_exit_high_volatility(dec!(0.8)));  // tr_ratio < 1, 退出
@@ -1148,8 +1157,8 @@ mod tests {
             CsvWriter::default(),
         );
 
-        // 模拟多次下单
-        for _ in 0..5 {
+        // 模拟多次下单 (默认频率限制是 10次/秒)
+        for _ in 0..10 {
             let req = OrderRequest {
                 symbol: "BTCUSDT".to_string(),
                 side: Side::Long,
