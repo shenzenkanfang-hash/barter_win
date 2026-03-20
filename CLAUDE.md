@@ -6,7 +6,12 @@
 ================================================================================
 
 基于 Go 量化交易系统迁移到 Rust，采用 Barter-rs 风格架构的高性能高可用系统。
-"C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe" 编译器位置 实在有问题自己联网坚决自己下 有问题自己解决去 别问了 
+
+编译器配置:
+- cargo.exe: C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe
+- rustc.exe: C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe
+- 构建前需设置环境变量: export RUSTC="/c/Users/char/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin/rustc.exe"
+
 有不清楚的先以项目的跑通为主 自己选择 只要不和 约定有大的冲突即可
 
 核心目标:
