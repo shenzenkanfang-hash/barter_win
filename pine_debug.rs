@@ -227,7 +227,7 @@ impl PineColorDetector {
     }
 
     /// 检测bar颜色 - 匹配Python的优先级顺序
-    fn detect_bar_color(&self, macd: Decimal, _signal: Decimal, hist_prev: Option<Decimal>, hist: Decimal, rsi: Decimal, ema10_val: Decimal, ema20_val: Decimal) -> String {
+    fn detect_bar_color(&self, macd: Decimal, _signal: Decimal, hist_prev: Option<Decimal>, hist: Decimal, rsi: Decimal, ema10_val: Decimal, ema20_val: Decimal, debug_date: &str) -> String {
         let hist_prev_val = match hist_prev {
             Some(v) => v,
             None => return colors::DEFAULT.to_string(),
@@ -238,6 +238,7 @@ impl PineColorDetector {
         let is_up = rsi >= dec!(70);
         let is_down = rsi <= dec!(30);
 
+        // 检查所有条件
         let selltimeS = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO && is_up;
         let buytimeS = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev_val < hist && hist <= Decimal::ZERO && is_down;
         let selltimeT = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev_val > hist && hist >= Decimal::ZERO;
@@ -255,7 +256,17 @@ impl PineColorDetector {
         // 7. s (selltimeS) -> 浅蓝 (strong_top)
         // 8. b (buytimeS) -> 橙色 (strong_bot)
 
-        // 注意: Python 代码中 selltimeS/buytimeS 的优先级最低！
+        // 调试输出到 stderr
+        eprintln!("DEBUG {}: hist_prev={:.2}, hist={:.2}, macd={:.2}, rsi={:.2}, buytimeT={}, buytime={}, is_up={}, is_down={}, result={}",
+                  date, hist_prev_val, hist, macd, rsi, buytimeT, buytime, is_up, is_down,
+                  if selltimeT || buytimeT { "纯红" }
+                  else if selltime { "浅黄" }
+                  else if buytime { "纯蓝" }
+                  else if is_up { "纯绿" }
+                  else if is_down { "紫色" }
+                  else if selltimeS { "浅蓝" }
+                  else if buytimeS { "橙色" }
+                  else { "白色" });
 
         // 检查优先级1-2: selltimeT/buytimeT -> 纯红
         if selltimeT || buytimeT { return colors::WEAK_SIGNAL.to_string(); }  // 纯红

@@ -220,9 +220,10 @@ pub struct PineColorDetector {
     rsi_overbought: Decimal,
     rsi_oversold: Decimal,
     epsilon: Decimal,
-    // 背景颜色历史（用于振幅指标计算）
-    bg_history: VecDeque<(Decimal, Decimal, Decimal)>, // (high, low, close)
-    bg_color_history: VecDeque<String>,
+    // 历史数据（用于振幅指标计算）
+    price_history: VecDeque<(Decimal, Decimal, Decimal)>, // (high, low, close)
+    // MACD 交叉分段标记（true=段起始）
+    macd_cross_history: VecDeque<bool>,
 }
 
 impl PineColorDetector {
@@ -239,8 +240,8 @@ impl PineColorDetector {
             rsi_overbought: dec!(70),
             rsi_oversold: dec!(30),
             epsilon: dec!(1e-8),
-            bg_history: VecDeque::with_capacity(1000),
-            bg_color_history: VecDeque::with_capacity(1000),
+            price_history: VecDeque::with_capacity(1000),
+            macd_cross_history: VecDeque::with_capacity(1000),
         }
     }
 
@@ -281,14 +282,23 @@ impl PineColorDetector {
         // 6. 检测背景颜色（完全对齐 Python calculate_bg_color）
         let bg_color = self.detect_bg_color(macd, signal);
 
-        // 7. 保存背景颜色历史和价格数据（用于振幅指标计算）
-        self.bg_history.push_back((high, low, close));
-        if self.bg_history.len() > 1000 {
-            self.bg_history.pop_front();
+        // 7. 检测 MACD 交叉（hist 穿过零轴）
+        let is_cross = if self.hist_history.len() >= 1 {
+            let prev_hist = self.hist_history.back().copied().unwrap_or(Decimal::ZERO);
+            (prev_hist < Decimal::ZERO && hist >= Decimal::ZERO) ||
+            (prev_hist > Decimal::ZERO && hist <= Decimal::ZERO)
+        } else {
+            false
+        };
+
+        // 8. 保存价格历史和交叉标记（用于振幅指标计算）
+        self.price_history.push_back((high, low, close));
+        if self.price_history.len() > 1000 {
+            self.price_history.pop_front();
         }
-        self.bg_color_history.push_back(bg_color.clone());
-        if self.bg_color_history.len() > 1000 {
-            self.bg_color_history.pop_front();
+        self.macd_cross_history.push_back(is_cross);
+        if self.macd_cross_history.len() > 1000 {
+            self.macd_cross_history.pop_front();
         }
 
         (bar_color, bg_color, macd, signal, hist, ema10_val, ema20_val, rsi, crsi)
@@ -385,49 +395,84 @@ impl PineColorDetector {
         (self.rsi.get_rsi(), self.rsi.get_crsi())
     }
 
-    /// 计算 TOP3 平均振幅百分比（仅针对绿色序列）
-    /// 在绿色序列中，选取 amplitude 最大的3根K线，计算其平均值
+    /// 计算 TOP3 平均振幅百分比（以 MACD 交叉分段的连续段中，amplitude 最大的3段平均值）
     pub fn calc_top3_avg_amplitude_pct(&self) -> Decimal {
-        // 收集所有绿色序列的 amplitude
-        let mut green_amplitudes: Vec<Decimal> = Vec::new();
+        let crosses = &self.macd_cross_history;
+        let prices = &self.price_history;
 
-        let bg_colors = &self.bg_color_history;
-        let bg_data = &self.bg_history;
-
-        for i in 0..bg_colors.len().min(bg_data.len()) {
-            if bg_colors[i] == colors::BULL_TREND_BG {
-                let (high, low, close) = bg_data[i];
-                if close > Decimal::ZERO {
-                    let amplitude = (high - low) / close * dec!(100);
-                    green_amplitudes.push(amplitude);
-                }
-            }
-        }
-
-        if green_amplitudes.is_empty() {
+        if crosses.len() < 2 || prices.len() < 2 {
             return Decimal::ZERO;
         }
 
-        // 排序并取最大的3个
-        green_amplitudes.sort_by(|a, b| b.cmp(a));
-        let top3: Vec<Decimal> = green_amplitudes.into_iter().take(3).collect();
+        // 找出所有连续段
+        let mut segments: Vec<Vec<Decimal>> = Vec::new();
+        let mut current_segment: Vec<Decimal> = Vec::new();
 
-        // 计算平均值
+        for i in 0..crosses.len().min(prices.len()) {
+            // 计算 amplitude
+            let (high, low, close) = prices[i];
+            if close > Decimal::ZERO {
+                let amplitude = (high - low) / close * dec!(100);
+                current_segment.push(amplitude);
+            }
+
+            // 遇到交叉点，结束当前段
+            if crosses[i] && !current_segment.is_empty() {
+                segments.push(current_segment);
+                current_segment = Vec::new();
+            }
+        }
+
+        // 最后一节
+        if !current_segment.is_empty() {
+            segments.push(current_segment);
+        }
+
+        if segments.is_empty() {
+            return Decimal::ZERO;
+        }
+
+        // 每段取平均 amplitude，然后取最大的3段
+        let mut segment_avgs: Vec<Decimal> = segments
+            .iter()
+            .map(|seg| {
+                let sum: Decimal = seg.iter().sum();
+                sum / Decimal::from(seg.len())
+            })
+            .collect();
+
+        segment_avgs.sort_by(|a, b| b.cmp(a));
+        let top3: Vec<Decimal> = segment_avgs.into_iter().take(3).collect();
+
+        if top3.is_empty() {
+            return Decimal::ZERO;
+        }
+
         let sum: Decimal = top3.iter().sum();
         sum / Decimal::from(top3.len())
     }
 
-    /// 计算 1% 振幅效率天数（仅针对红色序列）
-    /// 统计红色序列中 amplitude >= 1% 的天数
+    /// 计算 1% 振幅效率天数（以 MACD 交叉分段后，amplitude >= 1% 的天数）
     pub fn calc_one_percent_amplitude_time_days(&self) -> Decimal {
+        let crosses = &self.macd_cross_history;
+        let prices = &self.price_history;
+
+        if crosses.len() < 2 || prices.len() < 2 {
+            return Decimal::ZERO;
+        }
+
         let mut count = Decimal::ZERO;
+        let mut in_segment = false;
 
-        let bg_colors = &self.bg_color_history;
-        let bg_data = &self.bg_history;
+        for i in 0..crosses.len().min(prices.len()) {
+            // MACD 交叉点，进入新段
+            if crosses[i] {
+                in_segment = true;
+                continue;
+            }
 
-        for i in 0..bg_colors.len().min(bg_data.len()) {
-            if bg_colors[i] == colors::BEAR_TREND_BG {
-                let (high, low, close) = bg_data[i];
+            if in_segment {
+                let (high, low, close) = prices[i];
                 if close > Decimal::ZERO {
                     let amplitude = (high - low) / close * dec!(100);
                     if amplitude >= dec!(1) {
@@ -448,8 +493,8 @@ impl PineColorDetector {
         self.ema10.reset();
         self.ema20.reset();
         self.hist_history.clear();
-        self.bg_history.clear();
-        self.bg_color_history.clear();
+        self.price_history.clear();
+        self.macd_cross_history.clear();
         self.rsi = DominantCycleRSI::new();
     }
 }
