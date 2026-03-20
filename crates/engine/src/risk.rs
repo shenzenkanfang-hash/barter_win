@@ -122,12 +122,13 @@ impl RiskPreChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     /// E3.1 RiskPreChecker 测试 - 订单请求风控预检
 
     #[test]
     fn test_pre_check_normal_mode_pass() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
         checker.register_symbol("BTCUSDT".to_string());
 
         // 正常模式：品种已注册、资金充足、持仓比例未超限 -> 通过
@@ -142,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_unregistered_symbol() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
         checker.register_symbol("BTCUSDT".to_string());
 
         // 品种未注册 -> 拒绝
@@ -159,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_insufficient_balance() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
 
         // 资金不足 -> 拒绝
         let result = checker.pre_check(
@@ -175,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_position_ratio_exceeded() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
 
         // 持仓比例超限 (20% > 10%) -> 拒绝
         let result = checker.pre_check(
@@ -191,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_high_volatility_mode_pass() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
         checker.set_volatility_mode(VolatilityMode::High);
         checker.register_symbol("BTCUSDT".to_string());
 
@@ -207,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_high_volatility_mode_rejected() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
         checker.set_volatility_mode(VolatilityMode::High);
         checker.register_symbol("BTCUSDT".to_string());
 
@@ -225,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_extreme_volatility_mode_rejected() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
         checker.set_volatility_mode(VolatilityMode::Extreme);
         checker.register_symbol("BTCUSDT".to_string());
 
@@ -243,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_empty_registration_allows_all() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
         // 未注册任何品种（注册集合为空），允许所有品种交易
 
         let result = checker.pre_check(
@@ -257,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_boundary_position_ratio() {
-        let checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
+        let mut checker = RiskPreChecker::new(dec!(0.1), dec!(1000));
 
         // 边界情况：正好 10% 持仓比例 -> 通过
         let result = checker.pre_check(

@@ -350,7 +350,7 @@ impl VolatilityChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeDelta;
+    use chrono::{DateTime, TimeDelta, Utc};
     use rust_decimal_macros::dec;
 
     /// 辅助函数：创建测试用 Tick

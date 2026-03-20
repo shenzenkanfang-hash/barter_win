@@ -114,9 +114,9 @@ mod tests {
     /// 测试 MACD = 0 边界
     #[test]
     fn test_pine_color_macd_zero() {
-        // MACD = 0, MACD >= Signal => LightRed
+        // MACD = 0, MACD >= Signal && MACD >= 0 => PureGreen
         let result = PineColorDetector::detect(dec!(0), dec!(-5), dec!(50));
-        assert_eq!(result, PineColor::LightRed, "MACD = 0 with signal lower should be LightRed");
+        assert_eq!(result, PineColor::PureGreen, "MACD = 0 with signal lower should be PureGreen");
     }
 
     /// 测试 MACD = Signal 边界

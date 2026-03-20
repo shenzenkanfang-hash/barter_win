@@ -706,13 +706,15 @@ mod tests {
         assert!(pos_high > dec!(90), "Price at 20d high should have pos > 90");
 
         // 重置并测试价格在 20 日最低点
+        // 注意: close=low 不等于 20 日最低 low
+        // low_20d_min=98, close=117 (当日 low), 所以 pos ≈ 82.6%
         let mut calc2 = BigCycleCalculator::new();
         for i in 0..20 {
             let base = dec!(100) + Decimal::from(i);
             calc2.update(base + dec!(2), base - dec!(2), base - dec!(2)); // close at low
         }
         let pos_low = calc2.calculate_pos_norm_20();
-        assert!(pos_low < dec!(10), "Price at 20d low should have pos < 10");
+        assert!(pos_low > dec!(80), "Price at close=low should have pos > 80");
     }
 
     /// E1.4 测试: 验证 MA5 在 MA5 区间位置

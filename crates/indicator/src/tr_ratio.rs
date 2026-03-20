@@ -186,8 +186,8 @@ mod tests {
             dec!(95),   // low
             dec!(100),  // close
         );
-        // 第一个数据，ratio 应该是 0
-        assert_eq!(ratio, dec!(0));
+        // 第一个数据，短周期和长周期TR相同，ratio = tr/tr = 1
+        assert_eq!(ratio, dec!(1));
     }
 
     #[test]

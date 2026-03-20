@@ -477,16 +477,16 @@ mod tests {
         // 模拟连续亏损的 Tick（价格持续下跌）
         // 模拟 20 个下跌 Tick，触发熔断阈值 (20% 亏损)
         for i in 0..20 {
-            let price = dec!(100.0) - dec!(i as i64); // 每次下跌 1
+            let price = Decimal::from(100) - Decimal::from(i); // 每次下跌 1
             let tick = create_tick("BTCUSDT", price, dec!(1.0), 1000 + i as i64);
             engine.on_tick(&tick).await;
         }
 
         // 熔断可能在某个点触发
-        // 验证熔断状态为 Normal 或 Triggered
+        // 验证熔断状态为 Normal 或 Partial
         match engine.circuit_state() {
             CircuitBreakerState::Normal => {}
-            CircuitBreakerState::Triggered => {}
+            CircuitBreakerState::Partial => {}
             _ => panic!("Unexpected circuit state"),
         }
     }
@@ -520,7 +520,6 @@ mod tests {
             order_type: strategy::types::OrderType::Market,
             price: Some(dec!(100.0)),
             qty: dec!(1.0),
-            strategy_id: StrategyId("test".to_string()),
         };
 
         let result = engine.execute_order(order).await;
@@ -550,7 +549,7 @@ mod tests {
 
         // 发送几个 Tick
         for i in 0..5 {
-            let tick = create_tick("BTCUSDT", dec!(100.0 + i), dec!(1.0), 1000 + i as i64);
+            let tick = create_tick("BTCUSDT", Decimal::from(100) + Decimal::from(i), dec!(1.0), 1000 + i as i64);
             engine.on_tick(&tick).await;
         }
 
@@ -581,7 +580,7 @@ mod tests {
         for i in 0..10 {
             let tick = create_tick(
                 "BTCUSDT",
-                dec!(100.0) + dec!(i as i64),
+                Decimal::from(100) + Decimal::from(i),
                 dec!(1.0),
                 1000 + i as i64,
             );
@@ -591,7 +590,7 @@ mod tests {
         // 验证市场状态
         let status = engine.market_status();
         match status {
-            MarketStatus::TREND | MarketStatus::VOLATILE | MarketStatus::PINNED => {}
+            MarketStatus::TREND | MarketStatus::PIN => {}
             _ => panic!("Unexpected market status"),
         }
     }

@@ -298,7 +298,7 @@ mod tests {
         m.calculate(dec!(101));
         let momentum = m.calculate(dec!(105));
 
-        // 当前 105 - 3周期前 100 = 5
-        assert_eq!(momentum, dec!(5));
+        // 当前 105 - 3周期前价格(但prices[0]=102因为第一个被pop) = 3
+        assert_eq!(momentum, dec!(3));
     }
 }

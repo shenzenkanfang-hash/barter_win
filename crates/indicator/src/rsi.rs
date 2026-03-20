@@ -28,7 +28,7 @@ impl RSI {
         let change = price - self.last_price;
         self.last_price = price;
 
-        let gain = if change > Decimal::ZERO { change } else { -change };
+        let gain = if change > Decimal::ZERO { change } else { Decimal::ZERO };
         let loss = if change < Decimal::ZERO { -change } else { Decimal::ZERO };
 
         if self.avg_loss.is_zero() {
