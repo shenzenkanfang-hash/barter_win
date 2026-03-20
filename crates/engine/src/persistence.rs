@@ -270,6 +270,21 @@ impl PersistenceService {
     pub fn config(&self) -> &PersistenceConfig {
         &self.config
     }
+
+    // ========== 便捷方法 ==========
+
+    /// 记录日线 K线完成
+    pub fn record_daily_kline(&mut self, kline: &market::types::KLine) {
+        let kline_data = KLineData {
+            open: kline.open,
+            high: kline.high,
+            low: kline.low,
+            close: kline.close,
+            volume: kline.volume,
+            timestamp: kline.timestamp,
+        };
+        self.save_kline(&kline.symbol, "1d", kline_data);
+    }
 }
 
 /// 持久化统计

@@ -297,9 +297,6 @@ impl TradingEngine {
         // 7. 一轮编码结束
         self.round_guard.end_round(_round_id);
 
-        // 8. 持久化订单记录
-        self.persistence.record_order(&order);
-
         Ok(())
     }
 
