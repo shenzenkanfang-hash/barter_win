@@ -802,9 +802,22 @@ PreCheck 通过
                                  │
                                  ▼
     ┌─────────────────────────────────────────────────────────────────────────┐
+    │                    风控预检层 (锁外)                                    │
+    │                                                                       │
+    │  1. 账户资金检查 (可用 >= 最低保留)                                     │
+    │  2. 持仓比例检查 (订单金额/总权益 <= 最大比例)                          │
+    │  3. 品种注册检查 (品种已注册到该策略)                                  │
+    │  4. 波动率模式检查 (与当前模式匹配)                                    │
+    │                                                                       │
+    │  不通过 -> 标记风险，跳过该品种                                        │
+    │  通过 -> 进入下单执行                                                  │
+    └─────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+    ┌─────────────────────────────────────────────────────────────────────────┐
     │                    下单执行层 (串行 + 锁)                               │
     │                                                                       │
-    │  GlobalLock.acquire() -> 风控复核 -> 下单 -> 释放锁                    │
+    │  GlobalLock.acquire() -> 锁内风控复核 -> 下单 -> 释放锁               │
     │                                                                       │
     └─────────────────────────────────────────────────────────────────────────┘
 
@@ -1027,7 +1040,115 @@ fn check_position_mutual_exclusion(table: &CheckTable) -> Vec<OrderRequest> {
 }
 
 --------------------------------------------------------------------------------
-16.9 与原有架构的关系
+16.9 风控检查层
+--------------------------------------------------------------------------------
+
+风控分为两层：锁外预检 + 锁内复核
+
+16.9.1 锁外预检 (RiskPreChecker)
+
+在获取全局锁之前执行，检查所有风控条件:
+
+struct RiskPreChecker;
+
+impl RiskPreChecker {
+    pub fn pre_check(
+        &self,
+        order: &OrderRequest,
+        fund_pool: &RwLockReadGuard<FundPool>,
+        positions: &FnvHashMap<StrategyId, StrategyPosition>,
+    ) -> Result<(), RejectReason> {
+        // 1. 账户资金检查
+        self.check_account_balance(order, fund_pool)?;
+
+        // 2. 持仓比例检查
+        self.check_position_ratio(order, fund_pool)?;
+
+        // 3. 品种注册检查
+        self.check_symbol_registered(order)?;
+
+        // 4. 波动率模式检查
+        self.check_volatility_mode(order)?;
+
+        Ok(())
+    }
+}
+
+风控条件详情:
+
+| 检查项 | 条件 | 不通过原因 |
+|--------|------|-----------|
+| 账户资金 | 可用资金 >= 最低保留 | InsufficientBalance |
+| 持仓比例 | 订单金额/总权益 <= 最大比例 | PositionRatioExceeded |
+| 品种注册 | 品种已注册到该策略 | SymbolNotRegistered |
+| 波动率模式 | 波动率模式与策略匹配 | VolatilityModeMismatch |
+
+16.9.2 锁内复核 (RiskReChecker)
+
+获取全局锁后再次核对，确保并发安全:
+
+impl RiskReChecker {
+    pub fn re_check(
+        &self,
+        order: &OrderRequest,
+        fund_pool: &RwLockWriteGuard<FundPool>,
+    ) -> Result<(), RejectReason> {
+        // 再次检查资金（防止并发修改）
+        if fund_pool.available < order.amount {
+            return Err(RejectReason::InsufficientBalance);
+        }
+
+        // 再次检查波动率（市场可能已变化）
+        self.check_volatility_realtime(order)?;
+
+        Ok(())
+    }
+}
+
+16.9.3 风控流程图
+
+    策略信号产生 (LONG_ENTRY / SHORT_ENTRY / EXIT)
+           │
+           ▼
+    ┌───────────────────────────┐
+    │  风控预检（锁外）          │
+    │  - check_account_balance  │
+    │  - check_position_ratio   │
+    │  - check_symbol_registered│
+    │  - check_volatility_mode  │
+    └───────────────────────────┘
+           │ 不通过
+           ▼ 返回 RejectReason
+           │ 通过
+           ▼
+    ┌───────────────────────────┐
+    │  获取全局锁 (GlobalLock)   │
+    └───────────────────────────┘
+           │ 获取失败
+           ▼ 返回 LockFailed
+           │ 获取成功
+           ▼
+    ┌───────────────────────────┐
+    │  风控复核（锁内）          │
+    │  - 再次检查资金            │
+    │  - 实时波动率确认          │
+    └───────────────────────────┘
+           │ 不通过
+           ▼ 释放锁，返回 RejectReason
+           │ 通过
+           ▼
+    ┌───────────────────────────┐
+    │  执行下单                  │
+    │  - 更新持仓/资金           │
+    └───────────────────────────┘
+           │
+           ▼
+    ┌───────────────────────────┐
+    │  释放锁 (GlobalLock)       │
+    └───────────────────────────┘
+
+--------------------------------------------------------------------------------
+16.10 与原有架构的关系
 --------------------------------------------------------------------------------
 
 本文档描述的流水线架构是原有四层架构的扩展:
