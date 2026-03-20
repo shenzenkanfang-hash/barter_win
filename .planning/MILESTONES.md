@@ -197,8 +197,30 @@
 
 **Deliverables:**
 - 保留 `pine_indicator_full.rs` - Pine v5 完整指标 (PineColorDetector, EMA, RMA, DominantCycleRSI)
-- 保留 `day_cycle.rs` - 大周期指标 (BigCycleCalculator)
+- 保留 `min_cycle.rs` - 大周期指标 (BigCycleCalculator)
 - 新增 `indicator_1m.rs` - 1分钟指标（非 Pine 逻辑）
 - 删除零散指标: ema.rs, rsi.rs, pine_color.rs, price_position.rs, tr_ratio.rs, velocity.rs, z_score.rs, big_cycle.rs, error.rs
 
 **Status**: ✅ COMPLETE (2026-03-21)
+
+**Commit**: `73d8dd0` - indicator 模块重构完成
+
+---
+
+## v1.4: Indicator System Enhancement
+
+**Goal**: 完善指标系统，100% 对齐 Python v2.6
+
+**Deliverables:**
+- 重构 `indicator_1m.rs` - 100% 对齐 Python v2.6
+  - 百分位计算修正 (percentileofscore kind="weak")
+  - 滚动窗口工具 (RollingMean, RollingStd, RollingPercentile, RollingMax, RollingMin)
+  - TR 指标完善 (tr_ratio, tr_ratio_zscore)
+  - Z-Score 计算 (zscore_1h_1m, zscore_14_1m)
+  - 高阶动能指标 (Jerk, Norm jerk, Market force, Acc efficiency)
+
+**Status**: ✅ COMPLETE (2026-03-21)
+
+**Commit**: `d59a611` - 重构 indicator_1m.rs - 100% 对齐 Python v2.6
+
+**待继续**: 指标系统持续完善中
