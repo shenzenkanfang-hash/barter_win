@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "binance_test"
 path = "binance_test.rs"
 
+[[bin]]
+name = "indicator_compare"
+path = "indicator_compare.rs"
+
 [dependencies]
 account = { path = "crates/account" }
 market = { path = "crates/market" }
@@ -23,8 +27,12 @@ strategy = { path = "crates/strategy" }
 engine = { path = "crates/engine" }
 tokio = { workspace = true }
 rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 
 [workspace.dependencies]
 parking_lot = "0.12"

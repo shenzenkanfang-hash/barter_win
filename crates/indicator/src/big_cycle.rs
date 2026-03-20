@@ -558,6 +558,21 @@ impl BigCycleCalculator {
     pub fn is_ready(&self) -> bool {
         self.close_history.len() >= 60
     }
+
+    /// 获取 TR 5日均值
+    pub fn tr_5d_avg(&self) -> Decimal {
+        self.tr_5d_avg
+    }
+
+    /// 获取 TR 20日均值
+    pub fn tr_20d_avg(&self) -> Decimal {
+        self.tr_20d_avg
+    }
+
+    /// 获取 TR 60日均值
+    pub fn tr_60d_avg(&self) -> Decimal {
+        self.tr_60d_avg
+    }
 }
 
 #[cfg(test)]
