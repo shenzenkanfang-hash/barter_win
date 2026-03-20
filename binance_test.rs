@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("连接到 Binance 测试网...");
 
     // 创建 Binance WebSocket 连接器
-    let connector = BinanceWsConnector::new("BTCUSDT");
+    let mut connector = BinanceWsConnector::new("BTCUSDT");
     let mut stream = connector.connect().await?;
 
     tracing::info!("连接成功! 开始接收实时数据...\n");

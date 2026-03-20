@@ -207,7 +207,7 @@ impl PineColorDetector {
         }
     }
 
-    fn update(&mut self, close: Decimal) -> (String, String, Decimal, Decimal, Decimal, Decimal, Decimal, Decimal) {
+    fn update(&mut self, close: Decimal, debug_date: &str) -> (String, String, Decimal, Decimal, Decimal, Decimal, Decimal, Decimal) {
         let fast_ma = self.macd_fast.update(close);
         let slow_ma = self.macd_slow.update(close);
         let macd = fast_ma - slow_ma;
@@ -220,7 +220,7 @@ impl PineColorDetector {
         let hist_prev = self.hist_prev;
         self.hist_prev = Some(hist);
 
-        let bar_color = self.detect_bar_color(macd, signal, hist_prev, hist, rsi_val, ema10_val, ema20_val);
+        let bar_color = self.detect_bar_color(macd, signal, hist_prev, hist, rsi_val, ema10_val, ema20_val, debug_date);
         let bg_color = self.detect_bg_color(macd, signal);
 
         (bar_color, bg_color, macd, signal, hist, ema10_val, ema20_val, rsi_val)
@@ -258,7 +258,7 @@ impl PineColorDetector {
 
         // 调试输出到 stderr
         eprintln!("DEBUG {}: hist_prev={:.2}, hist={:.2}, macd={:.2}, rsi={:.2}, buytimeT={}, buytime={}, is_up={}, is_down={}, result={}",
-                  date, hist_prev_val, hist, macd, rsi, buytimeT, buytime, is_up, is_down,
+                  debug_date, hist_prev_val, hist, macd, rsi, buytimeT, buytime, is_up, is_down,
                   if selltimeT || buytimeT { "纯红" }
                   else if selltime { "浅黄" }
                   else if buytime { "纯蓝" }
@@ -386,7 +386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("date,index,close,macd,signal,hist,ema10,ema20,rsi,bar_color,bg_color,debug");
 
     for (i, (date, close)) in klines_data.iter().enumerate() {
-        let (bar_color, bg_color, macd, signal, hist, ema10_val, ema20_val, rsi_val) = detector.update(*close);
+        let (bar_color, bg_color, macd, signal, hist, ema10_val, ema20_val, rsi_val) = detector.update(*close, date);
 
         // 输出调试信息 (仅2026-03-14到2026-03-18)
         let debug = if date.as_str() >= "2026-03-14" && date.as_str() <= "2026-03-18" {
