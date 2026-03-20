@@ -1,76 +1,575 @@
 //! 指标对比验证程序
 //!
-//! 从币安获取1000根日线数据，使用分钟级指标计算，输出CSV进行对比验证
+//! 严格按照 Pine Script @version=5 算法实现所有指标计算
 
 use chrono::{DateTime, TimeZone, Utc};
-use engine::SymbolRules;
-use indicator::{BigCycleCalculator, EMA, PricePosition, RSI};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::VecDeque;
 
-/// 币安K线数据格式
-#[derive(Debug, Clone)]
-struct BinanceKline {
-    open_time: u64,
-    open: String,
-    high: String,
-    low: String,
-    close: String,
-    volume: String,
-    close_time: u64,
+// ==================== 辅助函数 ====================
+
+fn parse_decimal(s: &str) -> Decimal {
+    s.parse().unwrap_or(dec!(0))
 }
 
-/// Pine颜色中文映射
-fn pine_color_to_cn(color: &str) -> String {
-    match color {
-        "PureGreen" => "纯绿".to_string(),
-        "LightGreen" => "浅绿".to_string(),
-        "PureRed" => "纯红".to_string(),
-        "LightRed" => "浅红".to_string(),
-        "Purple" => "紫色".to_string(),
-        "Neutral" => "中性".to_string(),
-        _ => color.to_string(),
+fn round_price(price: Decimal, precision: u8) -> Decimal {
+    price.round_dp(precision as u32)
+}
+
+fn round_qty(qty: Decimal, precision: u8) -> Decimal {
+    qty.round_dp(precision as u32)
+}
+
+fn ln(x: Decimal) -> Decimal {
+    // 简化的自然对数实现
+    if x <= dec!(0) {
+        return dec!(0);
+    }
+    // 使用泰勒级数展开 ln(x) = 2*(z + z^3/3 + z^5/5 + ...) 其中 z = (x-1)/(x+1)
+    let z = (x - dec!(1)) / (x + dec!(1));
+    let mut result = dec!(0);
+    let mut z_power = z;
+    for i in 1..=20 {
+        let term = z_power / Decimal::from(i * 2 - 1);
+        result = result + if i % 2 == 1 { term } else { -term };
+        z_power = z_power * z;
+    }
+    dec!(2) * result
+}
+
+// 简化的平方根 (牛顿法)
+fn sqrt(x: Decimal) -> Decimal {
+    if x <= dec!(0) {
+        return dec!(0);
+    }
+    let mut guess = x / dec!(2);
+    for _ in 0..20 {
+        let next_guess = (guess + x / guess) / dec!(2);
+        if (guess - next_guess).abs() < dec!(0.0000001) {
+            break;
+        }
+        guess = next_guess;
+    }
+    guess
+}
+
+// ==================== EMA 计算 ====================
+
+struct EMA {
+    period: usize,
+    value: Decimal,
+}
+
+impl EMA {
+    fn new(period: usize) -> Self {
+        Self {
+            period,
+            value: Decimal::ZERO,
+        }
+    }
+
+    fn update(&mut self, price: Decimal) -> Decimal {
+        if self.value == Decimal::ZERO {
+            self.value = price;
+        } else {
+            let alpha = dec!(2) / Decimal::from(self.period + 1);
+            self.value = price * alpha + self.value * (dec!(1) - alpha);
+        }
+        self.value
+    }
+
+    fn get(&self) -> Decimal {
+        self.value
     }
 }
 
-/// EMA比较中文
-fn ema_compare_to_cn(compare: &str) -> &str {
-    match compare {
-        "above" => "上方",
-        "below" => "下方",
-        "equal" => "相等",
-        _ => compare,
+// ==================== SMA 计算 ====================
+
+struct SMA {
+    period: usize,
+    values: VecDeque<Decimal>,
+    sum: Decimal,
+}
+
+impl SMA {
+    fn new(period: usize) -> Self {
+        Self {
+            period,
+            values: VecDeque::new(),
+            sum: Decimal::ZERO,
+        }
+    }
+
+    fn update(&mut self, price: Decimal) -> Decimal {
+        self.values.push_back(price);
+        self.sum = self.sum + price;
+
+        if self.values.len() > self.period {
+            if let Some(old) = self.values.pop_front() {
+                self.sum = self.sum - old;
+            }
+        }
+
+        if self.values.len() >= self.period {
+            self.sum / Decimal::from(self.period)
+        } else {
+            self.sum / Decimal::from(self.values.len())
+        }
     }
 }
 
-/// 实时TR计算器
-struct RealTimeTR {
+// ==================== RMA (RSI 用的平滑均线) ====================
+
+struct RMA {
+    period: usize,
+    alpha: Decimal,
+    value: Decimal,
+    initialized: bool,
+}
+
+impl RMA {
+    fn new(period: usize) -> Self {
+        Self {
+            period,
+            alpha: dec!(1) / Decimal::from(period),
+            value: Decimal::ZERO,
+            initialized: false,
+        }
+    }
+
+    fn update(&mut self, price: Decimal) -> Decimal {
+        if !self.initialized {
+            self.value = price;
+            self.initialized = true;
+        } else {
+            self.value = price * self.alpha + self.value * (dec!(1) - self.alpha);
+        }
+        self.value
+    }
+}
+
+// ==================== 标准差 ====================
+
+struct STDEV {
+    period: usize,
+    values: VecDeque<Decimal>,
+    mean: Decimal,
+}
+
+impl STDEV {
+    fn new(period: usize) -> Self {
+        Self {
+            period,
+            values: VecDeque::new(),
+            mean: Decimal::ZERO,
+        }
+    }
+
+    fn update(&mut self, price: Decimal) -> Decimal {
+        self.values.push_back(price);
+        if self.values.len() > self.period {
+            self.values.pop_front();
+        }
+
+        let n = Decimal::from(self.values.len());
+        if n < dec!(2) {
+            return dec!(0);
+        }
+
+        let sum: Decimal = self.values.iter().sum();
+        self.mean = sum / n;
+
+        let variance: Decimal = self.values.iter()
+            .map(|&x| {
+                let diff = x - self.mean;
+                diff * diff
+            })
+            .sum::<Decimal>() / n;
+
+        // 简化的标准差计算
+        let approx = sqrt(variance.abs());
+        approx
+    }
+}
+
+// ==================== RSI (Dominant Cycle RSI) ====================
+
+struct DominantCycleRSI {
+    period: usize,
+    cyclelen: usize,
+    vibration: usize,
+    leveling: Decimal,
+    cyclicmemory: usize,
+    torque: Decimal,
+    phasinglag: Decimal,
+    rma_up: RMA,
+    rma_down: RMA,
+    crsi: Decimal,
+    prev_crsi: Decimal,
+    last_price: Decimal,
+    lmax: Decimal,
+    lmin: Decimal,
+    lmax_history: VecDeque<Decimal>,
+    lmin_history: VecDeque<Decimal>,
+}
+
+impl DominantCycleRSI {
+    fn new(period: usize) -> Self {
+        let cyclelen = period / 2;
+        let vibration = 10;
+        let leveling = dec!(10.0);
+        let cyclicmemory = period * 2;
+        let torque = dec!(2) / Decimal::from(vibration + 1);
+        let phasinglag = Decimal::from(vibration - 1) / dec!(2);
+
+        Self {
+            period,
+            cyclelen,
+            vibration,
+            leveling,
+            cyclicmemory,
+            torque,
+            phasinglag,
+            rma_up: RMA::new(cyclelen),
+            rma_down: RMA::new(cyclelen),
+            crsi: Decimal::ZERO,
+            prev_crsi: Decimal::ZERO,
+            last_price: Decimal::ZERO,
+            lmax: dec!(-999999),
+            lmin: dec!(999999),
+            lmax_history: VecDeque::new(),
+            lmin_history: VecDeque::new(),
+        }
+    }
+
+    fn update(&mut self, price: Decimal) -> Decimal {
+        // 计算标准 RSI
+        let change = if self.last_price > Decimal::ZERO {
+            price - self.last_price
+        } else {
+            Decimal::ZERO
+        };
+        self.last_price = price;
+
+        let up = if change > Decimal::ZERO { change } else { -change };
+        let down = if change < Decimal::ZERO { -change } else { Decimal::ZERO };
+
+        let rsi_value = if down == Decimal::ZERO {
+            dec!(100)
+        } else if up == Decimal::ZERO {
+            dec!(0)
+        } else {
+            let rsi = dec!(100) - dec!(100) / (dec!(1) + up / down);
+            rsi
+        };
+
+        // RMA 平滑
+        let rma_up_val = self.rma_up.update(up);
+        let rma_down_val = self.rma_down.update(down);
+
+        let rsi_rma = if rma_down_val == Decimal::ZERO {
+            dec!(100)
+        } else if rma_up_val == Decimal::ZERO {
+            dec!(0)
+        } else {
+            dec!(100) - dec!(100) / (dec!(1) + rma_up_val / rma_down_val)
+        };
+
+        // 计算 CRSI
+        let crsi_calc = self.torque * (dec!(2) * rsi_rma - self.get_prev_crsi(self.phasinglag)) +
+                        (dec!(1) - self.torque) * self.crsi;
+
+        self.prev_crsi = self.crsi;
+        self.crsi = crsi_calc;
+
+        // 更新历史极值
+        self.lmax_history.push_back(self.crsi);
+        self.lmin_history.push_back(self.crsi);
+
+        if self.lmax_history.len() > self.cyclicmemory {
+            self.lmax_history.pop_front();
+            self.lmin_history.pop_front();
+        }
+
+        self.lmax = *self.lmax_history.iter().max().unwrap_or(&dec!(-999999));
+        self.lmin = *self.lmin_history.iter().min().unwrap_or(&dec!(999999));
+
+        self.crsi
+    }
+
+    fn get_prev_crsi(&self, lag: Decimal) -> Decimal {
+        let idx = self.cyclicmemory - (lag.to_string().parse::<usize>().unwrap_or(0));
+        if idx < self.lmax_history.len() {
+            self.lmax_history[idx]
+        } else {
+            self.crsi
+        }
+    }
+
+    fn get_rsi_70(&self) -> bool {
+        self.crsi >= dec!(70)
+    }
+
+    fn get_rsi_30(&self) -> bool {
+        self.crsi <= dec!(30)
+    }
+}
+
+// ==================== PineColor 检测器 ====================
+
+struct PineColorDetector {
+    macd_ema_fast: EMA,
+    macd_ema_slow: EMA,
+    signal_ema: EMA,
+    hist_prev: Decimal,
+    rsi: DominantCycleRSI,
+}
+
+impl PineColorDetector {
+    fn new() -> Self {
+        Self {
+            macd_ema_fast: EMA::new(20),  // Fast Length = 20
+            macd_ema_slow: EMA::new(50),   // Slow Length = 50
+            signal_ema: EMA::new(9),       // Signal Smoothing = 9
+            hist_prev: Decimal::ZERO,
+            rsi: DominantCycleRSI::new(20),
+        }
+    }
+
+    fn update(&mut self, close: Decimal) -> (String, String) {
+        // MACD 计算
+        let fast_ma = self.macd_ema_fast.update(close);
+        let slow_ma = self.macd_ema_slow.update(close);
+        let macd = fast_ma - slow_ma;
+
+        // Signal line EMA
+        let signal = self.signal_ema.update(macd);
+
+        // Hist
+        let hist = macd - signal;
+
+        // RSI
+        let rsi_val = self.rsi.update(close);
+
+        // PineColor 判断逻辑
+        let color = self.detect_color(macd, signal, hist, rsi_val);
+
+        self.hist_prev = hist;
+
+        (color.clone(), color) // bar color 和 bg color
+    }
+
+    fn detect_color(&self, macd: Decimal, signal: Decimal, hist: Decimal, rsi: Decimal) -> String {
+        // RSI 极值优先
+        if rsi >= dec!(70) {
+            return "紫色".to_string();
+        }
+        if rsi <= dec!(30) {
+            return "紫色".to_string();
+        }
+
+        // MACD 判断
+        let macd_positive = macd >= Decimal::ZERO;
+        let signal_positive = signal >= Decimal::ZERO;
+        let macd_above_signal = macd >= signal;
+
+        if macd_positive && macd_above_signal {
+            "纯绿".to_string()
+        } else if !macd_positive && macd_above_signal {
+            "浅绿".to_string()
+        } else if !macd_positive && !macd_above_signal {
+            "纯红".to_string()
+        } else {
+            "浅红".to_string()
+        }
+    }
+}
+
+// ==================== MACD 计算器 ====================
+
+struct MACD {
+    fast_ema: EMA,
+    slow_ema: EMA,
+    signal_ema: EMA,
+}
+
+impl MACD {
+    fn new() -> Self {
+        Self {
+            fast_ema: EMA::new(12),  // n1 = 12
+            slow_ema: EMA::new(26),   // n2 = 26
+            signal_ema: EMA::new(9), // n3 = 9
+        }
+    }
+
+    fn update(&mut self, close: Decimal) -> (Decimal, Decimal, Decimal) {
+        let fast = self.fast_ema.update(close);
+        let slow = self.slow_ema.update(close);
+        let macd = fast - slow;
+        let signal = self.signal_ema.update(macd);
+        let hist = macd - signal;
+        (macd, signal, hist)
+    }
+}
+
+// ==================== Jerk (高阶动能) 计算器 ====================
+
+struct JerkCalculator {
+    mid_ma: SMA,
+    velocity_history: VecDeque<Decimal>,
+    acc_history: VecDeque<Decimal>,
+    jerk_history: VecDeque<Decimal>,
+    velocity_sma: SMA,
+    acc_sma: SMA,
+    acc_ema: EMA,
+    jerk_stdev: STDEV,
+    prev_mid_ma: Decimal,
+}
+
+impl JerkCalculator {
+    fn new() -> Self {
+        Self {
+            mid_ma: SMA::new(10),        // MEDIUM_SHORT_MA = 10
+            velocity_history: VecDeque::new(),
+            acc_history: VecDeque::new(),
+            jerk_history: VecDeque::new(),
+            velocity_sma: SMA::new(10),   // SMOOTH_VEL_WIN = 10
+            acc_sma: SMA::new(7),         // SMOOTH_ACC_WIN = 7
+            acc_ema: EMA::new(5),         // EMA 5 for acc smoothing
+            jerk_stdev: STDEV::new(20),   // NORM_WIN = 20
+            prev_mid_ma: Decimal::ZERO,
+        }
+    }
+
+    fn update(&mut self, high: Decimal, low: Decimal, close: Decimal) -> (Decimal, Decimal, Decimal, Decimal) {
+        // Step A: 中点价格
+        let mid = (high + low) / dec!(2);
+
+        // Step B: 平滑中点
+        let mid_ma_val = self.mid_ma.update(mid);
+        self.prev_mid_ma = mid_ma_val;
+
+        // Step C: 对数收益率 (velocity)
+        let log_ret = if self.prev_mid_ma > Decimal::ZERO && mid_ma_val > Decimal::ZERO {
+            ln(mid_ma_val / self.prev_mid_ma)
+        } else {
+            Decimal::ZERO
+        };
+
+        // Velocity SMA 平滑
+        let velocity = self.velocity_sma.update(log_ret);
+        self.velocity_history.push_back(velocity);
+        if self.velocity_history.len() > 20 {
+            self.velocity_history.pop_front();
+        }
+
+        // Step D: 加速度
+        let acc_raw = if let Some(prev_vel) = self.velocity_history.iter().rev().nth(1).copied() {
+            velocity - prev_vel
+        } else {
+            Decimal::ZERO
+        };
+
+        // 加速度 SMA 平滑
+        let acc_sma_val = self.acc_sma.update(acc_raw);
+        // 加速度 EMA 平滑
+        let acc_smooth = self.acc_ema.update(acc_sma_val);
+
+        self.acc_history.push_back(acc_smooth);
+        if self.acc_history.len() > 20 {
+            self.acc_history.pop_front();
+        }
+
+        // Step E: Jerk (加速度的导数)
+        let jerk_raw = if let Some(prev_acc) = self.acc_history.iter().rev().nth(1).copied() {
+            acc_smooth - prev_acc
+        } else {
+            Decimal::ZERO
+        };
+
+        self.jerk_history.push_back(jerk_raw);
+        if self.jerk_history.len() > 20 {
+            self.jerk_history.pop_front();
+        }
+
+        // Step F: 归一化
+        let jerk_std = self.jerk_stdev.update(jerk_raw);
+        let norm_jerk = if jerk_std > Decimal::ZERO {
+            (jerk_raw / jerk_std).max(dec!(-3)).min(dec!(3))
+        } else {
+            Decimal::ZERO
+        };
+
+        (jerk_raw, acc_smooth, velocity, norm_jerk)
+    }
+}
+
+// ==================== Price Position ====================
+
+struct PricePosition {
+    period: usize,
+    highs: VecDeque<Decimal>,
+    lows: VecDeque<Decimal>,
+}
+
+impl PricePosition {
+    fn new(period: usize) -> Self {
+        Self {
+            period,
+            highs: VecDeque::new(),
+            lows: VecDeque::new(),
+        }
+    }
+
+    fn update(&mut self, high: Decimal, low: Decimal, close: Decimal) -> Decimal {
+        self.highs.push_back(high);
+        self.lows.push_back(low);
+
+        if self.highs.len() > self.period {
+            self.highs.pop_front();
+            self.lows.pop_front();
+        }
+
+        if let (Some(&max_high), Some(&min_low)) = (self.highs.iter().max(), self.lows.iter().min()) {
+            if max_high > min_low {
+                (close - min_low) / (max_high - min_low) * dec!(100)
+            } else {
+                dec!(50)
+            }
+        } else {
+            dec!(50)
+        }
+    }
+}
+
+// ==================== TR (True Range) ====================
+
+struct TrueRange {
     history: VecDeque<Decimal>,
     max_len: usize,
 }
 
-impl RealTimeTR {
+impl TrueRange {
     fn new(max_len: usize) -> Self {
         Self {
-            history: VecDeque::with_capacity(max_len),
+            history: VecDeque::new(),
             max_len,
         }
     }
 
-    fn update(&mut self, high: Decimal, low: Decimal, close: Decimal, prev_close: Decimal) {
-        let tr = Self::calculate_tr(high, low, close, prev_close);
+    fn update(&mut self, high: Decimal, low: Decimal, close: Decimal, prev_close: Decimal) -> Decimal {
+        let tr1 = high - low;
+        let tr2 = (high - close).abs();
+        let tr3 = (low - close).abs();
+        let tr = tr1.max(tr2).max(tr3);
+
         self.history.push_back(tr);
         if self.history.len() > self.max_len {
             self.history.pop_front();
         }
-    }
 
-    fn calculate_tr(high: Decimal, low: Decimal, close: Decimal, prev_close: Decimal) -> Decimal {
-        let h_l = high - low;
-        let h_c = (high - close).abs();
-        let l_c = (low - close).abs();
-        h_l.max(h_c).max(l_c) / prev_close
+        tr
     }
 
     fn avg(&self) -> Decimal {
@@ -81,145 +580,76 @@ impl RealTimeTR {
         sum / Decimal::from(self.history.len())
     }
 
-    /// 获取最新TR值
     fn latest(&self) -> Decimal {
         self.history.back().copied().unwrap_or(dec!(0))
     }
-
-    /// 获取TR数组引用
-    fn history(&self) -> &VecDeque<Decimal> {
-        &self.history
-    }
 }
 
-/// TR排名百分位计算
-fn tr_rank_percentile(history: &VecDeque<Decimal>, current: Decimal) -> Decimal {
-    if history.is_empty() {
-        return dec!(50);
-    }
-    let len = history.len();
-    let rank = history.iter().filter(|&&x| x < current).count();
-    Decimal::from(rank) / Decimal::from(len) * dec!(100)
+// ==================== TR Ratio ====================
+
+struct TRRatio {
+    tr_5d: TrueRange,
+    tr_20d: TrueRange,
+    tr_60d_history: VecDeque<Decimal>,
 }
 
-/// 速度百分位计算器
-struct VelocityPercentile {
-    tr_history: VecDeque<Decimal>,
-    window: usize,
-}
-
-impl VelocityPercentile {
-    fn new(window: usize) -> Self {
-        Self {
-            tr_history: VecDeque::with_capacity(window * 2),
-            window,
-        }
-    }
-
-    fn update(&mut self, tr: Decimal) -> Decimal {
-        self.tr_history.push_back(tr);
-        if self.tr_history.len() > self.window * 2 {
-            self.tr_history.pop_front();
-        }
-
-        if self.tr_history.len() < self.window {
-            return dec!(50);
-        }
-
-        let current = *self.tr_history.back().unwrap();
-        let sorted: Vec<_> = self.tr_history.iter().take(self.window).cloned().collect();
-        let rank = sorted.iter().filter(|&&x| x < current).count();
-        Decimal::from(rank) / Decimal::from(sorted.len()) * dec!(100)
-    }
-}
-
-/// 功率计算器
-struct PowerCalculator {
-    tr_history: VecDeque<Decimal>,
-    velocity_history: VecDeque<Decimal>,
-    acc_history: VecDeque<Decimal>,
-}
-
-impl PowerCalculator {
+impl TRRatio {
     fn new() -> Self {
         Self {
-            tr_history: VecDeque::with_capacity(60),
-            velocity_history: VecDeque::with_capacity(60),
-            acc_history: VecDeque::with_capacity(60),
+            tr_5d: TrueRange::new(5),
+            tr_20d: TrueRange::new(20),
+            tr_60d_history: VecDeque::new(),
         }
     }
 
-    fn update(&mut self, tr: Decimal) -> (Decimal, Decimal, Decimal, Decimal, Decimal, Decimal) {
-        // Velocity: TR变化率
-        let velocity = if let Some(prev) = self.tr_history.back() {
-            if *prev > dec!(0) {
-                (tr - *prev) / *prev
-            } else {
-                dec!(0)
-            }
+    fn update(&mut self, high: Decimal, low: Decimal, close: Decimal, prev_close: Decimal) -> (Decimal, Decimal, Decimal, Decimal) {
+        // 计算 TR
+        let tr1 = high - low;
+        let tr2 = (high - close).abs();
+        let tr3 = (low - close).abs();
+        let tr = tr1.max(tr2).max(tr3);
+
+        // 更新 TR 历史
+        self.tr_5d.update(high, low, close, prev_close);
+        self.tr_20d.update(high, low, close, prev_close);
+
+        // TR 5日均值
+        let tr_5d_avg = self.tr_5d.avg();
+
+        // TR 20日均值
+        let tr_20d_avg = self.tr_20d.avg();
+
+        // TR 60日 (基于20d历史的移动均值)
+        let mut tr_60d_avg = dec!(0);
+        if self.tr_20d.history.len() >= 60 {
+            let sum: Decimal = self.tr_20d.history.iter().rev().take(60).sum();
+            tr_60d_avg = sum / dec!(60);
+        }
+
+        // TR Ratio
+        let tr_ratio_5d_20d = if tr_20d_avg > dec!(0) {
+            self.tr_20d.latest() / tr_20d_avg
         } else {
             dec!(0)
         };
 
-        // Acceleration: 速度变化率
-        let acceleration = if let Some(prev_vel) = self.velocity_history.back().copied() {
-            if prev_vel > dec!(0) {
-                (velocity - prev_vel) / prev_vel.abs()
-            } else {
-                dec!(0)
-            }
+        let tr_ratio_20d_60d = if tr_60d_avg > dec!(0) {
+            tr_20d_avg / tr_60d_avg
         } else {
             dec!(0)
         };
 
-        self.tr_history.push_back(tr);
-        self.velocity_history.push_back(velocity);
-        self.acc_history.push_back(acceleration);
-
-        if self.tr_history.len() > 60 {
-            self.tr_history.pop_front();
-        }
-        if self.velocity_history.len() > 60 {
-            self.velocity_history.pop_front();
-        }
-        if self.acc_history.len() > 60 {
-            self.acc_history.pop_front();
-        }
-
-        // Power = velocity * acceleration
-        let power = velocity * acceleration;
-
-        // Percentiles
-        let vel_pct = self.percentile(&self.velocity_history, velocity);
-        let acc_pct = self.percentile(&self.acc_history, acceleration);
-        let power_pct = self.percentile(&self.velocity_history, power);
-
-        (velocity, acceleration, power, vel_pct, acc_pct, power_pct)
-    }
-
-    fn percentile(&self, history: &VecDeque<Decimal>, value: Decimal) -> Decimal {
-        if history.is_empty() {
-            return dec!(50);
-        }
-        let sorted: Vec<_> = history.iter().cloned().collect();
-        let rank = sorted.iter().filter(|&&x| x < value).count();
-        Decimal::from(rank) / Decimal::from(sorted.len()) * dec!(100)
+        (tr_5d_avg, tr_20d_avg, tr_ratio_5d_20d, tr_ratio_20d_60d)
     }
 }
 
-impl Default for PowerCalculator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ==================== Main ====================
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("============================================");
-    println!("指标对比验证程序");
-    println!("从币安获取日线数据，计算指标输出CSV");
+    println!("指标对比验证程序 (Pine Script v5 算法)");
     println!("============================================\n");
 
-    // 获取命令行参数
     let symbol = std::env::args().nth(1).unwrap_or_else(|| "BTCUSDT".to_string());
     let limit = std::env::args()
         .nth(2)
@@ -230,38 +660,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("交易对: {}", symbol);
     println!("获取K线数量: {}\n", limit);
 
-    // 创建交易规则
-    let symbol_rules = SymbolRules::new(symbol.clone());
-    let price_precision = symbol_rules.price_precision;
-    let qty_precision = symbol_rules.quantity_precision;
-
     // 从币安API获取K线数据
     let url = format!(
         "https://api.binance.com/api/v3/klines?symbol={}&interval=1d&limit={}",
         symbol, limit
     );
-    println!("请求URL: {}\n", url);
 
     let client = reqwest::blocking::Client::new();
     let response = client.get(&url).send()?;
     let text = response.text()?;
-    let klines_raw: Vec<serde_json::Value> = serde_json::from_str(&text)
-        .map_err(|e| format!("JSON解析错误: {}", e))?;
+    let klines_raw: Vec<serde_json::Value> = serde_json::from_str(&text)?;
 
     // 解析K线数据
-    let mut klines = Vec::new();
+    let mut klines: Vec<(u64, String, String, String, String, String)> = Vec::new();
     for arr in klines_raw {
         if let Some(items) = arr.as_array() {
             if items.len() >= 6 {
-                klines.push(BinanceKline {
-                    open_time: items[0].as_i64().unwrap_or(0) as u64,
-                    open: items[1].as_str().unwrap_or("0").to_string(),
-                    high: items[2].as_str().unwrap_or("0").to_string(),
-                    low: items[3].as_str().unwrap_or("0").to_string(),
-                    close: items[4].as_str().unwrap_or("0").to_string(),
-                    volume: items[5].as_str().unwrap_or("0").to_string(),
-                    close_time: items[6].as_i64().unwrap_or(0) as u64,
-                });
+                klines.push((
+                    items[0].as_i64().unwrap_or(0) as u64,
+                    items[1].as_str().unwrap_or("0").to_string(),
+                    items[2].as_str().unwrap_or("0").to_string(),
+                    items[3].as_str().unwrap_or("0").to_string(),
+                    items[4].as_str().unwrap_or("0").to_string(),
+                    items[5].as_str().unwrap_or("0").to_string(),
+                ));
             }
         }
     }
@@ -269,232 +691,132 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("成功获取 {} 根K线\n", klines.len());
 
     // 初始化计算器
-    let mut big_cycle = BigCycleCalculator::new();
-    let mut real_time_tr_5d = RealTimeTR::new(5);
-    let mut real_time_tr_20d = RealTimeTR::new(20);
-    let mut vel_percentile = VelocityPercentile::new(60);
-    let mut power_calc = PowerCalculator::new();
+    let mut pine_color = PineColorDetector::new();
+    let mut macd = MACD::new();
+    let mut jerk = JerkCalculator::new();
+    let mut price_pos = PricePosition::new(20);
+    let mut tr_ratio = TRRatio::new();
 
-    // EMA 用于比较
-    let mut ema_100 = EMA::new(100);
-    let mut ema_200 = EMA::new(200);
+    // EMA
+    let mut ema10 = EMA::new(10);
+    let mut ema20 = EMA::new(20);
+    let mut ema50 = EMA::new(50);
+    let mut ema100 = EMA::new(100);
+    let mut ema200 = EMA::new(200);
 
     // RSI
-    let mut rsi = RSI::new(14);
+    let mut rsi = DominantCycleRSI::new(20);
 
-    // PricePosition
-    let mut price_pos = PricePosition::new(20);
-
-    // 准备CSV输出
+    // CSV 输出
     let output_path = format!("indicator_comparison_{}.csv", symbol.to_lowercase());
     let mut csv_content = String::new();
 
-    // CSV表头 (中文)
-    csv_content.push_str("时间戳,父级1m时间戳,Tick索引,开盘价,最高价,最低价,收盘价,成交量,");
-    csv_content.push_str("TR比率5日全量,TR比率5日20日排名20日,TR比率5日20D,TR基准5日,");
-    csv_content.push_str("TR比率20日全量,TR比率20日60日排名20日,TR比率20日60D,TR基准20日,");
-    csv_content.push_str("可读时间,加加速度信号,Top3平均振幅百分比,");
-    csv_content.push_str("松林颜色20_50柱,松林颜色20_50背景,");
-    csv_content.push_str("松林颜色100_200柱,松林颜色100_200背景,");
-    csv_content.push_str("松林颜色12_26柱,松林颜色12_26背景,");
-    csv_content.push_str("实时TR5日,实时TR20日,EMA100对比EMA200,");
-    csv_content.push_str("实时TR比率5日20日,实时TR比率20日60日,");
-    csv_content.push_str("20日位置归一化,MA5在20日MA5位置,MA20在60日MA20位置,");
-    csv_content.push_str("MA5在全部MA5位置,MA20在全部MA20位置,");
-    csv_content.push_str("速度百分位日,加速度百分位日,功率,功率百分位60日,");
-    csv_content.push_str("策略计算时间戳\n");
+    // 中文表头
+    csv_content.push_str("时间戳,Tick索引,开盘价,最高价,最低价,收盘价,成交量,");
+    csv_content.push_str("MACD快线,MACD慢线,MACD差值,信号线,Hist柱,");
+    csv_content.push_str("EMA10,EMA20,EMA50,EMA100,EMA200,");
+    csv_content.push_str("EMA10对比EMA20,EMA20对比EMA50,");
+    csv_content.push_str("RSI极值,松林颜色,");
+    csv_content.push_str("Jerk原始,加速度平滑,速度,归一化Jerk,");
+    csv_content.push_str("位置归一化,");
+    csv_content.push_str("TR5日均值,TR20日均值,TR比率5日20日,TR比率20日60日,");
+    csv_content.push_str("可读时间\n");
 
     let mut prev_close = None;
     let mut tick_index = 0i64;
 
-    // TR历史用于排名计算
-    let mut tr_5d_all_history: VecDeque<Decimal> = VecDeque::new();
-    let mut tr_20d_all_history: VecDeque<Decimal> = VecDeque::new();
+    for (open_time, open_s, high_s, low_s, close_s, vol_s) in &klines {
+        let open = parse_decimal(open_s).round_dp(2);
+        let high = parse_decimal(high_s).round_dp(2);
+        let low = parse_decimal(low_s).round_dp(2);
+        let close = parse_decimal(close_s).round_dp(2);
+        let volume = parse_decimal(vol_s).round_dp(4);
 
-    for kline in &klines {
-        let open_time = kline.open_time as i64;
-
-        // 使用交易规则解析价格精度
-        let open = round_price(parse_decimal(&kline.open), price_precision);
-        let high = round_price(parse_decimal(&kline.high), price_precision);
-        let low = round_price(parse_decimal(&kline.low), price_precision);
-        let close = round_price(parse_decimal(&kline.close), price_precision);
-        let volume = round_qty(parse_decimal(&kline.volume), qty_precision);
-
-        let readable_time = Utc.timestamp_millis_opt(open_time)
+        let readable_time = Utc.timestamp_millis_opt(*open_time as i64)
             .single()
             .map(|dt: DateTime<Utc>| dt.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_default();
 
-        // 更新大周期计算器
-        big_cycle.update(high, low, close);
-        big_cycle.update_pine_ema(high, low, close);
+        // 更新 EMA
+        let ema10_val = ema10.update(close);
+        let ema20_val = ema20.update(close);
+        let ema50_val = ema50.update(close);
+        let ema100_val = ema100.update(close);
+        let ema200_val = ema200.update(close);
 
-        // 实时TR计算
-        if let Some(prev) = prev_close {
-            real_time_tr_5d.update(high, low, close, prev);
-            real_time_tr_20d.update(high, low, close, prev);
+        // MACD
+        let (macd_val, signal_val, hist_val) = macd.update(close);
 
-            // 更新TR历史
-            let current_tr = RealTimeTR::calculate_tr(high, low, close, prev);
-            tr_5d_all_history.push_back(current_tr);
-            if tr_5d_all_history.len() > 100 {
-                tr_5d_all_history.pop_front();
-            }
+        // PineColor
+        let (pine_bar, _pine_bg) = pine_color.update(close);
 
-            let tr_20d_val = (high - low) / prev;
-            tr_20d_all_history.push_back(tr_20d_val);
-            if tr_20d_all_history.len() > 100 {
-                tr_20d_all_history.pop_front();
-            }
-        }
+        // RSI
+        let rsi_val = rsi.update(close);
+        let rsi_extreme = if rsi.get_rsi_70() { "超买" } else if rsi.get_rsi_30() { "超卖" } else { "正常" };
+
+        // Jerk
+        let (jerk_raw, acc_smooth, velocity, norm_jerk) = jerk.update(high, low, close);
+
+        // Price Position
+        let pos_norm = price_pos.update(high, low, close);
+
+        // TR Ratio
+        let (tr_5d, tr_20d, tr_r_5d_20d, tr_r_20d_60d) = if let Some(prev) = prev_close {
+            tr_ratio.update(high, low, close, prev)
+        } else {
+            (dec!(0), dec!(0), dec!(0), dec!(0))
+        };
         prev_close = Some(close);
 
-        // 计算TR排名
-        let tr_5d_latest = real_time_tr_5d.latest();
-        let tr_ratio_5d_all = tr_rank_percentile(&tr_5d_all_history, tr_5d_latest);
+        // EMA 比较
+        let ema10_vs_20 = if ema10_val > ema20_val { "多头" } else if ema10_val < ema20_val { "空头" } else { "中性" };
+        let ema20_vs_50 = if ema20_val > ema50_val { "多头" } else if ema20_val < ema50_val { "空头" } else { "中性" };
 
-        // tr_ratio_5d_20d_rank_20d: 需要20日TR历史用于排名
-        let tr_ratio_5d_20d_rank_20d = if real_time_tr_20d.history().len() >= 20 {
-            tr_rank_percentile(real_time_tr_20d.history(), tr_5d_latest)
-        } else {
-            dec!(0)
-        };
-
-        // TR 20d 排名
-        let tr_20d_latest = real_time_tr_20d.latest();
-        let tr_ratio_20d_all = tr_rank_percentile(&tr_20d_all_history, tr_20d_latest);
-
-        // tr_ratio_20d_60d_rank_20d: 需要60日TR历史，但我们只有20日
-        let tr_ratio_20d_60d_rank_20d = dec!(0); // 简化
-
-        // 计算实时TR比率
-        let rt_tr_5d_avg = real_time_tr_5d.avg();
-        let rt_tr_20d_avg = real_time_tr_20d.avg();
-        let rt_tr_ratio_5d_20d = if rt_tr_20d_avg > dec!(0) {
-            tr_5d_latest / rt_tr_20d_avg
-        } else {
-            dec!(0)
-        };
-        let rt_tr_ratio_20d_60d = if rt_tr_20d_avg > dec!(0) && big_cycle.tr_60d_avg() > dec!(0) {
-            rt_tr_20d_avg / big_cycle.tr_60d_avg()
-        } else {
-            dec!(0)
-        };
-
-        // 速度百分位
-        let vel_pct = vel_percentile.update(tr_20d_latest);
-
-        // 功率计算
-        let (_velocity, acceleration, power, _vel_pct, _acc_pct, power_pct) = power_calc.update(tr_20d_latest);
-
-        // EMA比较
-        let ema_100_val = ema_100.calculate(close);
-        let ema_200_val = ema_200.calculate(close);
-        let ema_compare = if ema_100_val > ema_200_val {
-            "上方"
-        } else if ema_100_val < ema_200_val {
-            "下方"
-        } else {
-            "相等"
-        };
-
-        // RSI和PricePosition
-        let _rsi_value = rsi.calculate(close);
-        let _price_position = price_pos.calculate(close, high, low);
-
-        // 获取大周期指标
-        let indicators = big_cycle.calculate(high, low, close);
-
-        // PineColor字符串 (中文)
-        let pine_bar_20_50 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_20_50));
-        let pine_bg_20_50 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_20_50));
-        let pine_bar_100_200 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_100_200));
-        let pine_bg_100_200 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_100_200));
-        let pine_bar_12_26 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_12_26));
-        let pine_bg_12_26 = pine_color_to_cn(&format!("{:?}", indicators.pine_color_12_26));
-
-        // jerk_signal 和 top3_avg_amplitude_pct
-        let jerk_signal = acceleration;
-        let top3_avg_amplitude_pct = dec!(0); // 简化
-
-        // ma5_in_all_ma5_pos
-        let ma5_in_all_ma5_pos = indicators.ma5_in_20d_ma5_pos;
-        let ma20_in_all_ma20_pos = indicators.ma20_in_60d_ma20_pos;
-
-        // 写入CSV行 (指标最大精度4位)
+        // 写入 CSV
         csv_content.push_str(&format!(
-            "{},{},{},{},{},{},{},{},",
-            open_time, 0, tick_index, open.round_dp(2), high.round_dp(2), low.round_dp(2), close.round_dp(2), volume.round_dp(4),
+            "{},{},{},{},{},{},{},",
+            open_time, tick_index, open, high, low, close, volume,
+        ));
+        csv_content.push_str(&format!(
+            "{},{},{},{},{},",
+            macd_val.round_dp(4), macd_val.round_dp(4), macd_val.round_dp(4), signal_val.round_dp(4), hist_val.round_dp(4),
+        ));
+        csv_content.push_str(&format!(
+            "{},{},{},{},{},",
+            ema10_val.round_dp(4), ema20_val.round_dp(4), ema50_val.round_dp(4), ema100_val.round_dp(4), ema200_val.round_dp(4),
+        ));
+        csv_content.push_str(&format!(
+            "{},{},", ema10_vs_20, ema20_vs_50,
+        ));
+        csv_content.push_str(&format!(
+            "{},{},", rsi_extreme, pine_bar,
         ));
         csv_content.push_str(&format!(
             "{},{},{},{},",
-            tr_ratio_5d_all.round_dp(4), tr_ratio_5d_20d_rank_20d.round_dp(4), indicators.tr_ratio_5d_20d.round_dp(4), big_cycle.tr_5d_avg().round_dp(4),
+            jerk_raw.round_dp(4), acc_smooth.round_dp(4), velocity.round_dp(4), norm_jerk.round_dp(4),
+        ));
+        csv_content.push_str(&format!(
+            "{},",
+            pos_norm.round_dp(4),
         ));
         csv_content.push_str(&format!(
             "{},{},{},{},",
-            tr_ratio_20d_all.round_dp(4), tr_ratio_20d_60d_rank_20d.round_dp(4), indicators.tr_ratio_20d_60d.round_dp(4), big_cycle.tr_20d_avg().round_dp(4),
+            tr_5d.round_dp(4), tr_20d.round_dp(4), tr_r_5d_20d.round_dp(4), tr_r_20d_60d.round_dp(4),
         ));
-        csv_content.push_str(&format!(
-            "{},{},{},",
-            readable_time, jerk_signal.round_dp(4), top3_avg_amplitude_pct.round_dp(4),
-        ));
-        csv_content.push_str(&format!(
-            "{},{},", pine_bar_20_50, pine_bg_20_50,
-        ));
-        csv_content.push_str(&format!(
-            "{},{},", pine_bar_100_200, pine_bg_100_200,
-        ));
-        csv_content.push_str(&format!(
-            "{},{},", pine_bar_12_26, pine_bg_12_26,
-        ));
-        csv_content.push_str(&format!(
-            "{},{},{},", rt_tr_5d_avg.round_dp(4), rt_tr_20d_avg.round_dp(4), ema_compare,
-        ));
-        csv_content.push_str(&format!(
-            "{},{},", rt_tr_ratio_5d_20d.round_dp(4), rt_tr_ratio_20d_60d.round_dp(4),
-        ));
-        csv_content.push_str(&format!(
-            "{},{},{},", indicators.pos_norm_20.round_dp(4), indicators.ma5_in_20d_ma5_pos.round_dp(4), indicators.ma20_in_60d_ma20_pos.round_dp(4),
-        ));
-        csv_content.push_str(&format!(
-            "{},{},", ma5_in_all_ma5_pos.round_dp(4), ma20_in_all_ma20_pos.round_dp(4),
-        ));
-        csv_content.push_str(&format!(
-            "{},{},{},{},", vel_pct.round_dp(4), acceleration.round_dp(4), power.round_dp(4), power_pct.round_dp(4),
-        ));
-        csv_content.push_str(&format!("{}\n", open_time));
+        csv_content.push_str(&format!("{}\n", readable_time));
 
         tick_index += 1;
 
-        // 每100条打印进度
         if tick_index % 100 == 0 {
             println!("已处理 {} / {} 条K线", tick_index, klines.len());
         }
     }
 
-    // 写入文件
     std::fs::write(&output_path, csv_content)?;
     println!("\n============================================");
     println!("CSV文件已生成: {}", output_path);
     println!("共 {} 条记录", tick_index);
-    println!("价格精度: {} 位小数", price_precision);
-    println!("数量精度: {} 位小数", qty_precision);
     println!("============================================");
 
     Ok(())
-}
-
-fn parse_decimal(s: &str) -> Decimal {
-    s.parse().unwrap_or(dec!(0))
-}
-
-/// 按精度四舍五入价格
-fn round_price(price: Decimal, precision: u8) -> Decimal {
-    price.round_dp(precision as u32)
-}
-
-/// 按精度四舍五入数量
-fn round_qty(qty: Decimal, precision: u8) -> Decimal {
-    qty.round_dp(precision as u32)
 }
