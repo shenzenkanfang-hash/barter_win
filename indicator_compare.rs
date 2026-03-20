@@ -422,22 +422,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ma5_in_all_ma5_pos = indicators.ma5_in_20d_ma5_pos;
         let ma20_in_all_ma20_pos = indicators.ma20_in_60d_ma20_pos;
 
-        // 写入CSV行
+        // 写入CSV行 (指标最大精度4位)
         csv_content.push_str(&format!(
             "{},{},{},{},{},{},{},{},",
-            open_time, 0, tick_index, open, high, low, close, volume,
+            open_time, 0, tick_index, open.round_dp(2), high.round_dp(2), low.round_dp(2), close.round_dp(2), volume.round_dp(4),
         ));
         csv_content.push_str(&format!(
             "{},{},{},{},",
-            tr_ratio_5d_all, tr_ratio_5d_20d_rank_20d, indicators.tr_ratio_5d_20d, big_cycle.tr_5d_avg(),
+            tr_ratio_5d_all.round_dp(4), tr_ratio_5d_20d_rank_20d.round_dp(4), indicators.tr_ratio_5d_20d.round_dp(4), big_cycle.tr_5d_avg().round_dp(4),
         ));
         csv_content.push_str(&format!(
             "{},{},{},{},",
-            tr_ratio_20d_all, tr_ratio_20d_60d_rank_20d, indicators.tr_ratio_20d_60d, big_cycle.tr_20d_avg(),
+            tr_ratio_20d_all.round_dp(4), tr_ratio_20d_60d_rank_20d.round_dp(4), indicators.tr_ratio_20d_60d.round_dp(4), big_cycle.tr_20d_avg().round_dp(4),
         ));
         csv_content.push_str(&format!(
             "{},{},{},",
-            readable_time, jerk_signal, top3_avg_amplitude_pct,
+            readable_time, jerk_signal.round_dp(4), top3_avg_amplitude_pct.round_dp(4),
         ));
         csv_content.push_str(&format!(
             "{},{},", pine_bar_20_50, pine_bg_20_50,
@@ -449,19 +449,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{},{},", pine_bar_12_26, pine_bg_12_26,
         ));
         csv_content.push_str(&format!(
-            "{},{},{},", rt_tr_5d_avg, rt_tr_20d_avg, ema_compare,
+            "{},{},{},", rt_tr_5d_avg.round_dp(4), rt_tr_20d_avg.round_dp(4), ema_compare,
         ));
         csv_content.push_str(&format!(
-            "{},{},", rt_tr_ratio_5d_20d, rt_tr_ratio_20d_60d,
+            "{},{},", rt_tr_ratio_5d_20d.round_dp(4), rt_tr_ratio_20d_60d.round_dp(4),
         ));
         csv_content.push_str(&format!(
-            "{},{},{},", indicators.pos_norm_20, indicators.ma5_in_20d_ma5_pos, indicators.ma20_in_60d_ma20_pos,
+            "{},{},{},", indicators.pos_norm_20.round_dp(4), indicators.ma5_in_20d_ma5_pos.round_dp(4), indicators.ma20_in_60d_ma20_pos.round_dp(4),
         ));
         csv_content.push_str(&format!(
-            "{},{},", ma5_in_all_ma5_pos, ma20_in_all_ma20_pos,
+            "{},{},", ma5_in_all_ma5_pos.round_dp(4), ma20_in_all_ma20_pos.round_dp(4),
         ));
         csv_content.push_str(&format!(
-            "{},{},{},{},", vel_pct, acceleration, power, power_pct,
+            "{},{},{},{},", vel_pct.round_dp(4), acceleration.round_dp(4), power.round_dp(4), power_pct.round_dp(4),
         ));
         csv_content.push_str(&format!("{}\n", open_time));
 
