@@ -29,7 +29,7 @@ v1.1 MockBinanceGateway + Signal Synthesis Layer 待办清单
     [x] risk_events          # 风控拒绝/强平触发
     [x] indicator_events     # 指标重要变化
 [x] EventRecorder trait + NoOpEventRecorder + SqliteEventRecorder
-[ ] MockBinanceGateway 集成 EventRecorder (TODO)
+[x] MockBinanceGateway 集成 EventRecorder
 
 ## C. CSV 输出
 --------------------------------------------------------------------------------
