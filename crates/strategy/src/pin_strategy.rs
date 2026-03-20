@@ -83,15 +83,14 @@ impl Default for PinStrategyConfig {
 /// 基于 Z-Score、TR-Ratio、价格位置等指标的马丁格尔策略。
 ///
 /// 状态机:
-///
-///     IDLE ──(做多)──> LONG_OPENING ──(加仓)──> LONG_HOLDING
-///         │                    │
-///         │                    │
-///         └──(做空)──> SHORT_OPENING ──(加仓)──> SHORT_HOLDING
-///                                                     │
-///                         ──(对冲)──> HEDGING <───────┘
-///                                         │
-///                         ──(盈利回落)──> CLOSING ──(全平)──> IDLE
+/// IDLE --(做多)--> LONG_OPENING --(加仓)--> LONG_HOLDING
+///     |                    |
+///     |                    |
+///     +--(做空)--> SHORT_OPENING --(加仓)--> SHORT_HOLDING
+///                                                     |
+///                         --(对冲)--> HEDGING <-------+
+///                                         |
+///                         --(盈利回落)--> CLOSING --(全平)--> IDLE
 ///
 /// 设计依据: 设计文档 16.10.2
 pub struct PinStrategy {

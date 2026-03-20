@@ -165,3 +165,128 @@ src/
 - 自动提交: 每次修改或创建文件后自动 git commit
 
 ================================================================================
+## 第二部分：Rust 量化交易系统项目规则
+
+### 项目信息
+
+- **项目目录**: `D:\量化策略开发\回测策略\`
+- **编译器配置**:
+  - cargo.exe: `C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe`
+  - rustc.exe: `C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe`
+
+### 设计文档（最高指导）
+
+所有开发必须严格遵循以下文档（按优先级）:
+
+1. `docs\2026-03-20-trading-system-rust-design.md`
+   - 架构设计（四层架构）
+   - 锁与并发控制
+   - 持仓管理
+   - 核心业务函数调用链
+
+2. `docs\indicator-logic.md`
+   - 三层指标体系: TR、Pine颜色、价格位置
+   - 日线指标 vs 分钟级指标
+   - Pine颜色判断逻辑
+
+3. `docs\architecture-reference.md`
+   - Rust 技术栈选择
+   - 代码组织规范
+   - 需要避免的坑
+
+### 编译活动规则（当前阶段）
+
+**编译活动已暂停**，完成所有功能代码后再统一编译验证。
+
+| 规则 | 说明 |
+|------|------|
+| 禁止主动编译 | 不执行 `cargo build`、`cargo check`、`cargo test` |
+| 禁止自动修复 | 不主动尝试修复编译错误 |
+| 功能优先 | 先完成所有功能代码实现 |
+| 统一编译 | 所有功能完成后一次性编译验证 |
+
+### 架构原则（强制）
+
+1. **高频路径无锁**
+   - Tick接收、指标更新、策略判断全部无锁
+   - 锁仅用于下单和资金更新
+   - 锁外预检所有风控条件
+
+2. **增量计算 O(1)**
+   - EMA、SMA、MACD 等指标必须增量计算
+   - K线增量更新当前K线
+
+3. **三层指标体系**
+   - TR (True Range): 波动率突破判断
+   - Pine颜色: 趋势信号 (MACD + EMA10/20 + RSI)
+   - 价格位置: 周期极值判断
+
+4. **混合持仓模式**
+   - 资金池 RwLock 保护（低频）
+   - 策略持仓独立计算（无锁）
+
+### 模块结构
+
+```
+crates/
+├── account/          # 账户层: 资金池、持仓、错误类型
+├── market/           # 市场数据层: WebSocket、K线合成、订单簿
+├── indicator/        # 指标层: EMA、RSI、Pine颜色、价格位置
+├── strategy/         # 策略层: 日线策略、分钟策略、Tick策略
+└── engine/           # 引擎层: 风控、订单执行、模式切换
+
+src/
+└── main.rs          # 程序入口，tracing 初始化
+```
+
+### 技术栈
+
+| 组件 | 技术 | 说明 |
+|------|------|------|
+| Runtime | Tokio | 异步 IO，多线程任务调度 |
+| 状态管理 | FnvHashMap | O(1) 查找 |
+| 同步原语 | parking_lot | 比 std RwLock 更高效 |
+| 数值计算 | rust_decimal | 金融计算避免浮点精度问题 |
+| 时间处理 | chrono | DateTime<Utc> |
+| 错误处理 | thiserror | 清晰的错误类型层次 |
+| 日志 | tracing | 结构化日志 |
+| 序列化 | serde | Serialize/Deserialize |
+
+### 代码规范（强制）
+
+1. 所有 `lib.rs` 顶部必须添加:
+   ```rust
+   #![forbid(unsafe_code)]
+   ```
+
+2. 派生宏顺序:
+   ```rust
+   #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+   ```
+
+3. 错误类型模式 (使用 thiserror):
+   ```rust
+   #[derive(Debug, Clone, Eq, PartialEq, Error)]
+   pub enum MyError {
+       #[error("描述: {0}")]
+       MyVariant(String),
+   }
+   ```
+
+4. 避免的问题:
+   - 禁止使用 `panic!()`，全部返回 Result
+   - 禁止在高频路径加锁
+   - 禁止过多 `clone()`，优先使用引用
+
+### 当前进度
+
+| Phase | 状态 | 说明 |
+|-------|------|------|
+| Phase 1: Foundation | 完成 | TradingError, Order, Position, FundPool |
+| Phase 2: Market Data | 完成 | Tick, KLine, KLineSynthesizer |
+| Phase 3: Indicator | 完成 | EMA, RSI, PineColor, PricePosition |
+| Phase 4: Strategy | 完成 | Strategy trait, Signal, TradingMode |
+| Phase 5: Engine | 完成 | RiskPreChecker, OrderExecutor, ModeSwitcher |
+| Phase 6: Integration | 进行中 | TradingEngine, main.rs, 类型转换 |
+
+---
