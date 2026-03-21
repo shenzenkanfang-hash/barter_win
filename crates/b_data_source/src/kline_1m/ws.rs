@@ -1,6 +1,6 @@
 //! Binance 1m K线 WebSocket 订阅
 //!
-//! 分片订阅: 每批50个symbol，间隔200ms发送
+//! 分片订阅: 每批50个symbol，间隔500ms发送
 
 use a_common::Paths;
 use futures_util::{SinkExt, StreamExt};
@@ -68,9 +68,9 @@ impl Kline1mStream {
 
         let (mut write, read) = ws.split();
 
-        // 分片订阅: 每批50个，间隔200ms
+        // 分片订阅: 每批50个，间隔500ms
         const BATCH_SIZE: usize = 50;
-        const BATCH_INTERVAL_MS: u64 = 200;
+        const BATCH_INTERVAL_MS: u64 = 500;
 
         for (i, batch) in symbols.chunks(BATCH_SIZE).enumerate() {
             let streams: Vec<String> = batch
