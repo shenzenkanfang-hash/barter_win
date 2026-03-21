@@ -9,21 +9,30 @@
 //!
 //! ```ignore
 //! /dev/shm/backup/
-//! ├── real_time/{symbol}/
-//! │   ├── kxian.json        # K线 {"1m": [...], "5m": [...], "15m": [...], "1d": [...]}
-//! │   ├── depth.json        # 深度 {"bids": [...], "asks": [...]}
-//! │   ├── trades.json       # 实时成交
-//! │   └── indicators.json   # 指标 {"ema": ..., "rsi": ..., "pine_color": ...}
-//! ├── account/
-//! │   └── info.json         # {"equity": 100000, "available": 90000, "frozen": 10000, "unrealized_pnl": 500}
-//! ├── position/
-//! │   └── {symbol}.json     # {"long_qty": 0.1, "long_price": 70000, "short_qty": 0, ...}
-//! ├── order/
-//! │   └── {order_id}.json   # {"symbol": "BTCUSDT", "side": "LONG", "qty": 0.1, "price": 70000, "status": "FILLED"}
-//! ├── trade/
-//! │   └── {trade_id}.json   # {"order_id": "O001", "symbol": "BTCUSDT", "price": 70000, "qty": 0.1}
-//! └── symbol_rules/
-//!     └── {symbol}.json     # {"symbol": "BTCUSDT", "price_precision": 2, "quantity_precision": 3, ...}
+//! ├── account.json              # 账户信息
+//! ├── trading_pairs.json        # 交易品种列表
+//! ├── symbol_rules.json         # 规则汇总
+//! │
+//! ├── channel/                  # 类别为主
+//! │   ├── minute.json           # 分钟通道
+//! │   └── daily.json            # 日线通道
+//! │
+//! ├── symbols/                  # 品种为主（通用数据）
+//! │   ├── btcusdt/
+//! │   │   ├── kxian.json
+//! │   │   ├── depth.json
+//! │   │   ├── trades.json
+//! │   │   ├── indicators.json
+//! │   │   └── position.json
+//! │   └── ethusdt/
+//! │
+//! └── tasks/                    # 任务池单独目录
+//!     ├── minute/
+//!     │   ├── pool.json         # 分钟池总览
+//!     │   └── {symbol}.json
+//!     └── daily/
+//!         ├── pool.json
+//!         └── {symbol}.json
 //! ```
 
 use crate::error::EngineError;
@@ -38,6 +47,9 @@ use tokio::time::{interval, Duration};
 // 常量定义
 // ============================================================================
 
+/// 内存备份根目录
+pub const MEMORY_BACKUP_DIR: &str = "/dev/shm/backup";
+
 /// K线最大条目数
 const MAX_KXIAN_ENTRIES: usize = 1000;
 /// 成交最大条目数
@@ -48,6 +60,26 @@ const MAX_INDICATORS_ENTRIES: usize = 100;
 const MAX_ORDERS_ENTRIES: usize = 200;
 /// 深度最大条目数
 const MAX_DEPTH_ENTRIES: usize = 100;
+/// 任务最大条目数
+const MAX_TASKS_ENTRIES: usize = 100;
+
+// 单文件（根目录）
+const ACCOUNT_FILE: &str = "account.json";
+const TRADING_PAIRS_FILE: &str = "trading_pairs.json";
+const SYMBOL_RULES_FILE: &str = "symbol_rules.json";
+
+// 类别为主
+const CHANNEL_DIR: &str = "channel/";
+const CHANNEL_MINUTE_FILE: &str = "channel/minute.json";
+const CHANNEL_DAILY_FILE: &str = "channel/daily.json";
+
+// 品种为主
+const SYMBOLS_DIR: &str = "symbols/";
+
+// 任务池
+const TASKS_DIR: &str = "tasks/";
+const TASKS_MINUTE_DIR: &str = "tasks/minute/";
+const TASKS_DAILY_DIR: &str = "tasks/daily/";
 
 // ============================================================================
 // 数据类型定义
@@ -250,6 +282,105 @@ pub struct IndicatorsData {
 }
 
 // ============================================================================
+// 通道数据类型
+// ============================================================================
+
+/// 通道数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelData {
+    pub channel_type: String,
+    pub volatility: Decimal,
+    pub tr_ratio: Decimal,
+    pub trend: String,
+    pub updated_at: String,
+}
+
+// ============================================================================
+// 任务池数据类型
+// ============================================================================
+
+/// 任务池数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskPool {
+    pub pool_type: String,
+    pub active_tasks: Vec<TaskInfo>,
+    pub completed_count: u64,
+    pub failed_count: u64,
+    pub updated_at: String,
+}
+
+impl Default for TaskPool {
+    fn default() -> Self {
+        Self {
+            pool_type: String::new(),
+            active_tasks: Vec::new(),
+            completed_count: 0,
+            failed_count: 0,
+            updated_at: String::new(),
+        }
+    }
+}
+
+/// 任务信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskInfo {
+    pub task_id: String,
+    pub symbol: String,
+    pub task_type: String,
+    pub status: String,
+    pub created_at: String,
+}
+
+// ============================================================================
+// 交易品种列表
+// ============================================================================
+
+/// 交易品种列表
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradingPairs {
+    pub pairs: Vec<TradingPairInfo>,
+    pub updated_at: String,
+}
+
+impl Default for TradingPairs {
+    fn default() -> Self {
+        Self {
+            pairs: Vec::new(),
+            updated_at: String::new(),
+        }
+    }
+}
+
+/// 交易品种信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradingPairInfo {
+    pub symbol: String,
+    pub status: String,
+    pub base_asset: String,
+    pub quote_asset: String,
+}
+
+// ============================================================================
+// 规则汇总
+// ============================================================================
+
+/// 规则汇总
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolRulesSummary {
+    pub rules: Vec<SymbolRulesData>,
+    pub updated_at: String,
+}
+
+impl Default for SymbolRulesSummary {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            updated_at: String::new(),
+        }
+    }
+}
+
+// ============================================================================
 // K线缓存（用于内存操作）
 // ============================================================================
 
@@ -379,7 +510,7 @@ impl MemoryBackup {
     /// * `symbol` - 交易对
     /// * `kxian` - K线数据
     pub async fn save_kxian(&self, symbol: &str, kxian: &KxianData) -> Result<(), EngineError> {
-        let path = format!("{}/real_time/{}/kxian.json", self.tmpfs_dir, symbol);
+        let path = format!("{}/symbols/{}/kxian.json", self.tmpfs_dir, symbol);
         self.ensure_dir(&path).await?;
 
         let mut data = self.load_json::<KxianCache>(&path).await.unwrap_or_default();
@@ -401,7 +532,7 @@ impl MemoryBackup {
 
     /// 保存深度数据
     pub async fn save_depth(&self, symbol: &str, depth: &DepthData) -> Result<(), EngineError> {
-        let path = format!("{}/real_time/{}/depth.json", self.tmpfs_dir, symbol);
+        let path = format!("{}/symbols/{}/depth.json", self.tmpfs_dir, symbol);
         self.ensure_dir(&path).await?;
 
         let mut data = depth.clone();
@@ -415,7 +546,7 @@ impl MemoryBackup {
 
     /// 保存实时成交
     pub async fn save_trades(&self, symbol: &str, trades: &RealtimeTradesData) -> Result<(), EngineError> {
-        let path = format!("{}/real_time/{}/trades.json", self.tmpfs_dir, symbol);
+        let path = format!("{}/symbols/{}/trades.json", self.tmpfs_dir, symbol);
         self.ensure_dir(&path).await?;
 
         let mut data: RealtimeTradesData = self.load_json(&path).await.unwrap_or_default();
@@ -427,7 +558,7 @@ impl MemoryBackup {
 
     /// 保存指标数据
     pub async fn save_indicators(&self, symbol: &str, indicators: &IndicatorsData) -> Result<(), EngineError> {
-        let path = format!("{}/real_time/{}/indicators.json", self.tmpfs_dir, symbol);
+        let path = format!("{}/symbols/{}/indicators.json", self.tmpfs_dir, symbol);
         self.ensure_dir(&path).await?;
 
         self.write_json(&path, indicators).await
@@ -435,14 +566,14 @@ impl MemoryBackup {
 
     /// 保存账户信息
     pub async fn save_account(&self, account: &AccountSnapshot) -> Result<(), EngineError> {
-        let path = format!("{}/account/info.json", self.tmpfs_dir);
+        let path = format!("{}/{}", self.tmpfs_dir, ACCOUNT_FILE);
         self.ensure_dir(&path).await?;
         self.write_json(&path, account).await
     }
 
     /// 保存持仓信息
     pub async fn save_position(&self, symbol: &str, position: &PositionSnapshot) -> Result<(), EngineError> {
-        let path = format!("{}/position/{}.json", self.tmpfs_dir, symbol);
+        let path = format!("{}/symbols/{}/position.json", self.tmpfs_dir, symbol);
         self.ensure_dir(&path).await?;
         self.write_json(&path, position).await
     }
@@ -463,9 +594,163 @@ impl MemoryBackup {
 
     /// 保存交易规则
     pub async fn save_symbol_rules(&self, rules: &SymbolRulesData) -> Result<(), EngineError> {
-        let path = format!("{}/symbol_rules/{}.json", self.tmpfs_dir, rules.symbol);
+        let path = format!("{}/{}", self.tmpfs_dir, SYMBOL_RULES_FILE);
         self.ensure_dir(&path).await?;
         self.write_json(&path, rules).await
+    }
+
+    // ============================================================================
+    // 通道数据操作
+    // ============================================================================
+
+    /// 保存通道数据
+    pub async fn save_channel(&self, channel: &ChannelData) -> Result<(), EngineError> {
+        let path = match channel.channel_type.as_str() {
+            "minute" => format!("{}/{}", self.tmpfs_dir, CHANNEL_MINUTE_FILE),
+            "daily" => format!("{}/{}", self.tmpfs_dir, CHANNEL_DAILY_FILE),
+            _ => return Err(EngineError::MemoryBackup(format!("未知通道类型: {}", channel.channel_type))),
+        };
+        self.ensure_dir(&path).await?;
+        self.write_json(&path, channel).await
+    }
+
+    /// 加载通道数据
+    pub async fn load_channel(&self, channel_type: &str) -> Result<Option<ChannelData>, EngineError> {
+        let path = match channel_type {
+            "minute" => format!("{}/{}", self.tmpfs_dir, CHANNEL_MINUTE_FILE),
+            "daily" => format!("{}/{}", self.tmpfs_dir, CHANNEL_DAILY_FILE),
+            _ => return Err(EngineError::MemoryBackup(format!("未知通道类型: {}", channel_type))),
+        };
+
+        match self.load_json::<ChannelData>(&path).await {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                // 文件不存在时返回 None
+                if let EngineError::MemoryBackup(ref msg) = e {
+                    if msg.contains("打开文件失败") {
+                        return Ok(None);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    // ============================================================================
+    // 任务池操作
+    // ============================================================================
+
+    /// 保存任务池
+    pub async fn save_task_pool(&self, pool_type: &str, pool: &TaskPool) -> Result<(), EngineError> {
+        let path = match pool_type {
+            "minute" => format!("{}/pool.json", TASKS_MINUTE_DIR),
+            "daily" => format!("{}/pool.json", TASKS_DAILY_DIR),
+            _ => return Err(EngineError::MemoryBackup(format!("未知任务池类型: {}", pool_type))),
+        };
+        let full_path = format!("{}/{}", self.tmpfs_dir, path);
+        self.ensure_dir(&full_path).await?;
+
+        let mut data: TaskPool = self.load_json(&full_path).await.unwrap_or_default();
+        // 合并数据
+        data.active_tasks.extend_from_slice(&pool.active_tasks);
+        data.completed_count = pool.completed_count;
+        data.failed_count = pool.failed_count;
+        data.updated_at = pool.updated_at.clone();
+
+        // 限制任务数量
+        self.trim_entries(&mut data.active_tasks, MAX_TASKS_ENTRIES);
+
+        self.write_json(&full_path, &data).await
+    }
+
+    /// 保存品种任务
+    pub async fn save_symbol_task(&self, pool_type: &str, symbol: &str, task: &TaskInfo) -> Result<(), EngineError> {
+        let path = match pool_type {
+            "minute" => format!("{}/{}.json", TASKS_MINUTE_DIR, symbol),
+            "daily" => format!("{}/{}.json", TASKS_DAILY_DIR, symbol),
+            _ => return Err(EngineError::MemoryBackup(format!("未知任务池类型: {}", pool_type))),
+        };
+        let full_path = format!("{}/{}", self.tmpfs_dir, path);
+        self.ensure_dir(&full_path).await?;
+        self.write_json(&full_path, task).await
+    }
+
+    /// 加载任务池
+    pub async fn load_task_pool(&self, pool_type: &str) -> Result<Option<TaskPool>, EngineError> {
+        let path = match pool_type {
+            "minute" => format!("{}/pool.json", TASKS_MINUTE_DIR),
+            "daily" => format!("{}/pool.json", TASKS_DAILY_DIR),
+            _ => return Err(EngineError::MemoryBackup(format!("未知任务池类型: {}", pool_type))),
+        };
+        let full_path = format!("{}/{}", self.tmpfs_dir, path);
+
+        match self.load_json::<TaskPool>(&full_path).await {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                if let EngineError::MemoryBackup(ref msg) = e {
+                    if msg.contains("打开文件失败") {
+                        return Ok(None);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    // ============================================================================
+    // 交易品种列表操作
+    // ============================================================================
+
+    /// 保存交易品种列表
+    pub async fn save_trading_pairs(&self, pairs: &TradingPairs) -> Result<(), EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, TRADING_PAIRS_FILE);
+        self.ensure_dir(&path).await?;
+        self.write_json(&path, pairs).await
+    }
+
+    /// 加载交易品种列表
+    pub async fn load_trading_pairs(&self) -> Result<Option<TradingPairs>, EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, TRADING_PAIRS_FILE);
+
+        match self.load_json::<TradingPairs>(&path).await {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                if let EngineError::MemoryBackup(ref msg) = e {
+                    if msg.contains("打开文件失败") {
+                        return Ok(None);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    // ============================================================================
+    // 规则汇总操作
+    // ============================================================================
+
+    /// 保存规则汇总
+    pub async fn save_symbol_rules_summary(&self, summary: &SymbolRulesSummary) -> Result<(), EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, SYMBOL_RULES_FILE);
+        self.ensure_dir(&path).await?;
+        self.write_json(&path, summary).await
+    }
+
+    /// 加载规则汇总
+    pub async fn load_symbol_rules_summary(&self) -> Result<Option<SymbolRulesSummary>, EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, SYMBOL_RULES_FILE);
+
+        match self.load_json::<SymbolRulesSummary>(&path).await {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                if let EngineError::MemoryBackup(ref msg) = e {
+                    if msg.contains("打开文件失败") {
+                        return Ok(None);
+                    }
+                }
+                Err(e)
+            }
+        }
     }
 
     /// 限制条目数量（从前面删除旧数据）
