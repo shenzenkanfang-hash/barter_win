@@ -8,18 +8,22 @@
 pub use a_common::api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData};
 pub use a_common::api::{BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket};
 pub use a_common::api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
+pub use a_common::api::{FuturesAccountResponse, FuturesAsset, FuturesPositionResponse};
 pub use a_common::ws::{BinanceTradeStream, BinanceWsConnector, BinanceTradeMsg, BinanceKlineMsg, BinanceDepthMsg};
 pub use a_common::ws::{MarketConnector, MockMarketConnector};
 pub use a_common::MarketError;
 
 // Sub-modules
-pub mod data_feeder;
 pub mod kline_1m;
 pub mod kline_1d;
 pub mod order_books;
 pub mod symbol_rules;
 pub mod volatility;
 pub mod recovery;
+
+// Futures data modules
+pub mod futures_account;
+pub mod futures_position;
 
 // Organized modules
 pub mod config;
@@ -32,9 +36,12 @@ pub use models::{MarketStream, MockMarketStream};
 pub use models::{KLine, Period, Tick, VolatilityStats};
 
 // Re-exports - Data processing
-pub use data_feeder::{DataFeeder, DataMessage, MarketDataFeeder};
 pub use kline_1m::{KLineSynthesizer, KlinePersistence};
 pub use symbol_rules::SymbolRegistry;
 pub use order_books::OrderBook;
 pub use volatility::VolatilityDetector;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
+
+// Re-exports - Futures data
+pub use futures_account::{FuturesAccount, FuturesAccountData};
+pub use futures_position::{FuturesPosition, FuturesPositionData};

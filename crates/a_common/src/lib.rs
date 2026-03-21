@@ -17,6 +17,7 @@ pub mod util;
 pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData};
 pub use api::{BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket};
 pub use api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
+pub use api::{FuturesAccountResponse, FuturesAsset, FuturesPositionResponse};
 
 // Re-exports - Config
 pub use config::{Platform, Paths};

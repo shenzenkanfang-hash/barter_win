@@ -447,6 +447,66 @@ impl BinanceApiGateway {
             .map(|b| b.max_leverage)
             .ok_or_else(|| EngineError::SymbolNotFound(symbol.to_string()))
     }
+
+    /// 从币安 USDT 合约 API 获取账户信息
+    ///
+    /// # 返回
+    /// * `FuturesAccountResponse` - USDT 合约账户信息
+    pub async fn fetch_futures_account(&self) -> Result<FuturesAccountResponse, EngineError> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}/fapi/v2/account", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {}",
+                resp.status()
+            )));
+        }
+
+        let account: FuturesAccountResponse = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        Ok(account)
+    }
+
+    /// 从币安 USDT 合约 API 获取持仓信息
+    ///
+    /// # 返回
+    /// * `Vec<FuturesPositionResponse>` - USDT 合约持仓列表
+    pub async fn fetch_futures_positions(&self) -> Result<Vec<FuturesPositionResponse>, EngineError> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}/fapi/v2/positionRisk", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {}",
+                resp.status()
+            )));
+        }
+
+        let positions: Vec<FuturesPositionResponse> = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        Ok(positions)
+    }
 }
 
 impl Default for BinanceApiGateway {
@@ -588,6 +648,65 @@ pub struct LeverageBracket {
     pub min_notional: String,
     /// 维持保证金率
     pub maintenance_margin_ratio: String,
+}
+
+// ============================================================================
+// USDT 合约账户 API 数据结构
+// ============================================================================
+
+/// USDT 合约账户信息响应
+/// GET /fapi/v2/account
+#[derive(Debug, Clone, Deserialize)]
+pub struct FuturesAccountResponse {
+    #[serde(rename = "totalMarginBalance")]
+    pub total_margin_balance: String,
+    #[serde(rename = "totalUnrealizedProfit")]
+    pub total_unrealized_profit: String,
+    #[serde(rename = "availableBalance")]
+    pub available_balance: String,
+    #[serde(rename = "totalMaintMargin")]
+    pub total_maint_margin: String,
+    #[serde(rename = "maxWithdrawAmount")]
+    pub max_withdraw_amount: String,
+    #[serde(rename = "updateTime")]
+    pub update_time: i64,
+    pub assets: Vec<FuturesAsset>,
+}
+
+/// USDT 合约资产信息
+#[derive(Debug, Clone, Deserialize)]
+pub struct FuturesAsset {
+    pub asset: String,
+    #[serde(rename = "marginBalance")]
+    pub margin_balance: String,
+    #[serde(rename = "unrealizedProfit")]
+    pub unrealized_profit: String,
+    #[serde(rename = "availableBalance")]
+    pub available_balance: String,
+}
+
+// ============================================================================
+// USDT 合约持仓 API 数据结构
+// ============================================================================
+
+/// USDT 合约持仓信息响应
+/// GET /fapi/v2/positionRisk
+#[derive(Debug, Clone, Deserialize)]
+pub struct FuturesPositionResponse {
+    pub symbol: String,
+    #[serde(rename = "positionSide")]
+    pub position_side: String,
+    #[serde(rename = "positionAmt")]
+    pub position_amt: String,
+    #[serde(rename = "entryPrice")]
+    pub entry_price: String,
+    #[serde(rename = "markPrice")]
+    pub mark_price: String,
+    #[serde(rename = "unrealizedProfit")]
+    pub unrealized_profit: String,
+    pub leverage: String,
+    #[serde(rename = "marginRatio")]
+    pub margin_ratio: String,
 }
 
 // ============================================================================
@@ -795,5 +914,52 @@ mod tests {
     fn test_rate_limiter() {
         let limiter = RateLimiter::new(10);
         assert_eq!(limiter.requests_per_minute, 10);
+    }
+
+    #[test]
+    fn test_futures_account_response_deserialization() {
+        let json = r#"{
+            "totalMarginBalance": "10000.00",
+            "totalUnrealizedProfit": "500.00",
+            "availableBalance": "8000.00",
+            "totalMaintMargin": "100.00",
+            "maxWithdrawAmount": "8000.00",
+            "updateTime": 1234567890,
+            "assets": [
+                {
+                    "asset": "USDT",
+                    "marginBalance": "10000.00",
+                    "unrealizedProfit": "500.00",
+                    "availableBalance": "8000.00"
+                }
+            ]
+        }"#;
+
+        let account: FuturesAccountResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(account.total_margin_balance, "10000.00");
+        assert_eq!(account.total_unrealized_profit, "500.00");
+        assert_eq!(account.available_balance, "8000.00");
+        assert_eq!(account.assets.len(), 1);
+        assert_eq!(account.assets[0].asset, "USDT");
+    }
+
+    #[test]
+    fn test_futures_position_response_deserialization() {
+        let json = r#"{
+            "symbol": "BTCUSDT",
+            "positionSide": "LONG",
+            "positionAmt": "1.5",
+            "entryPrice": "50000.00",
+            "markPrice": "51000.00",
+            "unrealizedProfit": "1500.00",
+            "leverage": "10",
+            "marginRatio": "0.02"
+        }"#;
+
+        let pos: FuturesPositionResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(pos.symbol, "BTCUSDT");
+        assert_eq!(pos.position_side, "LONG");
+        assert_eq!(pos.position_amt, "1.5");
+        assert_eq!(pos.leverage, "10");
     }
 }
