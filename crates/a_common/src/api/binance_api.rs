@@ -14,10 +14,13 @@
 //! ```
 
 use crate::claint::error::EngineError;
+use crate::config::Paths;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use parking_lot::Mutex;
@@ -296,6 +299,31 @@ impl BinanceApiGateway {
 
         info!("从币安 API 获取了 {} 个 USDT 交易对规则", rules.len());
         Ok(rules)
+    }
+
+    /// 保存交易规则到 symbols_rules/{symbol}.json
+    pub fn save_symbol_rules(&self, rules: &[SymbolRulesData]) -> Result<(), EngineError> {
+        let paths = Paths::new();
+        let base_dir = &paths.symbols_rules_dir;
+
+        // 创建目录
+        std::fs::create_dir_all(base_dir)
+            .map_err(|e| EngineError::Other(format!("创建目录失败: {}", e)))?;
+
+        for rule in rules {
+            let file_path = format!("{}/{}.json", base_dir, rule.symbol.to_lowercase());
+            let json_str = serde_json::to_string_pretty(rule)
+                .map_err(|e| EngineError::Other(format!("序列化失败: {}", e)))?;
+
+            let mut file = File::create(&file_path)
+                .map_err(|e| EngineError::Other(format!("创建文件失败: {}", e)))?;
+
+            file.write_all(json_str.as_bytes())
+                .map_err(|e| EngineError::Other(format!("写入文件失败: {}", e)))?;
+        }
+
+        info!("已保存 {} 个交易规则到 {}", rules.len(), base_dir);
+        Ok(())
     }
 
     /// 从币安 API 获取账户信息

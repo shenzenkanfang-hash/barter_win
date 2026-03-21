@@ -68,6 +68,8 @@ pub struct Paths {
     pub sqlite_db_path: PathBuf,
     /// CSV 输出目录
     pub csv_output_path: PathBuf,
+    /// 交易规则目录
+    pub symbols_rules_dir: String,
 }
 
 impl Default for Paths {
@@ -94,6 +96,7 @@ impl Paths {
             disk_sync_dir: "E:/backup/sync".to_string(),
             sqlite_db_path: PathBuf::from("E:/backup/trading_events.db"),
             csv_output_path: PathBuf::from("E:/backup/output/indicator_comparison.csv"),
+            symbols_rules_dir: "E:/shm/backup/symbols_rules".to_string(),
         }
     }
 
@@ -104,6 +107,7 @@ impl Paths {
             disk_sync_dir: "data/backup".to_string(),
             sqlite_db_path: PathBuf::from("data/trading_events.db"),
             csv_output_path: PathBuf::from("output/indicator_comparison.csv"),
+            symbols_rules_dir: "/dev/shm/backup/symbols_rules".to_string(),
         }
     }
 

@@ -31,6 +31,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gateway = BinanceApiGateway::new();
     let all_symbols = gateway.fetch_all_usdt_symbol_rules().await?;
 
+    // 保存交易规则到 symbols_rules/ 目录
+    gateway.save_symbol_rules(&all_symbols)?;
+
     let trading_symbols: Vec<String> = all_symbols
         .iter()
         .map(|s| s.symbol.clone())
