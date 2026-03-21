@@ -1,52 +1,40 @@
 # 目录重组迁移计划
 
-## 1. 重新分析：engine/ 文件性质
+## 1. 核心设计理念
 
-### 1.1 真正的业务代码 (e_strategy/)
-| 文件/目录 | 说明 | 业务性质 |
-|-----------|------|----------|
-| core/engine.rs | 交易引擎主循环 | ✅ 核心业务 |
-| core/pipeline.rs | 交易管道 | ✅ 核心业务 |
-| core/pipeline_form.rs | 管道表单 | ✅ 核心业务 |
-| core/strategy_pool.rs | 策略池 | ✅ 核心业务 |
-| order/order.rs | 订单执行器 | ✅ 核心业务 |
-| order/gateway.rs | 网关抽象 | ✅ 核心业务 |
-| channel/channel.rs | 波动率通道切换 | ✅ 核心业务 |
-| channel/mode.rs | 交易模式切换 | ✅ 核心业务 |
-| risk/ (5文件) | 风控预检/复核/阈值 | ✅ 风控业务 |
-| position/ (2文件) | 持仓管理 | ✅ 持仓业务 |
-| symbol_rules.rs | 交易规则 | ✅ 规则业务 |
-| symbol_rules_fetcher.rs | 规则API拉取 | ✅ 规则业务 |
+### 1.1 数据流架构
+```
+数据流:
+b_data_source (获取) → c_data_process (加工) → e_strategy (消费)
+                                          ↓
+                                     d_risk_monitor (风控监控)
+```
 
-### 1.2 非业务代码 (→ a_common/ 或 d_risk_monitor/)
-| 文件/目录 | 说明 | 建议归属 |
-|-----------|------|----------|
-| order/mock_binance_gateway.rs | Mock实现，非生产 | a_common/ |
-| persistence/sqlite_persistence.rs | 数据库持久化 | d_risk_monitor/ |
-| persistence/memory_backup.rs | 内存备份 | d_risk_monitor/ |
-| persistence/disaster_recovery.rs | 灾备恢复 | d_risk_monitor/ |
-| account_pool.rs | 账户池 | a_common/ |
-| margin_config.rs | 保证金配置 | d_risk_monitor/ |
-| check_table.rs | 检查表 | a_common/ |
-| checkpoint.rs | 检查点 | a_common/ |
-| checkpoint_integration.rs | 检查点集成 | a_common/ |
-| round_guard.rs | 回合守卫 | d_risk_monitor/ |
-| market_status.rs | 市场状态 | d_risk_monitor/ |
-| pnl_manager.rs | 盈亏管理 | d_risk_monitor/ |
-| telegram_notifier.rs | Telegram通知 | a_common/ |
-| platform.rs | 平台检测 | a_common/ |
-| error.rs | 错误类型 | a_common/ |
+### 1.2 模块角色
+| 目录 | 角色 | 职责 |
+|------|------|------|
+| a_common/ | 基础设施层 | 只提供工具和接口，不生产数据 |
+| b_data_source/ | 数据获取者 | 获取市场数据(WebSocket、K线等) |
+| c_data_process/ | 数据加工者 | 指标计算、数据处理 |
+| d_risk_monitor/ | 风控监控者 | 风控检查、持仓监控、持久化 |
+| e_strategy/ | 数据消费者 | 策略决策、订单执行(不获取/处理数据) |
+
+### 1.3 重组原则
+1. **a_common/** = 基础设施，被所有层使用
+2. **b_data_source/** = 生产原始数据
+3. **c_data_process/** = 生产加工后数据
+4. **d_risk_monitor/** = 风控数据消费者 + 生产风控报告
+5. **e_strategy/** = 最终消费者，不生产数据
 
 ## 2. 目标结构
 
-| 新目录 | 功能划分 | 对应原模块 |
-|--------|----------|------------|
-| a_common/ | 通用基础层：error、platform、account_pool、check_table、checkpoint、telegram_notifier、mock_binance_gateway | engine/shared/基础设施 + mock |
-| b_data_source/ | 数据源层：WebSocket、K线、市场数据、订单簿 | market/ |
-| c_data_process/ | 数据处理层：指标计算、Pine颜色、波动率排名 | indicator/ |
-| d_risk_monitor/ | 风控监控层：risk/、position/、margin_config、round_guard、market_status、pnl_manager、persistence/ | engine/业务支撑部分 |
-| e_strategy/ | 策略执行层：core/、order/(除mock外)、channel/、symbol_rules/ | engine/业务核心 |
-| g_test/ | 测试层：集成测试 | 测试代码 |
+| 新目录 | 角色 | 对应原模块 |
+|--------|------|------------|
+| a_common/ | 基础设施层(工具/接口) | account/ + engine/shared/基础设施 |
+| b_data_source/ | 数据获取者 | market/ |
+| c_data_process/ | 数据加工者 | indicator/ |
+| d_risk_monitor/ | 风控监控者 | engine/risk/, engine/position/, engine/persistence/, engine/shared/风控相关 |
+| e_strategy/ | 数据消费者 | strategy/, engine/core/, engine/order/, engine/channel/, engine/shared/策略相关 |
 
 ## 3. 当前结构
 
@@ -161,40 +149,26 @@ crates/
             └── engine_test.rs
 ```
 
-## 5. 重组原则
-
-### 5.1 模块依赖方向
-```
-b_data_source → c_data_process → e_strategy → d_risk_monitor
-                        ↑              ↓
-                        └──────────────┘
-```
-
-### 5.2 业务 vs 非业务划分
-- **业务代码 (e_strategy/)**: 交易策略、引擎核心、订单执行、通道切换
-- **非业务代码**: 数据库、API调用、通知、检查点等基础设施
-
-### 5.3 persistence 模块归属
-persistence (持久化) 放入 d_risk_monitor/，因为主要用于风控监控的数据持久化
-
-## 6. 实施步骤
+## 5. 实施步骤
 
 ### Phase 1: 创建目录结构
 1. 创建 a_common/, b_data_source/, c_data_process/, d_risk_monitor/, e_strategy/, g_test/
 
 ### Phase 2: 移动代码文件
-1. account/ + engine/shared/基础设施 → a_common/
-2. market/ → b_data_source/
-3. indicator/ → c_data_process/
-4. engine/risk/, engine/position/, engine/shared/风控相关, engine/persistence/ → d_risk_monitor/
-5. strategy/, engine/core/, engine/order/(除mock), engine/channel/, engine/shared/symbol_* → e_strategy/
+| 源目录 | 目标目录 | 说明 |
+|--------|----------|------|
+| account/ | a_common/ | 基础设施 |
+| market/ | b_data_source/ | 数据获取 |
+| indicator/ | c_data_process/ | 数据加工 |
+| engine/risk/, engine/position/, engine/persistence/ | d_risk_monitor/ | 风控监控 |
+| engine/shared/ (部分) | d_risk_monitor/shared/ | 风控相关共享 |
+| engine/shared/ (部分) | a_common/ | 基础设施共享 |
+| strategy/, engine/core/, engine/order/(除mock), engine/channel/, engine/shared/symbol_* | e_strategy/ | 策略执行 |
 
 ### Phase 3: 更新 Cargo.toml 和 import 路径
 
 ### Phase 4: 编译验证
 
-## 7. 测试目录位置
+## 6. 测试目录位置
 
 **推荐**: g_test/ 独立测试层
-- 测试代码与业务代码分离
-- 便于运行集成测试
