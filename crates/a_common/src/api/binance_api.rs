@@ -19,7 +19,6 @@ use reqwest::Client;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -301,28 +300,107 @@ impl BinanceApiGateway {
         Ok(rules)
     }
 
+    /// 从 API 获取并直接保存每个交易对的原始规则 JSON（不解析）
+    pub async fn fetch_and_save_all_usdt_symbol_rules(&self) -> Result<Vec<SymbolRulesData>, EngineError> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}/api/v3/exchangeInfo", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {} - Body: {}",
+                status,
+                &body_text[..body_text.len().min(500)]
+            )));
+        }
+
+        let body_text = resp.text().await.map_err(|e| EngineError::Other(format!("读取响应体失败: {}", e)))?;
+
+        // 解析获取所有交易对列表
+        let info: BinanceExchangeInfo = serde_json::from_str(&body_text)
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        // 保存原始 JSON
+        let paths = Paths::new();
+        let base_dir = &paths.symbols_rules_dir;
+        let _ = std::fs::create_dir_all(base_dir);
+
+        let trading_symbols: Vec<_> = info
+            .symbols
+            .iter()
+            .filter(|s| s.quoteAsset == "USDT" && s.status == "TRADING")
+            .collect();
+
+        for symbol in &trading_symbols {
+            let file_path = format!("{}/{}.json", base_dir, symbol.symbol.to_lowercase());
+            if let Ok(json_str) = serde_json::to_string_pretty(symbol) {
+                let _ = std::fs::write(&file_path, json_str.as_bytes());
+            }
+        }
+
+        // 构建返回数据
+        let mut rules = Vec::new();
+        for symbol in trading_symbols {
+            rules.push(SymbolRulesData {
+                symbol: symbol.symbol.clone(),
+                price_precision: symbol.pricePrecision.unwrap_or(8) as u8,
+                quantity_precision: symbol.quantityPrecision.unwrap_or(8) as u8,
+                tick_size: dec!(0.01),
+                min_qty: dec!(0.000001),
+                step_size: dec!(0.000001),
+                min_notional: dec!(10),
+                max_notional: dec!(1000000),
+                leverage: 1,
+                max_leverage: 20,
+                maker_fee: dec!(0.0002),
+                taker_fee: dec!(0.0005),
+            });
+        }
+
+        Ok(rules)
+    }
+
     /// 保存交易规则到 symbols_rules/{symbol}.json
     pub fn save_symbol_rules(&self, rules: &[SymbolRulesData]) -> Result<(), EngineError> {
         let paths = Paths::new();
         let base_dir = &paths.symbols_rules_dir;
 
         // 创建目录
-        std::fs::create_dir_all(base_dir)
-            .map_err(|e| EngineError::Other(format!("创建目录失败: {}", e)))?;
+        if let Err(e) = std::fs::create_dir_all(base_dir) {
+            return Err(EngineError::Other(format!("创建目录失败: {}", e)));
+        }
+
+        let mut saved = 0;
+        let mut failed = 0;
 
         for rule in rules {
             let file_path = format!("{}/{}.json", base_dir, rule.symbol.to_lowercase());
-            let json_str = serde_json::to_string_pretty(rule)
-                .map_err(|e| EngineError::Other(format!("序列化失败: {}", e)))?;
+            let json_str = match serde_json::to_string_pretty(rule) {
+                Ok(s) => s,
+                Err(e) => {
+                    failed += 1;
+                    tracing::warn!("序列化规则失败 {}: {}", rule.symbol, e);
+                    continue;
+                }
+            };
 
-            let mut file = File::create(&file_path)
-                .map_err(|e| EngineError::Other(format!("创建文件失败: {}", e)))?;
-
-            file.write_all(json_str.as_bytes())
-                .map_err(|e| EngineError::Other(format!("写入文件失败: {}", e)))?;
+            if let Err(e) = std::fs::write(&file_path, json_str.as_bytes()) {
+                failed += 1;
+                tracing::warn!("保存规则失败 {}: {}", rule.symbol, e);
+                continue;
+            }
+            saved += 1;
         }
 
-        info!("已保存 {} 个交易规则到 {}", rules.len(), base_dir);
+        info!("已保存 {}/{} 个交易规则到 {} (失败: {})", saved, rules.len(), base_dir, failed);
         Ok(())
     }
 
@@ -562,7 +640,7 @@ pub struct BinanceExchangeInfo {
 }
 
 /// 币安交易对信息
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinanceSymbol {
     pub symbol: String,
     pub status: String,
@@ -582,7 +660,7 @@ pub struct BinanceSymbol {
 }
 
 /// 币安过滤器
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinanceFilter {
     #[serde(rename = "filterType")]
     pub filter_type: String,
