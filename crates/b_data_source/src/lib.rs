@@ -22,8 +22,7 @@ pub mod volatility;
 pub mod recovery;
 
 // Futures data modules
-pub mod futures_account;
-pub mod futures_position;
+pub mod futures;
 
 // Organized modules
 pub mod config;
@@ -42,5 +41,4 @@ pub use volatility::VolatilityDetector;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 
 // Re-exports - Futures data
-pub use futures_account::{FuturesAccount, FuturesAccountData};
-pub use futures_position::{FuturesPosition, FuturesPositionData};
+pub use futures::{FuturesAccount, FuturesAccountData, FuturesPosition, FuturesPositionData};
