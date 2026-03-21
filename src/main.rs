@@ -1,51 +1,53 @@
 //! Trading System Rust Version - Main Entry
 //!
-//! High-performance trading system based on Barter-rs architecture
+//! 初始化流程:
+//! 1. 从交易所拉取交易规则
+//! 2. 订阅 1m K线 WS (分片: 50个/批, 200ms间隔)
 
-use a_common::config::Paths;
-use b_data_source::BinanceMultiStream;
+use b_data_source::{BinanceApiGateway, Kline1mStream, Paths};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .init();
 
     tracing::info!("Trading system starting");
 
-    // 使用平台自适应路径配置 (约定的高速内存盘)
     let paths = Paths::new();
-    let platform = paths.platform();
-    let base_dir = &paths.memory_backup_dir;
+    tracing::info!("Platform: {:?}", paths.platform());
+    tracing::info!("Memory backup: {}", paths.memory_backup_dir);
 
-    tracing::info!("Platform: {:?}", platform);
-    tracing::info!("Memory backup directory: {}", base_dir);
+    // 1. 从交易所拉取交易规则
+    let gateway = BinanceApiGateway::new();
+    let all_symbols = gateway.fetch_all_usdt_symbol_rules().await?;
 
-    // 订阅的交易对
-    let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
+    let trading_symbols: Vec<String> = all_symbols
+        .iter()
+        .map(|s| s.symbol.clone())
+        .collect();
 
-    // 创建多数据流 - 自动使用约定的高速内存盘路径
-    // 数据将写入:
-    //   - {base_dir}/trades/{symbol}.csv
-    //   - {base_dir}/kline-1m-实时/{symbol}.json
-    //   - {base_dir}/depth/{symbol}.json
-    let mut multi_stream = BinanceMultiStream::new(symbols).await?;
+    tracing::info!("Found {} USDT trading pairs", trading_symbols.len());
 
-    tracing::info!("Connected to Binance WebSocket, streaming market data to memory backup dir");
+    // 2. 启动 1m K线 WS 订阅 (自动分片: 50个/批, 200ms间隔)
+    tracing::info!("Starting 1m KLine WS subscription...");
+    let mut kline_stream = Kline1mStream::new(trading_symbols).await?;
+    tracing::info!("1m KLine WS subscription started");
 
-    // Main loop - continuously read and write messages
+    // 主循环
+    let mut count = 0;
     loop {
-        if let Some(_msg) = multi_stream.next_message().await {
-            // Message already written to memory backup by MultiStreamWriter
+        if let Some(_msg) = kline_stream.next_message().await {
+            count += 1;
+            if count % 1000 == 0 {
+                tracing::info!("Processed {} kline messages", count);
+            }
         } else {
             tracing::warn!("Stream ended");
             break;
         }
     }
-
-    tracing::info!("Trading system stopped");
 
     Ok(())
 }

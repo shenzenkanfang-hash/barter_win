@@ -29,11 +29,11 @@ pub mod futures;
 pub mod models;
 
 // Re-exports - Models (业务数据类型)
-pub use models::{BinanceMarketStream, BinanceMultiStream, MarketStream, MockMarketStream};
+pub use models::{MarketStream, MockMarketStream};
 pub use models::{KLine, Period, Tick};
 
 // Re-exports - Data processing
-pub use kline_1m::{KLineSynthesizer, KlinePersistence};
+pub use kline_1m::{KLineSynthesizer, KlinePersistence, Kline1mStream};
 pub use symbol_rules::SymbolRegistry;
 pub use order_books::OrderBook;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
