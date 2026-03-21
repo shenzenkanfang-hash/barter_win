@@ -116,6 +116,8 @@ impl DepthStream {
     fn write_overwrite(&mut self, symbol: &str, json_str: &str) -> std::io::Result<()> {
         let symbol_lower = symbol.to_lowercase();
         let path = format!("{}/{}.json", self.base_dir, symbol_lower);
+        // 先创建目录
+        Self::ensure_dir(std::path::Path::new(&path))?;
         let mut file = File::create(&path)?;
         file.write_all(json_str.as_bytes())?;
         file.write_all(b"\n")?;
