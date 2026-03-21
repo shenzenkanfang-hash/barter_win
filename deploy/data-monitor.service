@@ -1,0 +1,18 @@
+[Unit]
+Description=量化交易系统 - 实时监控服务
+After=network.target
+
+[Service]
+Type=simple
+User=quant
+WorkingDirectory=/home/quant
+ExecStart=/home/quant/target/release/data-monitor --symbol BTCUSDT --log-dir /home/quant/logs
+Restart=always
+RestartSec=10
+
+# 日志配置
+StandardOutput=append:/home/quant/logs/stdout.log
+StandardError=append:/home/quant/logs/stderr.log
+
+[Install]
+WantedBy=multi-user.target

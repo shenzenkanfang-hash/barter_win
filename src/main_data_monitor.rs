@@ -7,7 +7,7 @@
 //! - 关键日志输出到文件和控制台
 
 use clap::Parser;
-use chrono::{DateTime, Local, Timelike, Utc};
+use chrono::{DateTime, Local, TimeZone, Timelike, Utc};
 use futures_util::StreamExt;
 use market::{VolatilityDetector, VolatilityStats};
 use rust_decimal::Decimal;
@@ -63,7 +63,7 @@ struct VolatilitySignal {
     vol_15m: String,
     price: String,
     threshold_1m: String,    // 3%
-    threshold_15m: String,    // 13%
+    threshold_15m: String,    // 6%
 }
 
 /// 状态快照记录（每分钟）

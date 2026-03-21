@@ -16,7 +16,7 @@ pub struct VolatilityDetector {
     kline_1m_count: u32,
     /// 阈值: 1m 3%
     threshold_1m: Decimal,
-    /// 阈值: 15m 13%
+    /// 阈值: 15m 6%
     threshold_15m: Decimal,
 }
 
@@ -28,7 +28,7 @@ impl VolatilityDetector {
             kline_15m_window: Vec::with_capacity(2),
             kline_1m_count: 0,
             threshold_1m: dec!(0.03),
-            threshold_15m: dec!(0.13),
+            threshold_15m: dec!(0.06),
         }
     }
 
@@ -127,7 +127,7 @@ mod tests {
         let detector = VolatilityDetector::new("BTCUSDT".to_string());
         let (th1m, th15m) = detector.thresholds();
         assert_eq!(th1m, dec!(0.03));
-        assert_eq!(th15m, dec!(0.13));
+        assert_eq!(th15m, dec!(0.06));
     }
 
     #[test]
