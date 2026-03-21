@@ -6,10 +6,10 @@
 5,e_strategy,PinStatusDetector.check_long_hedge_condition(),✅ 已实现,Rust有4条件版本,同check_long_entry
 6,e_strategy,PinStatusDetector.check_short_hedge_condition(),✅ 已实现,Rust有4条件版本,同check_long_entry
 7,e_strategy,PinStatusDetector.check_exit_high_volatility(),✅ 已实现,Rust有4条件版本,同check_long_entry
-8,e_strategy,TrendStatusDetector.check_long_entry(),❌ 未实现,日线趋势检测,Pine颜色分组校验缺失
-9,e_strategy,TrendStatusDetector.check_short_entry(),❌ 未实现,日线趋势检测,Pine颜色分组校验缺失
-10,e_strategy,TrendStatusDetector.check_long_exit(),❌ 未实现,日线趋势检测,Pine颜色分组校验缺失
-11,e_strategy,TrendStatusDetector.check_short_exit(),❌ 未实现,日线趋势检测,Pine颜色分组校验缺失
+8,e_strategy,TrendStatusDetector.check_long_entry(),✅ 已实现,signal_generator.rs已有完整实现,Pine颜色分组校验已实现
+9,e_strategy,TrendStatusDetector.check_short_entry(),✅ 已实现,signal_generator.rs已有完整实现,Pine颜色分组校验已实现
+10,e_strategy,TrendStatusDetector.check_long_exit(),✅ 已实现,signal_generator.rs已有完整实现,Pine颜色分组校验已实现
+11,e_strategy,TrendStatusDetector.check_short_exit(),✅ 已实现,signal_generator.rs已有完整实现,Pine颜色分组校验已实现
 12,e_strategy,TradingEngine状态机(HEDGE_ENTER等),⚠️ 部分实现,完整交易生命周期缺失,Rust已有部分状态
 13,e_strategy,TradingEngine.health_check(),❌ 未实现,健康检查功能,待实现
 14,e_strategy,TradingEngine.JSON持久化(_store_data/_load_data),❌ 未实现,交易数据持久化,需实现
