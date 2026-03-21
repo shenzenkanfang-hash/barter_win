@@ -374,13 +374,14 @@ mod tests {
     #[test]
     fn test_check_short_entry_red_pos_low() {
         let generator = DaySignalGenerator::new();
-        let mut input = create_test_input("纯红", "纯红", "纯红", "纯红", "纯红", "纯红");
+        // 做空需要 bar=紫色 AND bg=纯红
+        let mut input = create_test_input("紫色", "纯红", "紫色", "纯红", "紫色", "纯红");
         input.ma5_in_20d_ma5_pos = dec!(20);
 
         let valid_groups = generator.validate_pine_color_groups(&input);
         let result = generator.check_short_entry(&input, &valid_groups);
 
-        assert!(result); // TR>1, pos<30, all red
+        assert!(result); // TR>1, pos<30, all purple/red
     }
 
     #[test]

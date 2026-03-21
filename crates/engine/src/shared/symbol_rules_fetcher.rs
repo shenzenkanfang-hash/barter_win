@@ -236,8 +236,8 @@ impl SymbolRulesFetcher {
     /// 从币安 API 获取账户信息
     ///
     /// # 返回
-    /// * `AccountInfo` - 账户信息
-    pub async fn fetch_account_info(&self) -> Result<AccountInfo, EngineError> {
+    /// * `BinanceAccountInfo` - 账户信息
+    pub async fn fetch_account_info(&self) -> Result<BinanceAccountInfo, EngineError> {
         let url = format!("{}/api/v3/account", self.api_base);
         let resp = self
             .client
@@ -258,7 +258,7 @@ impl SymbolRulesFetcher {
             .await
             .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
 
-        Ok(AccountInfo {
+        Ok(BinanceAccountInfo {
             account_type: info.account_type,
             can_trade: info.can_trade,
             can_withdraw: info.can_withdraw,
@@ -467,21 +467,6 @@ pub struct BinancePositionRisk {
     pub margin_ratio: String,
 }
 
-/// 账户信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountInfo {
-    /// 账户类型
-    pub account_type: String,
-    /// 是否可以交易
-    pub can_trade: bool,
-    /// 是否可以提币
-    pub can_withdraw: bool,
-    /// 是否可以充币
-    pub can_deposit: bool,
-    /// 更新时间
-    pub update_time: i64,
-}
-
 /// 持仓风险信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PositionRisk {
@@ -669,7 +654,7 @@ mod tests {
 
     #[test]
     fn test_account_info_struct() {
-        let info = AccountInfo {
+        let info = BinanceAccountInfo {
             account_type: "SPOT".to_string(),
             can_trade: true,
             can_withdraw: true,
