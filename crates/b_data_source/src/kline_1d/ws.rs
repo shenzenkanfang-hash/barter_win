@@ -161,18 +161,27 @@ impl Kline1dStream {
                 return Some(text);
             }
 
-            // 解析 K线数据
-            if let Some(data) = obj.get("data") {
-                if let Some(kline_obj) = data.get("k") {
-                    if let (Some(symbol), Some(json_str)) = (
-                        kline_obj.get("s").and_then(|v| v.as_str()),
-                        serde_json::to_string(&kline_obj).ok(),
-                    ) {
-                        if let Ok(ref mut f) = self.get_file(symbol) {
-                            let _ = f.write_all(json_str.as_bytes());
-                            let _ = f.write_all(b"\n");
-                            let _ = f.flush();
-                        }
+            // 尝试解析 K线数据 - 支持两种格式:
+            // 格式1: {"data":{"k":{...}}} (标准格式)
+            // 格式2: {"i":"1m","s":"BTCUSDT",...} (直接字段格式)
+            let kline_obj = if let Some(data) = obj.get("data") {
+                data.get("k")
+            } else if obj.get("i").is_some() && obj.get("s").is_some() {
+                // 直接在顶层，可能是简化格式
+                Some(&obj)
+            } else {
+                None
+            };
+
+            if let Some(kline) = kline_obj {
+                if let (Some(symbol), Some(json_str)) = (
+                    kline.get("s").and_then(|v| v.as_str()),
+                    serde_json::to_string(&kline).ok(),
+                ) {
+                    if let Ok(ref mut f) = self.get_file(symbol) {
+                        let _ = f.write_all(json_str.as_bytes());
+                        let _ = f.write_all(b"\n");
+                        let _ = f.flush();
                     }
                 }
             }
