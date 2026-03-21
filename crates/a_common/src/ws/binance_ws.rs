@@ -1,14 +1,12 @@
 //! Binance 测试网 WebSocket 连接器
 //!
 //! 连接地址: wss://stream.binancefuture.com/ws/
+//! 本模块只处理 WebSocket 协议，返回原始消息，业务类型转换由 DataFeeder 完成。
 
-use super::super::error::MarketError;
-use super::super::types::Tick;
+use crate::error::MarketError;
 use chrono::{TimeZone, Utc};
 use futures_util::{SinkExt, StreamExt};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -25,25 +23,97 @@ pub struct BinanceWsConnector {
     >,
 }
 
-/// Binance Trade WebSocket 消息格式
+/// Binance Trade WebSocket 消息格式 (原始消息)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct BinanceTradeMsg {
+pub struct BinanceTradeMsg {
     #[serde(rename = "e")]
-    event_type: String,
+    pub event_type: String,
     #[serde(rename = "E")]
-    event_time: i64,
+    pub event_time: i64,
     #[serde(rename = "s")]
-    symbol: String,
+    pub symbol: String,
     #[serde(rename = "t")]
-    trade_id: i64,
+    pub trade_id: i64,
     #[serde(rename = "p")]
-    price: String,
+    pub price: String,
     #[serde(rename = "q")]
-    quantity: String,
+    pub quantity: String,
     #[serde(rename = "T")]
-    trade_time: i64,
+    pub trade_time: i64,
     #[serde(rename = "m")]
-    is_buyer_maker: bool,
+    pub is_buyer_maker: bool,
+}
+
+/// Binance Kline WebSocket 消息格式 (原始消息)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinanceKlineMsg {
+    #[serde(rename = "e")]
+    pub event_type: String,
+    #[serde(rename = "E")]
+    pub event_time: i64,
+    #[serde(rename = "s")]
+    pub symbol: String,
+    #[serde(rename = "k")]
+    pub kline: KlineData,
+}
+
+/// Kline 数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KlineData {
+    #[serde(rename = "t")]
+    pub kline_start_time: i64,
+    #[serde(rename = "T")]
+    pub kline_close_time: i64,
+    #[serde(rename = "s")]
+    pub symbol: String,
+    #[serde(rename = "i")]
+    pub interval: String,
+    #[serde(rename = "f")]
+    pub first_trade_id: i64,
+    #[serde(rename = "L")]
+    pub last_trade_id: i64,
+    #[serde(rename = "o")]
+    pub open: String,
+    #[serde(rename = "c")]
+    pub close: String,
+    #[serde(rename = "h")]
+    pub high: String,
+    #[serde(rename = "l")]
+    pub low: String,
+    #[serde(rename = "v")]
+    pub volume: String,
+    #[serde(rename = "n")]
+    pub num_trades: i64,
+    #[serde(rename = "x")]
+    pub is_closed: bool,
+}
+
+/// Binance Depth WebSocket 消息格式 (原始消息)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinanceDepthMsg {
+    #[serde(rename = "e")]
+    pub event_type: String,
+    #[serde(rename = "E")]
+    pub event_time: i64,
+    #[serde(rename = "s")]
+    pub symbol: String,
+    #[serde(rename = "U")]
+    pub first_update_id: i64,
+    #[serde(rename = "u")]
+    pub final_update_id: i64,
+    #[serde(rename = "b")]
+    pub bids: Vec<PriceLevel>,
+    #[serde(rename = "a")]
+    pub asks: Vec<PriceLevel>,
+}
+
+/// 价格级别
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceLevel {
+    #[serde(rename = "0")]
+    pub price: String,
+    #[serde(rename = "1")]
+    pub qty: String,
 }
 
 impl BinanceWsConnector {
@@ -71,7 +141,7 @@ impl BinanceWsConnector {
         }
     }
 
-    /// 连接到 Binance WebSocket 并返回 ticks
+    /// 连接到 Binance WebSocket 并返回 stream
     pub async fn connect(&mut self) -> Result<BinanceTradeStream, MarketError> {
         let (ws_stream, _) = connect_async(&self.url)
             .await
@@ -163,22 +233,13 @@ pub struct BinanceTradeStream {
 }
 
 impl BinanceTradeStream {
-    /// 获取下一个 tick
-    pub async fn next_tick(&mut self) -> Option<Tick> {
+    /// 获取下一个原始 Trade 消息
+    /// 调用方负责转换为业务类型
+    pub async fn next_message(&mut self) -> Option<String> {
         while let Some(msg) = self.ws_stream.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    if let Ok(trade) = serde_json::from_str::<BinanceTradeMsg>(&text) {
-                        return Some(Tick {
-                            symbol: self.symbol.clone(),
-                            price: Decimal::from_str(&trade.price).ok()?,
-                            qty: Decimal::from_str(&trade.quantity).ok()?,
-                            timestamp: Utc.timestamp_millis_opt(trade.trade_time).unwrap(),
-                            kline_1m: None,
-                            kline_15m: None,
-                            kline_1d: None,
-                        });
-                    }
+                    return Some(text.to_string());
                 }
                 Ok(Message::Ping(_)) => {
                     // 处理 ping
@@ -195,5 +256,20 @@ impl BinanceTradeStream {
             }
         }
         None
+    }
+
+    /// 解析为 Trade 消息
+    pub fn parse_trade(&self, text: &str) -> Option<BinanceTradeMsg> {
+        serde_json::from_str::<BinanceTradeMsg>(text).ok()
+    }
+
+    /// 解析为 Kline 消息
+    pub fn parse_kline(&self, text: &str) -> Option<BinanceKlineMsg> {
+        serde_json::from_str::<BinanceKlineMsg>(text).ok()
+    }
+
+    /// 解析为 Depth 消息
+    pub fn parse_depth(&self, text: &str) -> Option<BinanceDepthMsg> {
+        serde_json::from_str::<BinanceDepthMsg>(text).ok()
     }
 }

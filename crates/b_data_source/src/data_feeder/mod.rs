@@ -9,8 +9,8 @@
 //! # 分片订阅
 //! - 每批 50 streams, 间隔 500ms
 
-use crate::ws::binance_ws::BinanceWsConnector;
-use crate::error::MarketError;
+use a_common::ws::BinanceWsConnector;
+use a_common::error::MarketError;
 use crate::kline_1m::KLineSynthesizer;
 use crate::order_books::OrderBook;
 use crate::volatility::VolatilityDetector;

@@ -14,3 +14,6 @@ tokio = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
 reqwest = { workspace = true }
+async-trait = { workspace = true }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"

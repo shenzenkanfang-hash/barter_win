@@ -12,5 +12,5 @@
 //! println!("BTCUSDT price precision: {}", rules.price_precision);
 //! ```
 
-// Re-export from b_data_source
-pub use b_data_source::api::{BinanceApiGateway, SymbolRulesFetcher, SymbolRulesData, BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket, BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
+// Re-export from a_common
+pub use a_common::api::{BinanceApiGateway, SymbolRulesFetcher, SymbolRulesData, BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket, BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
