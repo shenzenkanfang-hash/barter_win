@@ -4,8 +4,9 @@
 //! 1. 从交易所拉取交易规则
 //! 2. 订阅 1m K线 WS (分片: 50个/批, 500ms间隔)
 //! 3. 订阅 1d K线 WS (分片: 50个/批, 500ms间隔)
+//! 4. 订阅 Depth 订单簿 WS (仅 BTC 维护连接)
 
-use b_data_source::{BinanceApiGateway, Kline1mStream, Kline1dStream, Paths};
+use b_data_source::{BinanceApiGateway, Kline1mStream, Kline1dStream, DepthStream, Paths};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -44,16 +45,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kline_1d_stream = Kline1dStream::new(trading_symbols).await?;
     tracing::info!("1d KLine WS subscription started");
 
-    // 主循环：交替处理两个流
+    // 短暂等待后启动 Depth
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // 4. 启动 Depth 订单簿 WS (仅 BTC)
+    tracing::info!("Starting Depth WS subscription (BTC only)...");
+    let mut depth_stream = DepthStream::new_btc_only().await?;
+    tracing::info!("Depth WS subscription started");
+
+    // 主循环：交替处理三个流
     let mut count_1m = 0;
     let mut count_1d = 0;
+    let mut count_depth = 0;
     loop {
         tokio::select! {
             msg_1m = kline_1m_stream.next_message() => {
                 if let Some(_msg) = msg_1m {
                     count_1m += 1;
                     if count_1m % 1000 == 0 {
-                        tracing::info!("1m: Processed {} kline messages", count_1m);
+                        tracing::info!("1m: Processed {} messages", count_1m);
                     }
                 } else {
                     tracing::warn!("1m Stream ended");
@@ -64,10 +74,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(_msg) = msg_1d {
                     count_1d += 1;
                     if count_1d % 1000 == 0 {
-                        tracing::info!("1d: Processed {} kline messages", count_1d);
+                        tracing::info!("1d: Processed {} messages", count_1d);
                     }
                 } else {
                     tracing::warn!("1d Stream ended");
+                    break;
+                }
+            }
+            msg_depth = depth_stream.next_message() => {
+                if let Some(_msg) = msg_depth {
+                    count_depth += 1;
+                    if count_depth % 1000 == 0 {
+                        tracing::info!("Depth: Processed {} messages", count_depth);
+                    }
+                } else {
+                    tracing::warn!("Depth Stream ended");
                     break;
                 }
             }
