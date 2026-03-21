@@ -144,7 +144,7 @@ impl Kline1mStream {
         Ok(self.file_handles.get_mut(&symbol_lower).unwrap())
     }
 
-    /// 覆盖写入文件（截断后写入最新数据，确保监视器能看到）
+    /// 覆盖写入文件（截断后写入最新数据）
     fn write_overwrite(&mut self, symbol: &str, json_str: &str) -> std::io::Result<()> {
         let symbol_lower = symbol.to_lowercase();
         let path = format!("{}/{}.json", self.base_dir, symbol_lower);
@@ -153,8 +153,7 @@ impl Kline1mStream {
         let mut file = File::create(&path)?;
         file.write_all(json_str.as_bytes())?;
         file.write_all(b"\n")?;
-        file.flush()?;
-        file.sync_all()
+        file.flush()  // 内存盘不需要 sync_all
     }
 
     /// 获取下一条消息并写入缓存
@@ -187,12 +186,15 @@ impl Kline1mStream {
             };
 
             if let Some(kline) = kline_obj {
-                if let (Some(symbol), Some(json_str)) = (
+                if let (Some(symbol), Some(json_str), Some(is_closed)) = (
                     kline.get("s").and_then(|v| v.as_str()),
                     serde_json::to_string(&kline).ok(),
+                    kline.get("x").and_then(|v| v.as_bool()),
                 ) {
-                    // 覆盖写入：每次只保留最新一条数据
-                    let _ = self.write_overwrite(symbol, &json_str);
+                    // 只在 K线收盘时写入（减少 IO）
+                    if is_closed {
+                        let _ = self.write_overwrite(symbol, &json_str);
+                    }
                 }
             }
         }
