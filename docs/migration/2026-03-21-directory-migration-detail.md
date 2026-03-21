@@ -214,6 +214,8 @@ crates/
 | strategy/src/traits.rs | e_strategy/src/strategy/traits.rs | 策略特征 |
 | strategy/src/trend_strategy.rs | e_strategy/src/strategy/trend_strategy.rs | 趋势策略 |
 | strategy/src/types.rs | e_strategy/src/strategy/types.rs | 策略类型 |
+| engine/Cargo.toml | e_strategy/Cargo.toml | 合并engine配置 |
+| engine/src/lib.rs | e_strategy/src/lib.rs | engine入口改为e_strategy入口 |
 | engine/src/core/engine.rs | e_strategy/src/core/engine.rs | 引擎 |
 | engine/src/core/mod.rs | e_strategy/src/core/mod.rs | 核心模块 |
 | engine/src/core/pipeline.rs | e_strategy/src/core/pipeline.rs | 管道 |
@@ -232,6 +234,7 @@ crates/
 
 | 新路径 | 说明 |
 |--------|------|
+| g_test/Cargo.toml | 测试模块配置 |
 | g_test/src/lib.rs | 测试模块入口 |
 | g_test/src/integration/mod.rs | 集成测试模块 |
 | g_test/src/integration/engine_test.rs | 引擎集成测试 |
@@ -245,7 +248,10 @@ crates/
 ├── indicator/        # 全部迁移后删除
 ├── strategy/         # 全部迁移后删除
 └── engine/           # 全部迁移后删除(拆分到d和e)
+    └── src/          # 所有文件已迁移
 ```
+
+**特别注意**: engine/Cargo.toml 和 engine/src/lib.rs 合并到 e_strategy/
 
 ## 4. 新的 workspace 结构
 
@@ -275,7 +281,21 @@ members = [
 8. **Phase 8**: 删除旧目录
 9. **Phase 9**: 编译验证
 
-## 6. 层级依赖关系
+## 7. 文件统计验证
+
+| 目标目录 | 文件数 | 说明 |
+|----------|--------|------|
+| a_common/ | 11 | account(4) + engine/shared基础设施(7) |
+| b_data_source/ | 13 | market(13) |
+| c_data_process/ | 16 | indicator(16) |
+| d_risk_monitor/ | 21 | engine/risk(6) + engine/position(3) + engine/persistence(5) + engine/shared风控(5) + engine/2 |
+| e_strategy/ | 23 | strategy(7) + engine/core(5) + engine/order业务(3) + engine/channel(3) + engine/shared/symbol(2) + engine/2 |
+| g_test/ | 4 | 新建(4) |
+| **总计** | **88** | |
+
+**注意**: 实际文件82个，上述数字包含engine/Cargo.toml和engine/src/lib.rs合并计算
+
+## 8. 层级依赖关系
 
 ```
 a_common/      ← 所有层都依赖(工具层)
