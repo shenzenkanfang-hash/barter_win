@@ -2,7 +2,7 @@
 
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use crate::kline::KLineSynthesizer;
+use crate::kline_1m::KLineSynthesizer;
 use crate::types::{KLine, Period, VolatilityStats, Tick};
 
 pub struct VolatilityDetector {
