@@ -7,7 +7,7 @@
 //! - 强制平仓
 //! - 账户快照
 
-use crate::error::EngineError;
+use crate::claint::error::EngineError;
 use reqwest::Client;
 use serde::Serialize;
 use std::time::Duration;

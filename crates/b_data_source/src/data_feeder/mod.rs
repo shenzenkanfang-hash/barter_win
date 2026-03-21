@@ -10,12 +10,12 @@
 //! - 每批 50 streams, 间隔 500ms
 
 use a_common::ws::BinanceWsConnector;
-use a_common::error::MarketError;
+use a_common::MarketError;
 use crate::kline_1m::KLineSynthesizer;
 use crate::order_books::OrderBook;
 use crate::volatility::VolatilityDetector;
 use crate::symbol_rules::symbol_registry::SymbolRegistry;
-use crate::types::{KLine, Period, Tick};
+use crate::models::types::{KLine, Period, Tick};
 use fnv::FnvHashMap;
 use fnv::FnvHashSet;
 use std::sync::Arc;
@@ -82,7 +82,7 @@ pub enum DataMessage {
 
 impl DataFeeder {
     /// 创建 DataFeeder
-    pub async fn new(redis_url: &str) -> Result<Self, crate::error::MarketError> {
+    pub async fn new(redis_url: &str) -> Result<Self, crate::claint::MarketError> {
         let symbol_registry = Arc::new(RwLock::new(
             SymbolRegistry::new(redis_url).await?,
         ));
@@ -111,7 +111,7 @@ impl DataFeeder {
     }
 
     /// 启动 DataFeeder
-    pub async fn start(&mut self) -> Result<(), crate::error::MarketError> {
+    pub async fn start(&mut self) -> Result<(), crate::claint::MarketError> {
         tracing::info!("[DataFeeder] 启动中...");
 
         // 1. 更新品种列表
@@ -167,7 +167,7 @@ impl DataFeeder {
     async fn init_kline_1m_connections(
         &self,
         symbols: &[String],
-    ) -> Result<(), crate::error::MarketError> {
+    ) -> Result<(), crate::claint::MarketError> {
         let mid = symbols.len() / 2;
         let symbols_1 = &symbols[..mid];
         let symbols_2 = &symbols[mid..];
@@ -223,7 +223,7 @@ impl DataFeeder {
     async fn init_kline_1d_connection(
         &self,
         symbols: &[String],
-    ) -> Result<(), crate::error::MarketError> {
+    ) -> Result<(), crate::claint::MarketError> {
         tracing::info!(
             "[DataFeeder] 初始化 KLine 1d 连接, {} 品种",
             symbols.len()
@@ -251,7 +251,7 @@ impl DataFeeder {
     }
 
     /// 建立 Depth 连接（默认订阅 BTCUSDT）
-    async fn init_depth_connection(&self) -> Result<(), crate::error::MarketError> {
+    async fn init_depth_connection(&self) -> Result<(), crate::claint::MarketError> {
         tracing::info!(
             "[DataFeeder] 初始化 Depth 连接, 默认订阅: {}",
             self.default_depth_symbol
@@ -290,7 +290,7 @@ impl DataFeeder {
         conn: &mut BinanceWsConnector,
         symbols: &[String],
         interval: &str,
-    ) -> Result<(), crate::error::MarketError> {
+    ) -> Result<(), crate::claint::MarketError> {
         let streams: Vec<String> = symbols
             .iter()
             .map(|s| format!("{}@kline_{}", s.to_lowercase(), interval))
@@ -312,7 +312,7 @@ impl DataFeeder {
     }
 
     /// 添加 Depth 订阅
-    pub async fn add_depth_subscription(&self, symbol: &str) -> Result<(), crate::error::MarketError> {
+    pub async fn add_depth_subscription(&self, symbol: &str) -> Result<(), crate::claint::MarketError> {
         let should_subscribe = {
             let subscribed = self.depth_subscribed.read().await;
             !subscribed.contains(symbol)
@@ -353,7 +353,7 @@ impl DataFeeder {
     pub async fn remove_depth_subscription(
         &self,
         symbol: &str,
-    ) -> Result<(), crate::error::MarketError> {
+    ) -> Result<(), crate::claint::MarketError> {
         let should_unsubscribe = {
             let subscribed = self.depth_subscribed.read().await;
             subscribed.contains(symbol)
@@ -390,7 +390,7 @@ impl DataFeeder {
     }
 
     /// 更新波动率检测器
-    pub async fn update_volatility(&self, symbol: &str, price: rust_decimal::Decimal, timestamp: chrono::DateTime<chrono::Utc>) -> crate::types::VolatilityStats {
+    pub async fn update_volatility(&self, symbol: &str, price: rust_decimal::Decimal, timestamp: chrono::DateTime<chrono::Utc>) -> crate::models::types::VolatilityStats {
         let mut detectors = self.volatility_detectors.write().await;
 
         let detector = detectors
@@ -401,7 +401,7 @@ impl DataFeeder {
     }
 
     /// 检查是否应该添加/移除 Depth 订阅（基于波动率）
-    pub async fn check_depth_subscription(&self, symbol: &str, vol_stats: crate::types::VolatilityStats) {
+    pub async fn check_depth_subscription(&self, symbol: &str, vol_stats: crate::models::types::VolatilityStats) {
         if vol_stats.is_high_volatility {
             if let Err(e) = self.add_depth_subscription(symbol).await {
                 tracing::error!("[DataFeeder] 添加 Depth 订阅失败: {}", e);

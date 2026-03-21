@@ -1,4 +1,4 @@
-use a_common::error::EngineError;
+use a_common::EngineError;
 use crate::order::mock_binance_gateway::{MockAccount, MockPosition, OrderResult};
 use crate::strategy::types::OrderRequest;
 

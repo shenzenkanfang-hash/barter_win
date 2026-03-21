@@ -2,7 +2,7 @@
 //!
 //! 只包含抽象的连接器接口，不依赖业务类型。
 
-use crate::error::MarketError;
+use crate::claint::error::MarketError;
 use async_trait::async_trait;
 
 /// 市场数据连接器 trait - 订阅/退订

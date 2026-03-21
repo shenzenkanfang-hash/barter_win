@@ -15,7 +15,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::error::MarketError;
+use crate::claint::MarketError;
 
 /// Checkpoint 数据 - 用于快速恢复交易判断
 #[derive(Debug, Clone, Serialize, Deserialize)]

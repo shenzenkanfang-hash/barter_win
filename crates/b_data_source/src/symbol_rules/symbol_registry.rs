@@ -26,13 +26,13 @@ impl SymbolRegistry {
         }
     }
 
-    pub async fn new(redis_url: &str) -> Result<Self, crate::error::MarketError> {
+    pub async fn new(redis_url: &str) -> Result<Self, crate::claint::MarketError> {
         let client = redis::Client::open(redis_url)
-            .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
+            .map_err(|e| crate::claint::MarketError::RedisError(e.to_string()))?;
         let conn = client
             .get_connection_manager()
             .await
-            .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
+            .map_err(|e| crate::claint::MarketError::RedisError(e.to_string()))?;
 
         Ok(Self {
             redis: Some(conn),
@@ -44,7 +44,7 @@ impl SymbolRegistry {
     }
 
     /// 从 Binance 获取交易对信息并更新 Redis
-    pub async fn update_symbols(&mut self) -> Result<(), crate::error::MarketError> {
+    pub async fn update_symbols(&mut self) -> Result<(), crate::claint::MarketError> {
         // Mock 模式下跳过更新
         if self.is_mock {
             tracing::debug!("[SymbolRegistry] Mock 模式，跳过品种更新");
@@ -56,12 +56,12 @@ impl SymbolRegistry {
             .get("https://fapi.binance.com/fapi/v1/exchangeInfo")
             .send()
             .await
-            .map_err(|e| crate::error::MarketError::NetworkError(e.to_string()))?;
+            .map_err(|e| crate::claint::MarketError::NetworkError(e.to_string()))?;
 
         let info: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| crate::error::MarketError::ParseError(e.to_string()))?;
+            .map_err(|e| crate::claint::MarketError::ParseError(e.to_string()))?;
 
         if let Some(symbols) = info.get("symbols").and_then(|s| s.as_array()) {
             let mut new_symbols = FnvHashSet::default();
@@ -78,7 +78,7 @@ impl SymbolRegistry {
                             let _: () = redis_conn
                                 .hset("exchangeInfo", symbol, &json)
                                 .await
-                                .map_err(|e| crate::error::MarketError::RedisError(e.to_string()))?;
+                                .map_err(|e| crate::claint::MarketError::RedisError(e.to_string()))?;
                         }
                         new_symbols.insert(symbol.to_string());
                     }

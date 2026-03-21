@@ -3,7 +3,7 @@
 //! 连接地址: wss://stream.binancefuture.com/ws/
 //! 本模块只处理 WebSocket 协议，返回原始消息，业务类型转换由 DataFeeder 完成。
 
-use crate::error::MarketError;
+use crate::claint::error::MarketError;
 use chrono::{TimeZone, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};

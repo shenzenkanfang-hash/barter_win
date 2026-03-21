@@ -1,25 +1,38 @@
 #![forbid(unsafe_code)]
 
-pub mod api;
-pub mod error;
-pub mod platform;
-pub mod checkpoint;
-// pub mod checkpoint_integration; // TODO: 移到 e_strategy (依赖 channel 类型)
-pub mod telegram_notifier;
-pub mod types;
-pub mod ws;
+//! a_common - 基础设施层
+//!
+//! 提供 API/WS 网关、配置、通用错误、数据模型等基础设施组件。
 
-// Re-exports
+// Core modules
+pub mod api;
+pub mod ws;
+pub mod config;
+pub mod logs;
+pub mod models;
+pub mod claint;
+pub mod util;
+
+// Re-exports - API
 pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData};
 pub use api::{BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket};
 pub use api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
 
-pub use error::EngineError;
-pub use platform::{Platform, Paths};
-pub use checkpoint::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
-// pub use checkpoint_integration::CheckpointIntegration; // TODO: 移到 e_strategy
-pub use telegram_notifier::{TelegramConfig, TelegramNotifier};
-pub use types::*;
+// Re-exports - Config
+pub use config::{Platform, Paths};
 
+// Re-exports - Logs
+pub use logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
+
+// Re-exports - Models
+pub use models::*;
+
+// Re-exports - Claint (errors)
+pub use claint::{EngineError, MarketError};
+
+// Re-exports - Util
+pub use util::{TelegramConfig, TelegramNotifier};
+
+// Re-exports - WS
 pub use ws::{BinanceTradeStream, BinanceWsConnector};
 pub use ws::{MarketConnector, MockMarketConnector};

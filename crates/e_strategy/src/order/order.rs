@@ -1,4 +1,4 @@
-use a_common::error::EngineError;
+use a_common::EngineError;
 use crate::order::gateway::ExchangeGateway;
 use crate::order::mock_binance_gateway::OrderResult;
 use d_risk_monitor::risk::RiskPreChecker;

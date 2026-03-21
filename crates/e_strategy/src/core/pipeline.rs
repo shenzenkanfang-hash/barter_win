@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
-use a_common::checkpoint::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
+use a_common::logs::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
 use crate::shared::check_table::{CheckEntry, CheckTable};
 use c_data_process::PineColor;
-use b_data_source::types::Tick;
+use b_data_source::Tick;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use crate::strategy::types::{OrderRequest, Side, Signal};

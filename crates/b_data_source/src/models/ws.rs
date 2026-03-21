@@ -2,7 +2,7 @@
 //!
 //! 定义市场数据流接口，返回业务类型 Tick。
 
-use crate::types::Tick;
+use crate::models::types::Tick;
 use async_trait::async_trait;
 use chrono::Utc;
 use rust_decimal::Decimal;

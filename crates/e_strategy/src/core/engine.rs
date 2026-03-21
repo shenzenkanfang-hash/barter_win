@@ -1,7 +1,7 @@
 use d_risk_monitor::shared::account_pool::{AccountPool, CircuitBreakerState};
 use crate::shared::check_table::CheckTable;
 use d_risk_monitor::persistence::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
-use a_common::error::EngineError;
+use a_common::EngineError;
 use crate::order::gateway::ExchangeGateway;
 use d_risk_monitor::shared::market_status::{MarketStatus, MarketStatusDetector};
 use d_risk_monitor::persistence::memory_backup::MemoryBackup;
@@ -265,14 +265,14 @@ impl TradingEngine {
         }
     }
 
-    fn on_kline_completed(&mut self, kline: &b_data_source::types::KLine) {
+    fn on_kline_completed(&mut self, kline: &b_data_source::KLine) {
         info!(
             "1分钟K线完成: {} close={} high={} low={}",
             kline.symbol, kline.close, kline.high, kline.low
         );
     }
 
-    fn on_daily_kline_completed(&mut self, kline: &b_data_source::types::KLine) {
+    fn on_daily_kline_completed(&mut self, kline: &b_data_source::KLine) {
         info!(
             "日线K线完成: {} close={}",
             kline.symbol, kline.close
@@ -305,12 +305,12 @@ impl TradingEngine {
     /// 1. 风控预检 (锁外)
     /// 2. 调用 gateway 执行订单
     /// 3. 更新持仓
-    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::order::mock_binance_gateway::OrderResult, a_common::error::EngineError> {
+    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::order::mock_binance_gateway::OrderResult, a_common::EngineError> {
         let order_value = order.qty * order.price.unwrap_or(order.qty);
 
         // 1. 预占保证金
         self.strategy_pool.reserve_margin("main", order_value)
-            .map_err(|e| a_common::error::EngineError::RiskCheckFailed(e))?;
+            .map_err(|e| a_common::EngineError::RiskCheckFailed(e))?;
 
         // 2. 一轮编码作用域 (RAII 自动管理)
         let _round_scope = RoundGuardScope::new(&self.round_guard);

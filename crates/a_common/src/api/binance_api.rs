@@ -13,7 +13,7 @@
 //! println!("BTCUSDT price precision: {}", rules.price_precision);
 //! ```
 
-use crate::error::EngineError;
+use crate::claint::error::EngineError;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
