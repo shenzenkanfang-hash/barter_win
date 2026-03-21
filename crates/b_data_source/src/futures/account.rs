@@ -9,7 +9,6 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 /// USDT 合约账户数据获取器
-#[derive(Debug, Clone)]
 pub struct FuturesAccount {
     gateway: BinanceApiGateway,
 }
@@ -28,7 +27,7 @@ impl FuturesAccount {
             .gateway
             .fetch_futures_account()
             .await
-            .map_err(|e| a_common::MarketError::Other(e.to_string()))?;
+            .map_err(|e| a_common::MarketError::NetworkError(e.to_string()))?;
 
         Ok(FuturesAccountData::from_response(response))
     }

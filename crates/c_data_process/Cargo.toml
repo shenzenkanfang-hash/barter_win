@@ -8,3 +8,5 @@ rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+chrono = { workspace = true }
+b_data_source = { path = "../b_data_source" }

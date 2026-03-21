@@ -9,7 +9,7 @@
 use clap::Parser;
 use chrono::{DateTime, Local, TimeZone, Timelike, Utc};
 use futures_util::StreamExt;
-use b_data_source::{VolatilityDetector, VolatilityStats};
+use c_data_process::{VolatilityDetector, VolatilityStats};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Serialize;
