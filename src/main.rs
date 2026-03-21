@@ -4,7 +4,6 @@
 
 use a_common::config::Paths;
 use b_data_source::BinanceMultiStream;
-use std::fs;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -16,40 +15,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Trading system starting");
 
-    // 使用平台自适应路径配置
+    // 使用平台自适应路径配置 (约定的高速内存盘)
     let paths = Paths::new();
     let platform = paths.platform();
-
-    // 3 output files - 使用平台自适应路径
-    let base_dir = if platform.is_windows() {
-        "E:/logs".to_string()
-    } else {
-        "data/logs".to_string()
-    };
-
-    // 确保目录存在
-    fs::create_dir_all(&base_dir)?;
-
-    let trade_path = format!("{}/trade.log", base_dir);
-    let kline_path = format!("{}/kline.log", base_dir);
-    let depth_path = format!("{}/depth.log", base_dir);
+    let base_dir = &paths.memory_backup_dir;
 
     tracing::info!("Platform: {:?}", platform);
-    tracing::info!("Output directory: {}", base_dir);
+    tracing::info!("Memory backup directory: {}", base_dir);
 
-    // Create multi-stream writer for market data
+    // 订阅的交易对
     let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
-    let mut multi_stream = BinanceMultiStream::new(trade_path, kline_path, depth_path, symbols).await?;
 
-    tracing::info!("Connected to Binance WebSocket, streaming market data to 3 files");
-    tracing::info!("Trade -> {}", trade_path);
-    tracing::info!("Kline -> {}", kline_path);
-    tracing::info!("Depth -> {}", depth_path);
+    // 创建多数据流 - 自动使用约定的高速内存盘路径
+    // 数据将写入:
+    //   - {base_dir}/trades/{symbol}.csv
+    //   - {base_dir}/kline-1m-实时/{symbol}.json
+    //   - {base_dir}/depth/{symbol}.json
+    let mut multi_stream = BinanceMultiStream::new(symbols).await?;
+
+    tracing::info!("Connected to Binance WebSocket, streaming market data to memory backup dir");
 
     // Main loop - continuously read and write messages
     loop {
         if let Some(_msg) = multi_stream.next_message().await {
-            // Message already written to file by MultiStreamWriter
+            // Message already written to memory backup by MultiStreamWriter
         } else {
             tracing::warn!("Stream ended");
             break;
