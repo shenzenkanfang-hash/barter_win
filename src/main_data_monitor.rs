@@ -206,20 +206,20 @@ impl TradeHandler {
         // 更新计数
         self.trade_count += 1;
 
-        // 检查是否进入新的分钟
-        let current_min = get_local_minute();
-
-        // 每分钟状态记录
-        if self.last_status_minute.is_none() || self.last_status_minute != Some(current_min) {
-            self.record_status(&vol_stats, price, current_min);
-            self.last_status_minute = Some(current_min);
-        }
-
-        // 高波动信号检测
+        // 高波动信号检测（先判断，因为会影响记录逻辑）
         let is_high = vol_stats.is_high_volatility;
         if is_high != self.last_vol_state {
             self.record_signal(is_high, &vol_stats, price, ts);
             self.last_vol_state = is_high;
+        }
+
+        // 高波动期间：每分钟状态记录
+        if is_high {
+            let current_min = get_local_minute();
+            if self.last_status_minute.is_none() || self.last_status_minute != Some(current_min) {
+                self.record_status(&vol_stats, price, current_min, true);
+                self.last_status_minute = Some(current_min);
+            }
         }
 
         // 简洁交易输出（可选）
@@ -282,7 +282,7 @@ impl TradeHandler {
         }
     }
 
-    fn record_status(&self, stats: &VolatilityStats, price: Decimal, minute: (u32, u32, u32)) {
+    fn record_status(&self, stats: &VolatilityStats, price: Decimal, minute: (u32, u32, u32), is_continuous_high: bool) {
         let status = StatusSnapshot {
             timestamp: Utc::now().format("%Y-%m-%d %H:%M").to_string(),
             symbol: self.symbol.clone(),
@@ -291,20 +291,21 @@ impl TradeHandler {
             vol_15m: format!("{:.4}", stats.vol_15m),
             is_high_vol: stats.is_high_volatility,
             trade_count_1m: self.trade_count,
-            kline_1m_close: "-".to_string(), // VolatilityDetector 内部维护，不直接暴露
+            kline_1m_close: "-".to_string(),
             kline_15m_close: "-".to_string(),
         };
 
-        // 每分钟输出到控制台
-        info!(
-            "[{:02}:{:02}] price={} vol_1m={:.2}% vol_15m={:.2}% high={} trades={}",
-            minute.0, minute.1,
-            price,
-            stats.vol_1m * dec!(100),
-            stats.vol_15m * dec!(100),
-            if stats.is_high_volatility { "YES" } else { "no" },
-            self.trade_count
-        );
+        // 高波动持续期间的记录，用更醒目的格式
+        if is_continuous_high {
+            warn!(
+                "[{:02}:{:02}] [HIGH_VOL_CONTINUE] price={} vol_1m={:.2}% vol_15m={:.2}% trades={}",
+                minute.0, minute.1,
+                price,
+                stats.vol_1m * dec!(100),
+                stats.vol_15m * dec!(100),
+                self.trade_count
+            );
+        }
 
         // 写入文件
         if let Err(e) = self.file_logger.write_status(&status) {
