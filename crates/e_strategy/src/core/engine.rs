@@ -1,34 +1,34 @@
-use crate::shared::account_pool::{AccountPool, CircuitBreakerState};
+use d_risk_monitor::shared::account_pool::{AccountPool, CircuitBreakerState};
 use crate::shared::check_table::CheckTable;
-use crate::persistence::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
-use crate::shared::error::EngineError;
+use d_risk_monitor::persistence::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
+use a_common::error::EngineError;
 use crate::order::gateway::ExchangeGateway;
-use crate::shared::market_status::{MarketStatus, MarketStatusDetector};
-use crate::persistence::memory_backup::MemoryBackup;
+use d_risk_monitor::shared::market_status::{MarketStatus, MarketStatusDetector};
+use d_risk_monitor::persistence::memory_backup::MemoryBackup;
 use crate::order::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
 use crate::channel::mode::ModeSwitcher;
 use crate::order::OrderExecutor;
-use crate::risk::order_check::OrderCheck;
-use crate::persistence::PersistenceService;
-use crate::position::position_exclusion::PositionExclusionChecker;
-use crate::position::position_manager::{Direction, LocalPositionManager};
-use crate::shared::pnl_manager::PnlManager;
-use crate::risk::RiskPreChecker;
-use crate::risk::VolatilityMode;
-use crate::risk::risk_rechecker::RiskReChecker;
-use crate::shared::round_guard::{RoundGuard, RoundGuardScope};
+use d_risk_monitor::risk::order_check::OrderCheck;
+use d_risk_monitor::persistence::PersistenceService;
+use d_risk_monitor::position::position_exclusion::PositionExclusionChecker;
+use d_risk_monitor::position::position_manager::{Direction, LocalPositionManager};
+use d_risk_monitor::shared::pnl_manager::PnlManager;
+use d_risk_monitor::risk::RiskPreChecker;
+use d_risk_monitor::risk::VolatilityMode;
+use d_risk_monitor::risk::risk_rechecker::RiskReChecker;
+use d_risk_monitor::shared::round_guard::{RoundGuard, RoundGuardScope};
 use crate::core::strategy_pool::StrategyPool;
-use crate::risk::thresholds::ThresholdConstants;
-use indicator::{EMA, RSI};
-use market::{KLineSynthesizer, MarketStream, Period, Tick};
+use d_risk_monitor::risk::thresholds::ThresholdConstants;
+use c_data_process::{EMA, RSI};
+use b_data_source::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use strategy::types::{OrderRequest, Side};
-use strategy::StrategyId;
+use crate::strategy::types::{OrderRequest, Side};
+use crate::strategy::StrategyId;
 use tracing::{info, warn};
 
 /// 交易引擎 - 串联所有层
@@ -265,14 +265,14 @@ impl TradingEngine {
         }
     }
 
-    fn on_kline_completed(&mut self, kline: &market::types::KLine) {
+    fn on_kline_completed(&mut self, kline: &b_data_source::types::KLine) {
         info!(
             "1分钟K线完成: {} close={} high={} low={}",
             kline.symbol, kline.close, kline.high, kline.low
         );
     }
 
-    fn on_daily_kline_completed(&mut self, kline: &market::types::KLine) {
+    fn on_daily_kline_completed(&mut self, kline: &b_data_source::types::KLine) {
         info!(
             "日线K线完成: {} close={}",
             kline.symbol, kline.close
@@ -305,19 +305,19 @@ impl TradingEngine {
     /// 1. 风控预检 (锁外)
     /// 2. 调用 gateway 执行订单
     /// 3. 更新持仓
-    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::order::mock_binance_gateway::OrderResult, crate::shared::error::EngineError> {
+    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::order::mock_binance_gateway::OrderResult, a_common::error::EngineError> {
         let order_value = order.qty * order.price.unwrap_or(order.qty);
 
         // 1. 预占保证金
         self.strategy_pool.reserve_margin("main", order_value)
-            .map_err(|e| crate::shared::error::EngineError::RiskCheckFailed(e))?;
+            .map_err(|e| a_common::error::EngineError::RiskCheckFailed(e))?;
 
         // 2. 一轮编码作用域 (RAII 自动管理)
         let _round_scope = RoundGuardScope::new(&self.round_guard);
 
         // 3. 执行订单 (内部包含风控预检)
         let result = match order.order_type {
-            strategy::types::OrderType::Market => {
+            crate::strategy::types::OrderType::Market => {
                 self.order_executor.execute_market_order(
                     &order.symbol,
                     order.side,
@@ -325,7 +325,7 @@ impl TradingEngine {
                     order.price.unwrap_or(self.current_price),
                 )?
             }
-            strategy::types::OrderType::Limit => {
+            crate::strategy::types::OrderType::Limit => {
                 self.order_executor.execute_limit_order(
                     &order.symbol,
                     order.side,
@@ -628,7 +628,7 @@ impl TradingEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use market::MockMarketStream;
+    use b_data_source::MockMarketStream;
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -783,7 +783,7 @@ mod tests {
         let order = OrderRequest {
             symbol: "BTCUSDT".to_string(),
             side: Side::Long,
-            order_type: strategy::types::OrderType::Market,
+            order_type: crate::strategy::types::OrderType::Market,
             price: Some(dec!(100.0)),
             qty: dec!(1.0),
         };

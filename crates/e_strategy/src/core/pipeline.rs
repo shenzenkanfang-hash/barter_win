@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 
-use crate::shared::checkpoint::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
+use a_common::checkpoint::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
 use crate::shared::check_table::{CheckEntry, CheckTable};
-use indicator::PineColor;
-use market::types::Tick;
+use c_data_process::PineColor;
+use b_data_source::types::Tick;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use strategy::types::{OrderRequest, Side, Signal};
+use crate::strategy::types::{OrderRequest, Side, Signal};
 
 /// Pipeline Processor trait - 所有阶段处理器都实现这个接口
 pub trait Processor: Send + Sync {
@@ -125,7 +125,7 @@ impl Pipeline {
                 Signal::ShortEntry | Signal::ShortHedge => Side::Short,
                 _ => return None,
             },
-            order_type: strategy::types::OrderType::Market,
+            order_type: crate::strategy::types::OrderType::Market,
             price: Some(entry.target_price),
             qty: entry.quantity,
         })
@@ -252,7 +252,7 @@ impl Processor for MockStrategyProcessor {
             period: "1m".to_string(),
             ema_signal: self.signal,
             rsi_value: dec!(50),
-            pine_color: indicator::PineColor::Neutral,
+            pine_color: c_data_process::PineColor::Neutral,
             price_position: dec!(50),
             final_signal: self.signal,
             target_price: tick.price,

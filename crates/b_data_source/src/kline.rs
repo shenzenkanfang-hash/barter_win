@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 ///
 /// # 示例
 /// ```
-/// use market::{KLineSynthesizer, Period};
+/// use b_data_source::{KLineSynthesizer, Period};
 /// let mut synthesizer = KLineSynthesizer::new("BTCUSDT".to_string(), Period::Minute(1));
 /// ```
 pub struct KLineSynthesizer {

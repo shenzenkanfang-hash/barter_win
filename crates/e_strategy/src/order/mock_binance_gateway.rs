@@ -1,10 +1,10 @@
-use crate::shared::error::EngineError;
-use crate::shared::account_pool::AccountPool;
-use crate::shared::margin_config::StrategyLevel;
-use crate::risk::minute_risk::calculate_minute_open_notional;
-use crate::position::position_manager::{Direction, LocalPositionManager};
+use a_common::error::EngineError;
+use d_risk_monitor::shared::account_pool::AccountPool;
+use d_risk_monitor::shared::margin_config::StrategyLevel;
+use d_risk_monitor::risk::minute_risk::calculate_minute_open_notional;
+use d_risk_monitor::position::position_manager::{Direction, LocalPositionManager};
 use crate::core::strategy_pool::StrategyPool;
-use crate::persistence::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, RiskEventRecord, format_decimal};
+use d_risk_monitor::persistence::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, RiskEventRecord, format_decimal};
 use fnv::FnvHashMap;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
@@ -12,7 +12,7 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use strategy::types::{OrderRequest, OrderType, Side};
+use crate::strategy::types::{OrderRequest, OrderType, Side};
 use tracing::{info, warn};
 
 /// 模拟币安网关错误类型
@@ -1077,15 +1077,15 @@ impl SignalSynthesisLayer {
     /// - `leverage`: 杠杆倍数 (默认 10)
     pub fn synthesize(
         &self,
-        signal: strategy::types::Signal,
-        position_side: Option<strategy::types::Side>,
+        signal: crate::strategy::types::Signal,
+        position_side: Option<crate::strategy::types::Side>,
         current_price: Decimal,
         symbol: &str,
         account_pool: &AccountPool,
         current_symbol_count: Decimal,
         leverage: Decimal,
-    ) -> strategy::types::TradingDecision {
-        use strategy::types::{Side, TradingDecision, TradingAction};
+    ) -> crate::strategy::types::TradingDecision {
+        use crate::strategy::types::{Side, TradingDecision, TradingAction};
 
         let state = self.channel_state.read();
         let channel_type = state.channel_type;
@@ -1099,7 +1099,7 @@ impl SignalSynthesisLayer {
         );
 
         match signal {
-            strategy::types::Signal::LongEntry => {
+            crate::strategy::types::Signal::LongEntry => {
                 // 做多入场信号
                 if position_side == Some(Side::Short) {
                     // 当前持有空头，先平空再开多
@@ -1117,7 +1117,7 @@ impl SignalSynthesisLayer {
                     )
                 }
             }
-            strategy::types::Signal::ShortEntry => {
+            crate::strategy::types::Signal::ShortEntry => {
                 // 做空入场信号
                 if position_side == Some(Side::Long) {
                     // 当前持有多头，先平多再开空
@@ -1135,7 +1135,7 @@ impl SignalSynthesisLayer {
                     )
                 }
             }
-            strategy::types::Signal::LongExit => {
+            crate::strategy::types::Signal::LongExit => {
                 // 平多信号
                 TradingDecision::close_long(
                     symbol.to_string(),
@@ -1143,7 +1143,7 @@ impl SignalSynthesisLayer {
                     format!("通道 {:?} 平多", channel_type),
                 )
             }
-            strategy::types::Signal::ShortExit => {
+            crate::strategy::types::Signal::ShortExit => {
                 // 平空信号
                 TradingDecision::close_short(
                     symbol.to_string(),
@@ -1151,7 +1151,7 @@ impl SignalSynthesisLayer {
                     format!("通道 {:?} 平空", channel_type),
                 )
             }
-            strategy::types::Signal::ExitHighVol => {
+            crate::strategy::types::Signal::ExitHighVol => {
                 // 高波动退出信号 - 全部平仓
                 match position_side {
                     Some(Side::Long) => {
@@ -1174,14 +1174,14 @@ impl SignalSynthesisLayer {
                     ),
                 }
             }
-            strategy::types::Signal::LongHedge => {
+            crate::strategy::types::Signal::LongHedge => {
                 // 多头对冲信号 (保持多头，但可能需要减仓)
                 TradingDecision::no_action(
                     symbol.to_string(),
                     format!("通道 {:?} 多头对冲观望", channel_type),
                 )
             }
-            strategy::types::Signal::ShortHedge => {
+            crate::strategy::types::Signal::ShortHedge => {
                 // 空头对冲信号
                 TradingDecision::no_action(
                     symbol.to_string(),

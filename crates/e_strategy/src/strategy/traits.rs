@@ -1,6 +1,6 @@
-use crate::error::StrategyError;
-use crate::types::{Signal, TradingDecision, TradingMode};
-use market::{KLine, Tick};
+use crate::strategy::error::StrategyError;
+use crate::strategy::types::{Signal, TradingDecision, TradingMode};
+use b_data_source::{KLine, Tick};
 use rust_decimal::Decimal;
 
 /// 分钟指标数据 (由 IndicatorLayer 计算)
@@ -72,7 +72,7 @@ pub trait Strategy: Send + Sync {
     fn synthesize(
         &self,
         signal: Signal,
-        position_direction: Option<crate::types::Side>,
+        position_direction: Option<crate::strategy::types::Side>,
         current_price: Decimal,
     ) -> TradingDecision;
 }

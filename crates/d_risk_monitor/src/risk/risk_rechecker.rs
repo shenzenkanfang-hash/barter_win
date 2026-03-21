@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::shared::error::EngineError;
+use a_common::error::EngineError;
 use crate::risk::risk::VolatilityMode;
 
 /// 风控复核器 - 锁内复核

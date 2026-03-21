@@ -274,7 +274,7 @@ impl PersistenceService {
     // ========== 便捷方法 ==========
 
     /// 记录日线 K线完成
-    pub fn record_daily_kline(&mut self, kline: &market::types::KLine) {
+    pub fn record_daily_kline(&mut self, kline: &b_data_source::types::KLine) {
         let kline_data = KLineData {
             open: kline.open,
             high: kline.high,

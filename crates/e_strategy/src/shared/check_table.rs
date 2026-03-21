@@ -3,7 +3,7 @@ use fnv::FnvHashMap;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use strategy::types::Signal;
+use crate::strategy::types::Signal;
 
 /// Check 表项 - 记录策略判断结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct CheckEntry {
     /// RSI 数值: 0-100
     pub rsi_value: Decimal,
     /// Pine 颜色
-    pub pine_color: indicator::PineColor,
+    pub pine_color: c_data_process::types::PineColor,
     /// 价格位置: 0-100 (close-low)/(high-low)
     pub price_position: Decimal,
 
@@ -138,7 +138,7 @@ mod tests {
             period: "1m".to_string(),
             ema_signal: Signal::LongEntry,
             rsi_value: Decimal::from(60),
-            pine_color: indicator::PineColor::PureGreen,
+            pine_color: c_data_process::types::PineColor::PureGreen,
             price_position: Decimal::from(75),
             final_signal: Signal::LongEntry,
             target_price: Decimal::from(50000),

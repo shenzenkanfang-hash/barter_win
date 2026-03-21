@@ -1,11 +1,11 @@
-use crate::shared::error::EngineError;
+use a_common::error::EngineError;
 use crate::order::gateway::ExchangeGateway;
 use crate::order::mock_binance_gateway::OrderResult;
-use crate::risk::RiskPreChecker;
+use d_risk_monitor::risk::RiskPreChecker;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use strategy::types::{OrderRequest, OrderType, Side};
+use crate::strategy::types::{OrderRequest, OrderType, Side};
 
 /// 订单执行器
 ///
@@ -92,9 +92,9 @@ impl OrderExecutor {
     /// 从交易决策执行订单
     pub fn execute_from_decision(
         &self,
-        decision: &strategy::types::TradingDecision,
+        decision: &crate::strategy::types::TradingDecision,
     ) -> Result<OrderResult, EngineError> {
-        use strategy::types::{TradingAction, Side};
+        use crate::strategy::types::{TradingAction, Side};
 
         match decision.action {
             TradingAction::OpenLong => {

@@ -13,10 +13,10 @@
 //! 2. API 拉取核对账户（第二优先级）
 //! 3. 如果 API 数据更新，覆盖本地数据
 
-use crate::shared::error::EngineError;
+use a_common::error::EngineError;
 use crate::persistence::memory_backup::{MemoryBackup, PositionSnapshot as MemoryPositionSnapshot};
 use crate::persistence::sqlite_persistence::SqliteRecordService;
-use crate::shared::symbol_rules_fetcher::SymbolRulesFetcher;
+use a_common::symbol_rules_fetcher::SymbolRulesFetcher;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

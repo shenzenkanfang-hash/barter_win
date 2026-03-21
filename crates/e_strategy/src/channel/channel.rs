@@ -1,13 +1,13 @@
 use crate::shared::check_table::CheckTable;
 use crate::core::pipeline_form::PipelineForm;
-use crate::shared::round_guard::RoundGuard;
-use indicator::{BigCycleCalculator, EMA, PineColor, PricePosition, RSI};
-use market::{KLine, KLineSynthesizer, Period, Tick};
+use d_risk_monitor::shared::round_guard::RoundGuard;
+use c_data_process::{BigCycleCalculator, EMA, PineColor, PricePosition, RSI};
+use b_data_source::{KLine, KLineSynthesizer, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::sync::Arc;
-use strategy::types::Signal;
-use strategy::StrategyId;
+use crate::strategy::types::Signal;
+use crate::strategy::StrategyId;
 
 /// 通道类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,7 +370,7 @@ impl VolatilityChannel {
     }
 
     /// 获取大周期指标 (TR Ratio, 区间位置)
-    pub fn get_big_cycle_indicators(&mut self) -> Option<indicator::BigCycleIndicators> {
+    pub fn get_big_cycle_indicators(&mut self) -> Option<c_data_process::BigCycleIndicators> {
         if !self.big_cycle.is_ready() {
             return None;
         }

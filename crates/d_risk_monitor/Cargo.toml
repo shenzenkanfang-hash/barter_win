@@ -17,3 +17,5 @@ parking_lot = { workspace = true }
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
 reqwest = { workspace = true }
+a_common = { path = "../a_common" }
+b_data_source = { path = "../b_data_source" }

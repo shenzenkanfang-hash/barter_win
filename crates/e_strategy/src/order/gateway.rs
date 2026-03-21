@@ -1,6 +1,6 @@
-use crate::shared::error::EngineError;
+use a_common::error::EngineError;
 use crate::order::mock_binance_gateway::{MockAccount, MockPosition, OrderResult};
-use strategy::types::OrderRequest;
+use crate::strategy::types::OrderRequest;
 
 /// 交易所网关 trait
 ///
