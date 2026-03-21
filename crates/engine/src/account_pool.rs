@@ -370,7 +370,7 @@ impl AccountPool {
 
     /// 重置账户 (写锁)
     pub fn reset(&self) {
-        let account = self.account.write();
+        let mut account = self.account.write();
         let initial_balance = *self.initial_balance.read();
         *account = AccountInfo {
             account_id: "default".to_string(),

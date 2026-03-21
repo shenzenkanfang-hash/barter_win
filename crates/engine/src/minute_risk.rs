@@ -27,29 +27,24 @@ pub struct MinuteOpenResult {
     pub actual_notional_per_symbol: Decimal,
     /// 是否达到最小开仓阈值
     pub meets_min_threshold: bool,
+    /// 剩余可开仓保证金 (仅计算用)
+    pub remaining_margin: Decimal,
 }
 
 /// 计算分钟级单品种开仓名义价值
 ///
-/// 计算逻辑 (对应 Python risk_engine.py):
-/// ```python
-/// minute_margin = self.calculate_strategy_margin("MINUTE")
-/// total_new_open_margin = minute_margin.new_open_max
-/// total_available_notional = total_new_open_margin * leverage
-/// actual_notional = min(total_available_notional / symbol_count, MAX_SINGLE_NOTIONAL)
-/// ```
+/// 完全对标 Python risk_engine.py 的 calculate_minute_open_notional 逻辑:
 ///
 /// # 参数
 /// - `account_pool`: 账户保证金池
-/// - `margin_config`: 保证金池配置
-/// - `symbol_count`: 当前交易品种数量
-/// - `leverage`: 杠杆倍数 (默认 1)
+/// - `current_symbol_count`: 当前交易品种数量
+/// - `leverage`: 杠杆倍数 (默认 10)
 ///
 /// # 返回
 /// - `MinuteOpenResult`: 包含各项计算结果的结构体
 pub fn calculate_minute_open_notional(
     account_pool: &AccountPool,
-    symbol_count: Decimal,
+    current_symbol_count: Decimal,
     leverage: Decimal,
 ) -> MinuteOpenResult {
     let margin_config = MarginPoolConfig::default();
@@ -66,43 +61,88 @@ pub fn calculate_minute_open_notional(
     // 分钟级新开仓保证金上限 = 可用保证金 * 新开仓比例
     let total_new_open_margin = total_available_margin * margin_config.minute.new_open_ratio;
 
-    // 目标品种数量 (转换为 Decimal)
-    let target_symbol_count = Decimal::from(margin_config.minute_open.target_symbol_count);
-
-    // 单品种名义价值上限
+    // 配置参数
+    let open_config = &margin_config.minute_open;
+    let min_notional = open_config.min_notional_per_symbol;
+    let target_count = Decimal::from(open_config.target_symbol_count);
+    let threshold = open_config.threshold_amount;
     let max_single_notional = MAX_SINGLE_NOTIONAL;
 
-    // 考虑杠杆后的可用名义价值
-    let total_available_notional = total_new_open_margin * leverage;
+    // 实际每品种名义价值
+    let mut actual_notional_per_symbol: Decimal;
+    let mut remaining_margin: Decimal = dec!(0);
 
-    // 实际每品种名义价值 = min(总可用名义价值 / 品种数量, 最大单品种限制)
-    let actual_notional_per_symbol = if symbol_count > dec!(0) {
-        (total_available_notional / symbol_count).min(max_single_notional)
+    if total_new_open_margin <= dec!(0) {
+        // 新开仓保证金为0，返回最低名义价值
+        actual_notional_per_symbol = min_notional;
     } else {
-        dec!(0)
-    };
+        let total_available_notional = total_new_open_margin * leverage;
+
+        if current_symbol_count <= dec!(0) {
+            // 当前品种数为0，使用最低开仓名义价值
+            actual_notional_per_symbol = min_notional;
+        } else {
+            // 计算最小总名义价值和所需保证金
+            let min_total_notional = current_symbol_count * min_notional;
+            let min_total_margin = min_total_notional / leverage;
+
+            if total_new_open_margin <= threshold {
+                // 保证金不足阈值，使用最低名义价值
+                actual_notional_per_symbol = min_notional;
+            } else {
+                if current_symbol_count < target_count {
+                    // 品种数不足目标，按剩余保证金分配
+                    let excess_margin = total_new_open_margin - threshold;
+                    let excess_notional = excess_margin * leverage;
+                    let per_symbol_excess = excess_notional / current_symbol_count;
+                    actual_notional_per_symbol = min_notional + per_symbol_excess;
+                } else {
+                    // 品种数已达目标，均分总名义价值
+                    actual_notional_per_symbol = total_available_notional / target_count;
+                }
+            }
+        }
+
+        // 单品种上限限制: min(actual_notional, MAX_SINGLE_NOTIONAL) 并确保不低于 min_notional
+        actual_notional_per_symbol = actual_notional_per_symbol
+            .min(max_single_notional)
+            .max(min_notional);
+
+        // 计算已用保证金和剩余保证金
+        if current_symbol_count > dec!(0) {
+            let used_margin = (actual_notional_per_symbol * current_symbol_count) / leverage;
+            remaining_margin = (total_new_open_margin - used_margin).max(dec!(0));
+        }
+    }
 
     // 是否满足最小名义价值阈值
-    let min_threshold = margin_config.minute_open.threshold_amount;
-    let meets_min_threshold = actual_notional_per_symbol >= min_threshold;
+    let meets_min_threshold = actual_notional_per_symbol >= threshold;
 
     MinuteOpenResult {
         effective_margin,
         total_available_margin,
         total_new_open_margin,
-        target_symbol_count,
+        target_symbol_count: target_count,
         max_single_notional,
         actual_notional_per_symbol,
         meets_min_threshold,
+        remaining_margin,
     }
 }
 
 /// 计算小时级单品种开仓名义价值
 ///
-/// 计算逻辑与分钟级类似，但使用小时级配置
+/// 完全对标 Python risk_engine.py 的 calculate_hour_open_notional 逻辑:
+///
+/// 核心配置:
+/// - 目标品种数: 10
+/// - 每品种加仓次数: 10
+/// - 总份数: 10 × 10 = 100
+/// - 最小名义价值: 5 USDT
+/// - 阈值: 500 USDT (对应保证金)
 pub fn calculate_hour_open_notional(
     account_pool: &AccountPool,
-    symbol_count: Decimal,
+    current_symbol_count: Decimal,
     leverage: Decimal,
 ) -> MinuteOpenResult {
     let margin_config = MarginPoolConfig::default();
@@ -119,34 +159,80 @@ pub fn calculate_hour_open_notional(
     // 小时级新开仓保证金上限 = 可用保证金 * 新开仓比例
     let total_new_open_margin = total_available_margin * margin_config.hour.new_open_ratio;
 
-    // 目标品种数量
-    let target_symbol_count = Decimal::from(margin_config.hour_open.target_symbol_count);
-
-    // 单品种名义价值上限
+    // 配置参数
+    let open_config = &margin_config.hour_open;
+    let min_notional = open_config.min_notional_per_symbol; // 5.0
+    let target_count = Decimal::from(open_config.target_symbol_count); // 10
+    let add_times = Decimal::from(open_config.add_times); // 10
+    let threshold_notional = open_config.threshold_notional; // 500.0
     let max_single_notional = MAX_SINGLE_NOTIONAL;
 
-    // 考虑杠杆后的可用名义价值
-    let total_available_notional = total_new_open_margin * leverage;
+    // 总目标份数 = 目标品种数 × 加仓次数
+    let total_target_shares = target_count * add_times; // 100
+
+    // 阈值保证金 = 阈值名义价值 / 杠杆
+    let threshold_margin = threshold_notional / leverage;
 
     // 实际每品种名义价值
-    let actual_notional_per_symbol = if symbol_count > dec!(0) {
-        (total_available_notional / symbol_count).min(max_single_notional)
+    let mut actual_notional_per_symbol: Decimal;
+    let mut remaining_margin: Decimal = dec!(0);
+
+    if total_new_open_margin <= dec!(0) {
+        // 新开仓保证金为0，返回最低名义价值
+        actual_notional_per_symbol = min_notional;
     } else {
-        dec!(0)
-    };
+        let total_available_notional = total_new_open_margin * leverage;
+
+        if current_symbol_count <= dec!(0) {
+            // 当前品种数为0，使用最低开仓名义价值
+            actual_notional_per_symbol = min_notional;
+        } else {
+            // 基础逻辑：先计算当前品种数的最小总名义价值
+            let min_total_notional = current_symbol_count * min_notional;
+            let _min_total_margin = min_total_notional / leverage;
+
+            if total_new_open_margin <= threshold_margin {
+                // 未达阈值：保持初始5刀/品种
+                actual_notional_per_symbol = min_notional;
+            } else {
+                // 达到阈值：按100份分配，或按当前品种数均分
+                if current_symbol_count < target_count {
+                    // 当前品种数<10：超额部分按当前品种数均分
+                    let excess_margin = total_new_open_margin - threshold_margin;
+                    let excess_notional = excess_margin * leverage;
+                    let per_symbol_excess = excess_notional / current_symbol_count;
+                    actual_notional_per_symbol = min_notional + per_symbol_excess;
+                } else {
+                    // 当前品种数≥10：按100份均分总名义价值
+                    actual_notional_per_symbol = total_available_notional / total_target_shares;
+                }
+            }
+        }
+
+        // 单品种上限限制: min(actual_notional, MAX_SINGLE_NOTIONAL) 并确保不低于 min_notional
+        actual_notional_per_symbol = actual_notional_per_symbol
+            .min(max_single_notional)
+            .max(min_notional);
+
+        // 计算已用保证金和剩余保证金
+        if current_symbol_count > dec!(0) {
+            let used_margin = (actual_notional_per_symbol * current_symbol_count) / leverage;
+            remaining_margin = (total_new_open_margin - used_margin).max(dec!(0));
+        }
+    }
 
     // 是否满足最小名义价值阈值
-    let min_threshold = margin_config.hour_open.threshold_notional;
-    let meets_min_threshold = actual_notional_per_symbol >= min_threshold;
+    let meets_min_threshold = actual_notional_per_symbol >= threshold_notional;
 
     MinuteOpenResult {
         effective_margin,
         total_available_margin,
         total_new_open_margin,
-        target_symbol_count,
+        target_symbol_count: target_count,
         max_single_notional,
         actual_notional_per_symbol,
         meets_min_threshold,
+        remaining_margin,
     }
 }
 
@@ -199,11 +285,11 @@ mod tests {
             dec!(0.10),       // 10% 部分熔断
         );
 
-        // 模拟 10 个交易品种，1x 杠杆
+        // 模拟 10 个交易品种，10x 杠杆
         let result = calculate_minute_open_notional(
             &pool,
             dec!(10),
-            dec!(1),
+            dec!(10),
         );
 
         // 有效保证金应该是 100000
@@ -215,10 +301,18 @@ mod tests {
         // 分钟级新开仓限额 = 80000 * 0.15 = 12000
         assert_eq!(result.total_new_open_margin, dec!(12000.0));
 
-        // 实际每品种名义价值 = min(12000 / 10, 5000) = min(1200, 5000) = 1200
-        assert_eq!(result.actual_notional_per_symbol, dec!(1200.0));
+        // 目标品种数 = 50
+        assert_eq!(result.target_symbol_count, dec!(50));
 
-        // 满足最小阈值 (1200 >= 250)
+        // 当前品种数 10 < 目标 50 且保证金 12000 > 阈值 250
+        // excess_margin = 12000 - 250 = 11750
+        // excess_notional = 11750 * 10 = 117500
+        // per_symbol_excess = 117500 / 10 = 11750
+        // actual_notional = 5 + 11750 = 11755
+        // 但限制在 MAX_SINGLE_NOTIONAL = 5000 以内
+        assert_eq!(result.actual_notional_per_symbol, dec!(5000.0));
+
+        // 满足最小阈值
         assert!(result.meets_min_threshold);
     }
 
@@ -236,11 +330,10 @@ mod tests {
         let result = calculate_minute_open_notional(
             &pool,
             dec!(10),
-            dec!(1),
+            dec!(10),
         );
 
-        // 有效保证金 = 90000 (未实现盈亏为0时 total_equity = 90000)
-        // 实际上 cumulative_profit = -10000, total_equity = 90000
+        // 有效保证金 = 90000
         assert_eq!(result.effective_margin, dec!(90000.0));
 
         // 可用保证金 = 90000 * 0.8 = 72000
@@ -249,8 +342,9 @@ mod tests {
         // 分钟级新开仓限额 = 72000 * 0.15 = 10800
         assert_eq!(result.total_new_open_margin, dec!(10800.0));
 
-        // 实际每品种名义价值 = min(10800 / 10, 5000) = 1080
-        assert_eq!(result.actual_notional_per_symbol, dec!(1080.0));
+        // 当前品种数 10 < 目标 50 且保证金 10800 > 阈值 250
+        // actual_notional 被限制在 5000
+        assert_eq!(result.actual_notional_per_symbol, dec!(5000.0));
     }
 
     #[test]
@@ -270,23 +364,55 @@ mod tests {
     }
 
     #[test]
-    fn test_max_single_notional_limit() {
+    fn test_minute_zero_symbols() {
         let pool = AccountPool::with_config(
             dec!(100000.0),
             dec!(0.20),
             dec!(0.10),
         );
 
-        // 只有 2 个品种，应该用 total_new_open_margin / 2 但不超过 5000
+        // 品种数为 0，应该返回最低名义价值 5
         let result = calculate_minute_open_notional(
             &pool,
-            dec!(2),
-            dec!(1),
+            dec!(0),
+            dec!(10),
         );
 
-        // total_new_open_margin = 80000 * 0.15 = 12000
-        // 12000 / 2 = 6000，但 max_single_notional = 5000
-        // 所以实际应该是 5000
-        assert_eq!(result.actual_notional_per_symbol, dec!(5000.0));
+        assert_eq!(result.actual_notional_per_symbol, dec!(5.0));
+    }
+
+    #[test]
+    fn test_hour_open_notional_basic() {
+        let pool = AccountPool::with_config(
+            dec!(100000.0),
+            dec!(0.20),
+            dec!(0.10),
+        );
+
+        // 10 个品种，10x 杠杆
+        let result = calculate_hour_open_notional(
+            &pool,
+            dec!(10),
+            dec!(10),
+        );
+
+        // 有效保证金 = 100000
+        assert_eq!(result.effective_margin, dec!(100000.0));
+
+        // 可用保证金 = 100000 * 0.8 = 80000
+        assert_eq!(result.total_available_margin, dec!(80000.0));
+
+        // 小时级新开仓限额 = 80000 * 0.3 = 24000
+        assert_eq!(result.total_new_open_margin, dec!(24000.0));
+
+        // 目标份数 = 10 * 10 = 100
+        // threshold_margin = 500 / 10 = 50
+        // total_new_open_margin 24000 > threshold_margin 50
+        // current_symbol_count 10 >= target_count 10
+        // actual_notional = (24000 * 10) / 100 = 2400
+        assert_eq!(result.actual_notional_per_symbol, dec!(2400.0));
+
+        // 满足最小阈值
+        assert!(result.meets_min_threshold);
     }
 }
