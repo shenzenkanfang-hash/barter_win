@@ -182,8 +182,8 @@ impl BinanceApiGateway {
 
         Ok(SymbolRulesData {
             symbol: symbol.to_string(),
-            price_precision: symbol_info.pricePrecision as u8,
-            quantity_precision: symbol_info.quantityPrecision as u8,
+            price_precision: symbol_info.pricePrecision.unwrap_or(8) as u8,
+            quantity_precision: symbol_info.quantityPrecision.unwrap_or(8) as u8,
             tick_size,
             min_qty,
             step_size,
@@ -280,8 +280,8 @@ impl BinanceApiGateway {
 
             rules.push(SymbolRulesData {
                 symbol: symbol.symbol.clone(),
-                price_precision: symbol.pricePrecision as u8,
-                quantity_precision: symbol.quantityPrecision as u8,
+                price_precision: symbol.pricePrecision.unwrap_or(8) as u8,
+                quantity_precision: symbol.quantityPrecision.unwrap_or(8) as u8,
                 tick_size,
                 min_qty,
                 step_size,
@@ -540,12 +540,16 @@ pub struct BinanceSymbol {
     pub status: String,
     #[serde(rename = "baseAsset")]
     pub baseAsset: String,
+    #[serde(rename = "baseAssetPrecision")]
+    pub baseAssetPrecision: Option<u32>,
     #[serde(rename = "quoteAsset")]
     pub quoteAsset: String,
+    #[serde(rename = "quoteAssetPrecision")]
+    pub quoteAssetPrecision: Option<u32>,
     #[serde(rename = "pricePrecision")]
-    pub pricePrecision: i32,
+    pub pricePrecision: Option<u32>,
     #[serde(rename = "quantityPrecision")]
-    pub quantityPrecision: i32,
+    pub quantityPrecision: Option<u32>,
     pub filters: Vec<BinanceFilter>,
 }
 
@@ -795,7 +799,7 @@ mod tests {
         let symbol: BinanceSymbol = serde_json::from_str(json).unwrap();
         assert_eq!(symbol.symbol, "BTCUSDT");
         assert_eq!(symbol.quoteAsset, "USDT");
-        assert_eq!(symbol.pricePrecision, 2);
+        assert_eq!(symbol.pricePrecision, Some(2));
         assert_eq!(symbol.filters.len(), 3);
     }
 
