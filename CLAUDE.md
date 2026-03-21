@@ -76,6 +76,62 @@ crates/
 ├── strategy/         # 策略层: 日线策略、分钟策略、Tick策略
 └── engine/           # 引擎层: 风控、订单执行、模式切换
 
+    # engine/src/ 子模块结构 (强制约束)
+    # 禁止在子模块外新增文件，所有新功能必须放入对应子模块
+    engine/src/
+    ├── core/           # 核心引擎
+    │   ├── engine.rs          # TradingEngine 主循环
+    │   ├── pipeline.rs        # 交易管道
+    │   ├── pipeline_form.rs   # 管道表单
+    │   └── strategy_pool.rs   # 策略池
+    │
+    ├── risk/           # 风控模块
+    │   ├── risk.rs            # 基础风控
+    │   ├── risk_rechecker.rs   # 复核风控
+    │   ├── minute_risk.rs     # 分钟级风控
+    │   ├── order_check.rs     # 订单检查
+    │   └── thresholds.rs       # 阈值配置
+    │
+    ├── order/          # 订单模块
+    │   ├── order.rs           # 订单执行器
+    │   ├── gateway.rs         # 网关抽象
+    │   └── mock_binance_gateway.rs  # Mock 交易所
+    │
+    ├── position/       # 持仓模块
+    │   ├── position_manager.rs    # 持仓管理
+    │   └── position_exclusion.rs  # 持仓排除
+    │
+    ├── persistence/    # 持久化模块
+    │   ├── sqlite_persistence.rs  # SQLite 存储
+    │   ├── memory_backup.rs       # 内存备份
+    │   ├── disaster_recovery.rs    # 灾备恢复
+    │   └── persistence.rs        # 持久化 trait
+    │
+    ├── channel/       # 通道模块
+    │   ├── channel.rs        # 通道判断
+    │   └── mode.rs          # 交易模式
+    │
+    ├── shared/         # 共享模块
+    │   ├── account_pool.rs       # 账户池
+    │   ├── margin_config.rs      # 保证金配置
+    │   ├── symbol_rules.rs        # 交易规则
+    │   ├── symbol_rules_fetcher.rs # 规则拉取
+    │   ├── market_status.rs      # 市场状态
+    │   ├── checkpoint.rs         # 检查点
+    │   ├── pnl_manager.rs       # PnL 管理
+    │   ├── telegram_notifier.rs  # Telegram 通知
+    │   ├── platform.rs          # 平台检测
+    │   ├── round_guard.rs       # 回合守卫
+    │   ├── check_table.rs       # 检查表
+    │   └── error.rs             # 错误类型
+    │
+    └── lib.rs          # 库入口
+
+    # 模块依赖方向 (必须遵循)
+    # shared → risk → order → position → persistence
+    # channel → shared
+    # core → risk, order, position, channel
+
 src/
 └── main.rs          # 程序入口，tracing 初始化
 
@@ -234,6 +290,16 @@ crates/
 ├── indicator/        # 指标层: EMA、RSI、Pine颜色、价格位置
 ├── strategy/         # 策略层: 日线策略、分钟策略、Tick策略
 └── engine/           # 引擎层: 风控、订单执行、模式切换
+
+    # engine/src/ 子模块结构 (强制约束)
+    engine/src/
+    ├── core/           # 核心引擎 (4 文件)
+    ├── risk/           # 风控 (5 文件)
+    ├── order/          # 订单 (3 文件)
+    ├── position/       # 持仓 (2 文件)
+    ├── persistence/    # 持久化 (4 文件)
+    ├── channel/       # 通道 (2 文件)
+    └── shared/        # 共享 (13 文件)
 
 src/
 └── main.rs          # 程序入口，tracing 初始化
