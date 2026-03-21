@@ -27,11 +27,19 @@ pub struct SymbolRulesFetcher {
 }
 
 impl SymbolRulesFetcher {
-    /// 创建新的获取器
+    /// 创建新的获取器（现货 API）
     pub fn new() -> Self {
         Self {
             client: Client::new(),
             api_base: "https://api.binance.com".to_string(),
+        }
+    }
+
+    /// 创建 USDT 合约 API 获取器
+    pub fn new_futures() -> Self {
+        Self {
+            client: Client::new(),
+            api_base: "https://fapi.binance.com".to_string(),
         }
     }
 
@@ -291,6 +299,70 @@ impl SymbolRulesFetcher {
             margin_ratio: pos.margin_ratio,
         })
     }
+
+    /// 从币安 USDT 合约 API 获取杠杆档位
+    ///
+    /// # 参数
+    /// * `symbol` - 可选，交易对名称，如 "BTCUSDT"
+    ///
+    /// # 返回
+    /// * `Vec<LeverageBracket>` - 杠杆档位列表
+    pub async fn fetch_leverage_brackets(&self, symbol: Option<&str>) -> Result<Vec<LeverageBracket>, EngineError> {
+        let url = format!("{}/fapi/v1/leverageBracket", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {}",
+                resp.status()
+            )));
+        }
+
+        let brackets: Vec<BinanceLeverageBracket> = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        let result = brackets
+            .into_iter()
+            .map(|b| LeverageBracket {
+                symbol: b.symbol,
+                bracket: b.bracket,
+                max_leverage: b.max_leverage,
+                min_notional: b.min_notional,
+                maintenance_margin_ratio: b.maintenance_margin_ratio,
+            })
+            .filter(|b| {
+                if let Some(s) = symbol {
+                    b.symbol == s
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    /// 从币安 USDT 合约 API 获取最大可用杠杆
+    ///
+    /// # 参数
+    /// * `symbol` - 交易对名称，如 "BTCUSDT"
+    ///
+    /// # 返回
+    /// * `i32` - 最大可用杠杆倍数
+    pub async fn get_max_leverage(&self, symbol: &str) -> Result<i32, EngineError> {
+        let brackets = self.fetch_leverage_brackets(Some(symbol)).await?;
+        brackets
+            .first()
+            .map(|b| b.max_leverage)
+            .ok_or_else(|| EngineError::SymbolNotFound(symbol.to_string()))
+    }
 }
 
 impl Default for SymbolRulesFetcher {
@@ -416,6 +488,34 @@ pub struct PositionRisk {
     pub isolated: bool,
     /// 保证金率
     pub margin_ratio: String,
+}
+
+/// 币安杠杆档位信息
+#[derive(Debug, Clone, Deserialize)]
+pub struct BinanceLeverageBracket {
+    pub symbol: String,
+    pub bracket: i32,
+    #[serde(rename = "maxLeverage")]
+    pub max_leverage: i32,
+    #[serde(rename = "minNotional")]
+    pub min_notional: String,
+    #[serde(rename = "maintMarginRatio")]
+    pub maintenance_margin_ratio: String,
+}
+
+/// 杠杆档位信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeverageBracket {
+    /// 交易对
+    pub symbol: String,
+    /// 档位
+    pub bracket: i32,
+    /// 最大杠杆
+    pub max_leverage: i32,
+    /// 最小名义价值
+    pub min_notional: String,
+    /// 维持保证金率
+    pub maintenance_margin_ratio: String,
 }
 
 // ============================================================================
@@ -579,5 +679,41 @@ mod tests {
 
         assert_eq!(pos.symbol, "BTCUSDT");
         assert_eq!(pos.leverage, 10);
+    }
+
+    #[test]
+    fn test_new_futures() {
+        let fetcher = SymbolRulesFetcher::new_futures();
+        assert_eq!(fetcher.api_base, "https://fapi.binance.com");
+    }
+
+    #[test]
+    fn test_leverage_bracket_deserialization() {
+        let json = r#"{
+            "symbol": "BTCUSDT",
+            "bracket": 1,
+            "maxLeverage": 20,
+            "minNotional": "0",
+            "maintMarginRatio": "0.005"
+        }"#;
+
+        let bracket: BinanceLeverageBracket = serde_json::from_str(json).unwrap();
+        assert_eq!(bracket.symbol, "BTCUSDT");
+        assert_eq!(bracket.bracket, 1);
+        assert_eq!(bracket.max_leverage, 20);
+    }
+
+    #[test]
+    fn test_leverage_bracket_struct() {
+        let bracket = LeverageBracket {
+            symbol: "BTCUSDT".to_string(),
+            bracket: 1,
+            max_leverage: 20,
+            min_notional: "0".to_string(),
+            maintenance_margin_ratio: "0.005".to_string(),
+        };
+
+        assert_eq!(bracket.symbol, "BTCUSDT");
+        assert_eq!(bracket.max_leverage, 20);
     }
 }
