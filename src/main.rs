@@ -7,12 +7,18 @@
 //! 4. 订阅 Depth 订单簿 WS (仅 BTC 维护连接)
 
 use b_data_source::{BinanceApiGateway, Kline1mStream, Kline1dStream, DepthStream, Paths};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)  // 不显示 target
+                .with_level(true)    // 显示日志级别
+                .with_thread_ids(false)  // 不显示线程ID
+        )
+        .with(LevelFilter::INFO)  // 只显示 INFO 及以上
         .init();
 
     tracing::info!("Trading system starting");
