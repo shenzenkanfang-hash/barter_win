@@ -3,8 +3,9 @@
 //! 初始化流程:
 //! 1. 从交易所拉取交易规则
 //! 2. 订阅 1m K线 WS (分片: 50个/批, 500ms间隔)
+//! 3. 订阅 1d K线 WS (分片: 50个/批, 500ms间隔)
 
-use b_data_source::{BinanceApiGateway, Kline1mStream, Paths};
+use b_data_source::{BinanceApiGateway, Kline1mStream, Kline1dStream, Paths};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -32,20 +33,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. 启动 1m K线 WS 订阅 (分片: 50个/批, 500ms间隔)
     tracing::info!("Starting 1m KLine WS subscription...");
-    let mut kline_stream = Kline1mStream::new(trading_symbols).await?;
+    let mut kline_1m_stream = Kline1mStream::new(trading_symbols.clone()).await?;
     tracing::info!("1m KLine WS subscription started");
 
-    // 主循环
-    let mut count = 0;
+    // 短暂等待后启动 1d
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+    // 3. 启动 1d K线 WS 订阅 (分片: 50个/批, 500ms间隔)
+    tracing::info!("Starting 1d KLine WS subscription...");
+    let mut kline_1d_stream = Kline1dStream::new(trading_symbols).await?;
+    tracing::info!("1d KLine WS subscription started");
+
+    // 主循环：交替处理两个流
+    let mut count_1m = 0;
+    let mut count_1d = 0;
     loop {
-        if let Some(_msg) = kline_stream.next_message().await {
-            count += 1;
-            if count % 1000 == 0 {
-                tracing::info!("Processed {} kline messages", count);
+        tokio::select! {
+            msg_1m = kline_1m_stream.next_message() => {
+                if let Some(_msg) = msg_1m {
+                    count_1m += 1;
+                    if count_1m % 1000 == 0 {
+                        tracing::info!("1m: Processed {} kline messages", count_1m);
+                    }
+                } else {
+                    tracing::warn!("1m Stream ended");
+                    break;
+                }
             }
-        } else {
-            tracing::warn!("Stream ended");
-            break;
+            msg_1d = kline_1d_stream.next_message() => {
+                if let Some(_msg) = msg_1d {
+                    count_1d += 1;
+                    if count_1d % 1000 == 0 {
+                        tracing::info!("1d: Processed {} kline messages", count_1d);
+                    }
+                } else {
+                    tracing::warn!("1d Stream ended");
+                    break;
+                }
+            }
         }
     }
 

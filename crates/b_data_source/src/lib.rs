@@ -34,6 +34,7 @@ pub use models::{KLine, Period, Tick};
 
 // Re-exports - Data processing
 pub use kline_1m::{KLineSynthesizer, KlinePersistence, Kline1mStream};
+pub use kline_1d::Kline1dStream;
 pub use symbol_rules::SymbolRegistry;
 pub use order_books::OrderBook;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
