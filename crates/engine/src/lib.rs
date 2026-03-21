@@ -14,6 +14,8 @@ pub mod market_status;
 pub mod memory_backup;
 pub mod mock_binance_gateway;
 pub mod mode;
+pub mod margin_config;
+pub mod minute_risk;
 pub mod order;
 pub mod order_check;
 pub mod persistence;
@@ -32,7 +34,8 @@ pub mod symbol_rules_fetcher;
 pub mod telegram_notifier;
 pub mod thresholds;
 
-pub use account_pool::{AccountInfo, AccountPool, CircuitBreakerState};
+pub use account_pool::{AccountInfo, AccountMargin, AccountPool, CircuitBreakerState};
+pub use margin_config::{GlobalMarginConfig, MarginPoolConfig, MinuteOpenConfig, StrategyLevel};
 pub use checkpoint::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
 pub use channel::{ChannelCheckpointCallback, ChannelType, VolatilityChannel};
 pub use check_table::{CheckEntry, CheckTable};
@@ -79,3 +82,4 @@ pub use disaster_recovery::{
 };
 pub use telegram_notifier::{TelegramConfig, TelegramNotifier};
 pub use thresholds::ThresholdConstants;
+pub use minute_risk::{calculate_hour_open_notional, calculate_minute_open_notional, calculate_open_qty_from_notional, MinuteOpenResult};

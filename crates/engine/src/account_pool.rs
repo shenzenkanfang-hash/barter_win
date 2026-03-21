@@ -2,6 +2,9 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
+use chrono::Utc;
+
+use crate::margin_config::{GlobalMarginConfig, MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN};
 
 /// 熔断状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,7 +22,7 @@ pub enum CircuitBreakerState {
 pub struct AccountInfo {
     /// 账户ID
     pub account_id: String,
-    /// 总权益
+    /// 总权益 (totalMarginBalance)
     pub total_equity: Decimal,
     /// 可用资金
     pub available: Decimal,
@@ -29,8 +32,33 @@ pub struct AccountInfo {
     pub frozen: Decimal,
     /// 累计盈利
     pub cumulative_profit: Decimal,
+    /// 未实现盈亏 (totalUnrealizedProfit)
+    pub unrealized_pnl: Decimal,
     /// 熔断状态
     pub circuit_state: CircuitBreakerState,
+}
+
+/// 账户保证金信息 (用于风控计算)
+#[derive(Debug, Clone)]
+pub struct AccountMargin {
+    /// 账户总保证金
+    pub total_margin_balance: Decimal,
+    /// 未实现盈亏
+    pub unrealized_pnl: Decimal,
+    /// 有效保证金 = max(total_margin + unrealized_pnl, MIN_EFFECTIVE_MARGIN)
+    pub effective_margin: Decimal,
+    /// 可用保证金 = effective_margin * max_usage_ratio
+    pub total_available_margin: Decimal,
+    /// 已用保证金
+    pub total_used_margin: Decimal,
+    /// 保留保证金 = effective_margin * reserve_ratio
+    pub reserve_margin: Decimal,
+    /// 全局新开仓上限
+    pub global_new_open_ceiling: Decimal,
+    /// 全局翻倍仓上限
+    pub global_double_open_ceiling: Decimal,
+    /// 更新时间戳
+    pub update_time: i64,
 }
 
 impl Default for AccountInfo {
@@ -42,6 +70,7 @@ impl Default for AccountInfo {
             margin_used: dec!(0),
             frozen: dec!(0),
             cumulative_profit: dec!(0),
+            unrealized_pnl: dec!(0),
             circuit_state: CircuitBreakerState::Normal,
         }
     }
@@ -70,6 +99,12 @@ pub struct AccountPool {
     circuit_cooldown_secs: i64,
     /// 最后熔断时间 (RwLock 保护)
     last_circuit_ts: RwLock<i64>,
+    /// 保证金池配置
+    margin_config: MarginPoolConfig,
+    /// 总已用保证金 (RwLock 保护) - 用于全局上限计算
+    total_used_margin: RwLock<Decimal>,
+    /// Redis连续失败计数器 (用于熔断)
+    redis_failure_count: RwLock<u32>,
 }
 
 impl Default for AccountPool {
@@ -90,6 +125,7 @@ impl AccountPool {
                 margin_used: dec!(0),
                 frozen: dec!(0),
                 cumulative_profit: dec!(0),
+                unrealized_pnl: dec!(0),
                 circuit_state: CircuitBreakerState::Normal,
             }),
             initial_balance: RwLock::new(initial), // 默认 10 万
@@ -98,6 +134,9 @@ impl AccountPool {
             recovery_threshold: dec!(0.05),    // 5% 盈利恢复
             circuit_cooldown_secs: 300,        // 5 分钟冷却
             last_circuit_ts: RwLock::new(0),
+            margin_config: MarginPoolConfig::default(),
+            total_used_margin: RwLock::new(dec!(0)),
+            redis_failure_count: RwLock::new(0),
         }
     }
 
@@ -115,6 +154,7 @@ impl AccountPool {
                 margin_used: dec!(0),
                 frozen: dec!(0),
                 cumulative_profit: dec!(0),
+                unrealized_pnl: dec!(0),
                 circuit_state: CircuitBreakerState::Normal,
             }),
             initial_balance: RwLock::new(initial_balance),
@@ -123,6 +163,9 @@ impl AccountPool {
             recovery_threshold: circuit_threshold / dec!(4),
             circuit_cooldown_secs: 300,
             last_circuit_ts: RwLock::new(0),
+            margin_config: MarginPoolConfig::default(),
+            total_used_margin: RwLock::new(dec!(0)),
+            redis_failure_count: RwLock::new(0),
         }
     }
 
@@ -265,6 +308,55 @@ impl AccountPool {
         self.account.read().cumulative_profit
     }
 
+    /// 获取账户保证金信息 (用于风控计算) (读锁)
+    ///
+    /// 计算逻辑:
+    /// - effective_margin = max(total_equity + unrealized_pnl, MIN_EFFECTIVE_MARGIN)
+    /// - total_available_margin = effective_margin * max_usage_ratio
+    /// - global_new_open_ceiling = total_available_margin * new_open_ratio (分钟级)
+    /// - global_double_open_ceiling = total_available_margin * double_open_ratio (分钟级)
+    pub fn get_account_margin(&self, level: StrategyLevel) -> AccountMargin {
+        let account = self.account.read();
+        let config = &self.margin_config;
+
+        let total_margin_balance = account.total_equity;
+        let unrealized_pnl = account.unrealized_pnl;
+
+        // 有效保证金 = max(总保证金 + 未实现盈亏, 最低有效保证金)
+        let effective_margin = (total_margin_balance + unrealized_pnl)
+            .max(MIN_EFFECTIVE_MARGIN);
+
+        // 可用保证金 = 有效保证金 * 最大使用比例
+        let total_available_margin = effective_margin * config.global.max_usage_ratio;
+
+        // 已用保证金
+        let total_used_margin = *self.total_used_margin.read();
+
+        // 保留保证金 = 有效保证金 * 保留比例
+        let reserve_margin = effective_margin * config.global.reserve_ratio;
+
+        // 策略级别配置
+        let strategy_config = config.strategy_config(level);
+
+        // 全局新开仓上限 = 可用保证金 * 新开仓比例
+        let global_new_open_ceiling = total_available_margin * strategy_config.new_open_ratio;
+
+        // 全局翻倍仓上限 = 可用保证金 * 翻倍仓比例
+        let global_double_open_ceiling = total_available_margin * strategy_config.double_open_ratio;
+
+        AccountMargin {
+            total_margin_balance,
+            unrealized_pnl,
+            effective_margin,
+            total_available_margin,
+            total_used_margin,
+            reserve_margin,
+            global_new_open_ceiling,
+            global_double_open_ceiling,
+            update_time: chrono::Utc::now().timestamp(),
+        }
+    }
+
     /// 获取亏损比例 (读锁)
     pub fn loss_ratio(&self) -> Decimal {
         let account = self.account.read();
@@ -278,7 +370,7 @@ impl AccountPool {
 
     /// 重置账户 (写锁)
     pub fn reset(&self) {
-        let mut account = self.account.write();
+        let account = self.account.write();
         let initial_balance = *self.initial_balance.read();
         *account = AccountInfo {
             account_id: "default".to_string(),
@@ -287,9 +379,11 @@ impl AccountPool {
             margin_used: dec!(0),
             frozen: dec!(0),
             cumulative_profit: dec!(0),
+            unrealized_pnl: dec!(0),
             circuit_state: CircuitBreakerState::Normal,
         };
         drop(account);
+        *self.total_used_margin.write() = dec!(0);
         // last_circuit_ts 不是 AccountInfo 的一部分
         // 如果需要原子更新，需要在锁外处理
     }
