@@ -162,13 +162,17 @@ impl MultiStreamWriter {
         Ok(())
     }
 
-    /// 获取或创建 trade 文件
+    /// 获取或创建 trade 文件 (追加模式，适合高频写入)
     fn get_trade_file(&mut self, symbol: &str) -> std::io::Result<&mut File> {
         let symbol_lower = symbol.to_lowercase();
         if !self.trade_files.contains_key(&symbol_lower) {
             let path = format!("{}/trades/{}.csv", self.base_dir, symbol_lower);
             self.ensure_dir(std::path::Path::new(&path))?;
-            let file = File::create(&path)?;
+            // 追加模式，不覆盖已有数据
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
             self.trade_files.insert(symbol_lower, file);
         }
         Ok(self.trade_files.get_mut(&symbol.to_lowercase()).unwrap())
