@@ -16,7 +16,8 @@ use serde::Serialize;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -26,9 +27,9 @@ use tracing_subscriber::fmt::format::FmtSpan;
 #[command(name = "trading-system")]
 #[command(about = "量化交易系统 - 实时监控")]
 struct Args {
-    /// 交易对符号，如 BTCUSDT
-    #[arg(short, long, default_value = "BTCUSDT")]
-    symbol: String,
+    /// 交易对符号列表，如 BTCUSDT ETHUSDT (空格分隔)
+    #[arg(short, long, default_value = "BTCUSDT", value_delimiter = ' ')]
+    symbols: Vec<String>,
 
     /// 日志输出目录
     #[arg(short, long, default_value = "logs")]
@@ -330,6 +331,38 @@ impl TradeHandler {
 // Binance Trade 原始数据
 // ============================================================================
 
+/// 币安组合Stream消息格式
+#[derive(serde::Deserialize)]
+struct CombinedStreamMsg {
+    #[serde(rename = "stream")]
+    stream: String,
+    #[serde(rename = "data")]
+    data: TradeRaw,
+}
+
+/// 多交易对处理器
+struct MultiTradeHandler {
+    handlers: HashMap<String, TradeHandler>,
+    file_logger: FileLogger,
+}
+
+impl MultiTradeHandler {
+    fn new(symbols: Vec<String>, log_dir: String, verbose_trades: bool) -> std::io::Result<Self> {
+        let mut handlers = HashMap::new();
+        for symbol in symbols {
+            handlers.insert(symbol.to_lowercase(), TradeHandler::new(symbol.clone(), log_dir.clone(), verbose_trades)?);
+        }
+        let file_logger = FileLogger::new(&log_dir)?;
+        Ok(Self { handlers, file_logger })
+    }
+
+    fn handle_trade(&mut self, symbol: &str, price_str: &str, qty_str: &str, is_maker: bool, ts: i64) {
+        if let Some(handler) = self.handlers.get_mut(symbol) {
+            handler.handle_trade(price_str, qty_str, is_maker, ts);
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct TradeRaw {
     #[serde(rename = "t")]
@@ -353,7 +386,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // 初始化日志
-    let log_file = format!("{}/monitor_{}.log", args.log_dir, args.symbol);
+    let log_file = format!("{}/monitor_all.log", args.log_dir);
     std::fs::create_dir_all(&args.log_dir)?;
 
     let file_appender = std::fs::OpenOptions::new()
@@ -368,30 +401,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi(false)
         .init();
 
+    let symbols_str = args.symbols.join(", ");
+
     info!("===========================================");
     info!("  量化交易系统 - 实时监控");
     info!("===========================================");
-    info!("  符号: {}", args.symbol);
+    info!("  交易对: {}", symbols_str);
     info!("  日志目录: {}", args.log_dir);
     info!("  详细交易: {}", if args.verbose_trades { "是" } else { "否" });
     info!("===========================================\n");
 
-    // 创建处理器
-    let mut handler = TradeHandler::new(
-        args.symbol.clone(),
+    // 创建多交易对处理器
+    let mut multi_handler = MultiTradeHandler::new(
+        args.symbols.clone(),
         args.log_dir.clone(),
         args.verbose_trades,
     )?;
 
-    // WebSocket URL
+    // 构建组合 WebSocket URL: btcusdt@trade/ethusdt@trade/...
+    let streams: Vec<String> = args.symbols
+        .iter()
+        .map(|s| format!("{}@trade", s.to_lowercase()))
+        .collect();
     let url = format!(
-        "wss://stream.binance.com:9443/ws/{}@trade",
-        args.symbol.to_lowercase()
+        "wss://stream.binance.com:9443/stream?streams={}",
+        streams.join("/")
     );
 
     info!("连接 WebSocket: {}", url);
     println!("\n========================================");
-    println!("  {} 实时监控", args.symbol);
+    println!("  {} 实时监控", symbols_str);
     println!("  WebSocket: {}", url);
     println!("========================================\n");
 
@@ -403,12 +442,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(msg) = reader.next().await {
         let msg = msg?;
         if let Message::Text(text) = msg {
-            if let Ok(trade) = serde_json::from_str::<TradeRaw>(&text) {
-                handler.handle_trade(
-                    &trade.price,
-                    &trade.quantity,
-                    trade.is_buyer_maker,
-                    trade.trade_time,
+            if let Ok(msg) = serde_json::from_str::<CombinedStreamMsg>(&text) {
+                // 从stream名提取symbol，如 "btcusdt@trade" -> "btcusdt"
+                let symbol = msg.stream.replace("@trade", "");
+                multi_handler.handle_trade(
+                    &symbol,
+                    &msg.data.price,
+                    &msg.data.quantity,
+                    msg.data.is_buyer_maker,
+                    msg.data.trade_time,
                 );
             }
         }
