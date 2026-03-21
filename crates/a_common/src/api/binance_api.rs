@@ -225,16 +225,17 @@ impl BinanceApiGateway {
             .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
 
         if !resp.status().is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
             return Err(EngineError::Other(format!(
-                "API 返回错误状态: {}",
-                resp.status()
+                "API 返回错误状态: {} - Body: {}",
+                resp.status(),
+                &body_text[..body_text.len().min(500)]
             )));
         }
 
-        let info: BinanceExchangeInfo = resp
-            .json()
-            .await
-            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+        let body_text = resp.text().await.map_err(|e| EngineError::Other(format!("读取响应体失败: {}", e)))?;
+        let info: BinanceExchangeInfo = serde_json::from_str(&body_text)
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {} - Response: {}", e, &body_text[..body_text.len().min(500)])))?;
 
         let mut rules = Vec::new();
         for symbol in info
