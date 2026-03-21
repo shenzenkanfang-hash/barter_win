@@ -40,3 +40,6 @@ pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 
 // Re-exports - Futures data
 pub use futures::{FuturesAccount, FuturesAccountData, FuturesPosition, FuturesPositionData};
+
+#[cfg(test)]
+pub mod tests;
