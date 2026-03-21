@@ -206,14 +206,12 @@ impl TradeHandler {
         // 更新计数
         self.trade_count += 1;
 
-        // 每100笔交易输出一次状态（方便定位问题）
-        if self.trade_count % 100 == 0 {
-            info!(
-                "[{:02}:{:02}:{:02}] trade#{} price={} vol_1m={:.4} vol_15m={:.4} is_high={}",
-                timestamp.hour(), timestamp.minute(), timestamp.second(),
-                self.trade_count, price, vol_stats.vol_1m, vol_stats.vol_15m, vol_stats.is_high_volatility
-            );
-        }
+        // 每笔交易输出状态（方便定位问题）
+        info!(
+            "[{:02}:{:02}:{:02}] trade#{} price={} qty={} vol_1m={:.4} vol_15m={:.4} is_high={}",
+            timestamp.hour(), timestamp.minute(), timestamp.second(),
+            self.trade_count, price, qty, vol_stats.vol_1m, vol_stats.vol_15m, vol_stats.is_high_volatility
+        );
 
         // 高波动信号检测（先判断，因为会影响记录逻辑）
         let is_high = vol_stats.is_high_volatility;
