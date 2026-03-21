@@ -23,6 +23,9 @@ pub enum EngineError {
     #[error("网络错误: {0}")]
     Network(String),
 
+    #[error("内存备份错误: {0}")]
+    MemoryBackup(String),
+
     #[error("其他错误: {0}")]
     Other(String),
 }

@@ -3,6 +3,7 @@ use crate::check_table::CheckTable;
 use crate::error::EngineError;
 use crate::gateway::ExchangeGateway;
 use crate::market_status::{MarketStatus, MarketStatusDetector};
+use crate::memory_backup::MemoryBackup;
 use crate::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
 use crate::mode::ModeSwitcher;
 use crate::order::OrderExecutor;
@@ -87,6 +88,9 @@ pub struct TradingEngine {
 
     // 持久化服务
     persistence: PersistenceService,
+
+    // 内存备份管理器
+    memory_backup: Option<Arc<MemoryBackup>>,
 
     // 一轮编码守卫
     round_guard: RoundGuard,
@@ -179,6 +183,7 @@ impl TradingEngine {
             account_pool,
             strategy_pool,
             persistence: PersistenceService::new(),
+            memory_backup: None,
             round_guard: RoundGuard::new(),
             check_table: CheckTable::new(),
             thresholds: ThresholdConstants::production(),
@@ -415,6 +420,42 @@ impl TradingEngine {
     /// 获取网关
     pub fn get_gateway(&self) -> &Arc<MockBinanceGateway> {
         &self.gateway
+    }
+
+    /// 启用内存备份系统
+    ///
+    /// 在后台启动内存备份任务，定期将 /dev/shm/backup/ 同步到磁盘。
+    ///
+    /// # 参数
+    /// * `tmpfs_dir` - 内存文件系统目录 (如 "/dev/shm/backup/")
+    /// * `disk_dir` - 磁盘备份目录 (如 "data/backup/")
+    /// * `sync_interval_secs` - 同步间隔（秒），默认30秒
+    pub fn enable_memory_backup(
+        &mut self,
+        tmpfs_dir: &str,
+        disk_dir: &str,
+        sync_interval_secs: u64,
+    ) {
+        let backup = Arc::new(MemoryBackup::new(tmpfs_dir, disk_dir, sync_interval_secs));
+        let backup_clone = backup.clone();
+
+        // 启动后台同步任务
+        tokio::spawn(async move {
+            backup_clone.start_sync_task().await;
+        });
+
+        self.memory_backup = Some(backup);
+        info!(
+            tmpfs_dir = %tmpfs_dir,
+            disk_dir = %disk_dir,
+            sync_interval_secs = %sync_interval_secs,
+            "内存备份系统已启用"
+        );
+    }
+
+    /// 获取内存备份管理器
+    pub fn get_memory_backup(&self) -> Option<&Arc<MemoryBackup>> {
+        self.memory_backup.as_ref()
     }
 
     /// 启动交易引擎

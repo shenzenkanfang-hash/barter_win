@@ -10,6 +10,7 @@ pub mod engine;
 pub mod error;
 pub mod gateway;
 pub mod market_status;
+pub mod memory_backup;
 pub mod mock_binance_gateway;
 pub mod mode;
 pub mod order;
@@ -37,6 +38,12 @@ pub use engine::TradingEngine;
 pub use error::EngineError;
 pub use gateway::ExchangeGateway;
 pub use market_status::{MarketStatus, MarketStatusDetector, PinIntensity, PinDetection};
+pub use memory_backup::{
+    AccountSnapshot as MemoryAccountSnapshot, DepthData, DepthEntry, IndicatorsData, KxianCache,
+    KxianData, KlineEntry, MemoryBackup, OrderSnapshot as MemoryOrderSnapshot,
+    PositionSnapshot as MemoryPositionSnapshot, RealtimeTradeEntry, RealtimeTradesData,
+    SymbolRulesData, TradeSnapshot as MemoryTradeSnapshot,
+};
 pub use mock_binance_gateway::{
     ChannelState, GatewayChannelType as MockChannelType, ExitSignal, MockAccount, MockBinanceGateway,
     MockOrder, MockPosition, MockTrade, OrderResult, OrderStatus, PineColorState, RejectReason,
