@@ -289,4 +289,83 @@ src/
 | Phase 5: Engine | 完成 | RiskPreChecker, OrderExecutor, ModeSwitcher |
 | Phase 6: Integration | 进行中 | TradingEngine, main.rs, 类型转换 |
 
+================================================================================
+服务器部署流程（长期测试环境）
+================================================================================
+
+**服务器**: quant@172.18.57.21 (Ubuntu 24.04, 1.6GB RAM + 2GB Swap)
+
+### 部署步骤
+
+**1. Windows 本地打包上传**
+```bash
+# 排除 .git 和 target 目录（减少体积）
+tar --exclude='.git' --exclude='target' --exclude='*.exe' --exclude='*.pdb' -czvf barter-rs.tar.gz .
+
+# 上传到服务器
+scp barter-rs.tar.gz quant@172.18.57.21:/home/quant/
+```
+
+**2. 服务器解压编译（单线程省内存）**
+```bash
+ssh quant@172.18.57.21
+
+# 解压
+tar -xzvf barter-rs.tar.gz
+
+# 编译（单线程 + 单codegen单元，最省内存）
+source ~/.cargo/env
+export RUSTFLAGS='-C codegen-units=1'
+cargo build --release -j 1
+```
+
+**3. 运行程序**
+```bash
+# 查看编译产物
+ls target/release/
+
+# 运行 data-printer 测试
+./target/release/data-printer
+
+# 或其他二进制
+./target/release/你的程序名
+```
+
+### 服务器内存优化（如需）
+```bash
+# 关闭不需要的服务释放内存
+sudo systemctl stop cloudmonitor packagekit tuned unattended-upgrades docker
+
+# 如服务器无swap，先创建（1.6GB RAM必须）
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+```
+
+### 更新部署（代码修改后）
+```bash
+# 1. 本地重新打包
+tar --exclude='.git' --exclude='target' -czvf barter-rs.tar.gz .
+
+# 2. 上传
+scp barter-rs.tar.gz quant@172.18.57.21:/home/quant/
+
+# 3. 服务器解压覆盖
+ssh quant@172.18.57.21
+tar -xzvf barter-rs.tar.gz
+
+# 4. 增量编译（比首次快很多）
+source ~/.cargo/env
+cargo build --release -j 1
+```
+
+### 首次部署检查清单
+- [ ] 服务器创建 swap (2GB)
+- [ ] 安装 Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- [ ] 安装编译依赖: `sudo apt install build-essential pkg-config libssl-dev git`
+- [ ] 打包上传代码
+- [ ] 执行编译
+- [ ] 验证运行
+
 ---
