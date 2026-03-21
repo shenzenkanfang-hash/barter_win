@@ -1,26 +1,30 @@
 #![forbid(unsafe_code)]
 
 pub mod api;
-pub mod binance_ws;
-pub mod data_feeder;
-pub mod error;
+pub mod ws;
 pub mod kline;
-pub mod kline_persistence;
-pub mod orderbook;
-pub mod recovery;
-pub mod symbol_registry;
-pub mod types;
-pub mod volatility;
-pub mod websocket;
+pub mod registry;
 
-pub use binance_ws::{BinanceTradeStream, BinanceWsConnector};
-pub use data_feeder::{DataFeeder, DataMessage, MarketDataFeeder};
-pub use error::MarketError;
-pub use kline::KLineSynthesizer;
-pub use kline_persistence::KlinePersistence;
+pub mod error;
+pub mod orderbook;
+pub mod volatility;
+pub mod recovery;
+pub mod types;
+
+pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData};
+pub use api::{BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket};
+pub use api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
+
+pub use ws::{BinanceTradeStream, BinanceWsConnector};
+pub use ws::{MarketConnector, MarketStream, MockMarketConnector, MockMarketStream};
+pub use ws::{DataFeeder, DataMessage, MarketDataFeeder};
+
+pub use kline::{KLineSynthesizer, KlinePersistence};
+
+pub use registry::SymbolRegistry;
+
 pub use orderbook::OrderBook;
-pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
-pub use symbol_registry::SymbolRegistry;
-pub use types::{KLine, Period, Tick, VolatilityStats};
 pub use volatility::VolatilityDetector;
-pub use websocket::{MarketConnector, MarketStream, MockMarketConnector, MockMarketStream};
+pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
+pub use types::{KLine, Period, Tick, VolatilityStats};
+pub use error::MarketError;

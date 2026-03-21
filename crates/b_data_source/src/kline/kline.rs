@@ -1,4 +1,4 @@
-use crate::types::{KLine, Period, Tick};
+use super::super::types::{KLine, Period, Tick};
 use chrono::{DateTime, Utc};
 
 /// K线合成器

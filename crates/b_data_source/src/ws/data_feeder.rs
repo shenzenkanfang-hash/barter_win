@@ -9,13 +9,13 @@
 //! # 分片订阅
 //! - 每批 50 streams, 间隔 500ms
 
-use crate::binance_ws::BinanceWsConnector;
-use crate::error::MarketError;
-use crate::kline::KLineSynthesizer;
-use crate::orderbook::OrderBook;
-use crate::volatility::VolatilityDetector;
-use crate::symbol_registry::SymbolRegistry;
-use crate::types::{KLine, Period, Tick};
+use super::super::ws::binance_ws::BinanceWsConnector;
+use super::super::error::MarketError;
+use super::super::kline::KLineSynthesizer;
+use super::super::orderbook::OrderBook;
+use super::super::volatility::VolatilityDetector;
+use super::super::registry::symbol_registry::SymbolRegistry;
+use super::super::types::{KLine, Period, Tick};
 use fnv::FnvHashMap;
 use fnv::FnvHashSet;
 use std::sync::Arc;

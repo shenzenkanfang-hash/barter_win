@@ -2,8 +2,8 @@
 //!
 //! 连接地址: wss://stream.binancefuture.com/ws/
 
-use crate::error::MarketError;
-use crate::types::Tick;
+use super::super::error::MarketError;
+use super::super::types::Tick;
 use chrono::{TimeZone, Utc};
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
