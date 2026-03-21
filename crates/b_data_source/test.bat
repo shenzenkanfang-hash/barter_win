@@ -9,49 +9,49 @@ cd /d "D:\Rust项目\barter-rs-main"
 echo ========================================
 echo 运行 b_data_source 所有测试
 echo ========================================
-%CARGO% test -p b_data_source --lib
+%CARGO% test --package b_data_source --lib
 if errorlevel 1 goto :fail
 
 echo.
 echo ========================================
 echo 运行 futures 测试
 echo ========================================
-%CARGO% test -p b_data_source --lib tests::test_futures
+%CARGO% test --package b_data_source --lib tests::test_futures
 if errorlevel 1 goto :fail
 
 echo.
 echo ========================================
 echo 运行 kline 测试
 echo ========================================
-%CARGO% test -p b_data_source --lib tests::test_kline
+%CARGO% test --package b_data_source --lib tests::test_kline
 if errorlevel 1 goto :fail
 
 echo.
 echo ========================================
 echo 运行 orderbook 测试
 echo ========================================
-%CARGO% test -p b_data_source --lib tests::test_orderbook
+%CARGO% test --package b_data_source --lib tests::test_orderbook
 if errorlevel 1 goto :fail
 
 echo.
 echo ========================================
 echo 运行 models 测试
 echo ========================================
-%CARGO% test -p b_data_source --lib tests::test_models
+%CARGO% test --package b_data_source --lib tests::test_models
 if errorlevel 1 goto :fail
 
 echo.
 echo ========================================
 echo 运行 symbol_registry 测试
 echo ========================================
-%CARGO% test -p b_data_source --lib tests::test_symbol_registry
+%CARGO% test --package b_data_source --lib tests::test_symbol_registry
 if errorlevel 1 goto :fail
 
 echo.
 echo ========================================
 echo 运行 recovery 测试
 echo ========================================
-%CARGO% test -p b_data_source --lib tests::test_recovery
+%CARGO% test --package b_data_source --lib tests::test_recovery
 if errorlevel 1 goto :fail
 
 echo.
