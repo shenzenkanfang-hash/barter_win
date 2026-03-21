@@ -916,7 +916,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(index_count, 6, "应该有 6 个索引");
+        assert_eq!(index_count, 9, "应该有 9 个索引");
     }
 
     #[test]

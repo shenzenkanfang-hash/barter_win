@@ -558,6 +558,7 @@ impl SyncLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
     use tempfile::TempDir;
 
     #[test]
@@ -565,8 +566,8 @@ mod tests {
         let data = RecoveryData {
             positions: vec![LocalPositionSnapshot {
                 symbol: "BTCUSDT".to_string(),
-                long_qty: decimal!(0.1),
-                long_avg_price: decimal!(50000),
+                long_qty: dec!(0.1),
+                long_avg_price: dec!(50000),
                 short_qty: Decimal::ZERO,
                 short_avg_price: Decimal::ZERO,
                 updated_at: "2024-01-01T00:00:00Z".to_string(),
@@ -619,10 +620,10 @@ mod tests {
     fn test_local_position_snapshot_serialization() {
         let pos = LocalPositionSnapshot {
             symbol: "ETHUSDT".to_string(),
-            long_qty: decimal!(1.5),
-            long_avg_price: decimal!(3000),
-            short_qty: decimal!(0.5),
-            short_avg_price: decimal!(3100),
+            long_qty: dec!(1.5),
+            long_avg_price: dec!(3000),
+            short_qty: dec!(0.5),
+            short_avg_price: dec!(3100),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
         };
 
@@ -630,6 +631,6 @@ mod tests {
         let deserialized: LocalPositionSnapshot = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.symbol, "ETHUSDT");
-        assert_eq!(deserialized.long_qty, decimal!(1.5));
+        assert_eq!(deserialized.long_qty, dec!(1.5));
     }
 }
