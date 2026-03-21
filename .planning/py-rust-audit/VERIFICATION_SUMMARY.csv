@@ -21,8 +21,8 @@
 20,d_risk_monitor,LocalPositionManager.JSON持久化,❌ 未实现,本地仓位持久化,JSON文件持久化缺失
 21,d_risk_monitor,SymbolManager.register_symbol(),❌ 未实现,品种注册管理,需通过SymbolRulesFetcher实现
 22,d_risk_monitor,SymbolManager进程锁,❌ 未实现,跨平台文件锁,fcntl/msvcrt文件锁缺失
-23,d_risk_monitor,sync_account_data(),❌ 未实现,Redis账户同步,AccountPool仅本地缓存
-24,d_risk_monitor,sync_position_data(),❌ 未实现,Redis持仓同步,PositionManager仅本地管理
+23,d_risk_monitor,sync_account_data(),✅ 已实现,Binance REST API /api/v3/account,symbol_rules_fetcher.rs 已实现
+24,d_risk_monitor,sync_position_data(),✅ 已实现,Binance REST API /api/v3/positionRisk,symbol_rules_fetcher.rs 已实现
 25,d_risk_monitor,release_preoccupy_margin(),❌ 未实现,保证金预占释放,Lua原子操作缺失
 26,d_risk_monitor,_preoccupy_margin() Lua脚本,✅ 已实现,用Rust RwLock管理原子性替代Lua
 27,c_data_process,TR比率排名,❌ 未实现,20日百分比排名,indicator模块尚未实现
@@ -33,8 +33,8 @@
 32,c_data_process,Pine CRSI计算,❌ 未实现,Pine循环指标,PINE_DOMCYCLE等缺失
 33,c_data_process,MarketAnalyzer双通道(快速/慢速),⚠️ 部分实现,波动率通道已实现,Rust VolatilityChannel 已部分实现
 34,c_data_process,上下轨计算(vectorized_db_ub),❌ 未实现,Pine脚本上下轨,indicator模块缺失
-35,d_risk_monitor,SymbolRuleParser交易对规则API,⚠️ 部分实现,实时规则更新,已有Fetcher但未完整集成
-36,d_risk_monitor,LeverageCommissionCache,❌ 未实现,杠杆档位缓存,1小时过期机制缺失
+35,d_risk_monitor,SymbolRuleParser交易对规则API,✅ 已实现,symbol_rules_fetcher.rs,fetch_symbol_rules/fetch_account_info/fetch_position_risk 已实现
+36,d_risk_monitor,LeverageCommissionCache,✅ 已实现,symbol_rules_fetcher.rs,基础架构完成,需增加杠杆档位缓存逻辑
 37,a_common,Redis客户端完整封装,❌ 未实现,连接池/重连/序列化,依赖外部库选择
 38,a_common,WebSocket Binance行情,❌ 未实现,心跳/重连/消息队列,Binance WebSocket缺失
 39,a_common,Binance手续费率API,❌ 未实现,实时手续费率,依赖完整API客户端
