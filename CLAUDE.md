@@ -294,6 +294,7 @@ src/
 ================================================================================
 
 **服务器**: quant@172.18.57.21 (Ubuntu 24.04, 1.6GB RAM + 2GB Swap)
+**编译服务器**: 192.168.1.17 (Windows 本地，资源充足)
 
 ### 铁律：禁止直接在服务器修改代码
 
@@ -308,24 +309,23 @@ src/
 
 ### 部署步骤
 
-**1. Windows 本地打包上传**
+**1. 在 192.168.1.17 (编译服务器) 编译**
 ```bash
-tar --exclude='.git' --exclude='target' --exclude='*.exe' --exclude='*.pdb' -czvf barter-rs.tar.gz .
+# 本地编译 (资源充足，可以多线程)
+cargo build --release
+```
+
+**2. 打包上传到服务器**
+```bash
+tar --exclude='.git' --exclude='*.pdb' -czvf barter-rs.tar.gz target/release/
 scp barter-rs.tar.gz quant@172.18.57.21:/home/quant/
 ```
 
-**2. 服务器解压编译（单线程省内存）**
+**3. 服务器解压运行**
 ```bash
 ssh quant@172.18.57.21
 tar -xzvf barter-rs.tar.gz
-source ~/.cargo/env
-export RUSTFLAGS='-C codegen-units=1'
-cargo build --release -j 1
-```
-
-**3. 运行程序**
-```bash
-./target/release/data-printer  # 或 trading-system
+./target/release/data-monitor  # 或其他程序
 ```
 
 ### 服务器内存优化（如需）
@@ -336,9 +336,17 @@ sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 
 ### 更新部署（代码修改后）
 ```bash
-tar --exclude='.git' --exclude='target' -czvf barter-rs.tar.gz .
+# 1. 在 192.168.1.17 编译
+cargo build --release
+
+# 2. 打包 release 目录
+tar --exclude='.git' --exclude='*.pdb' -czvf barter-rs.tar.gz target/release/
+
+# 3. 上传到服务器
 scp barter-rs.tar.gz quant@172.18.57.21:/home/quant/
-ssh quant@172.18.57.21 "tar -xzvf barter-rs.tar.gz && source ~/.cargo/env && cargo build --release -j 1"
+
+# 4. 服务器解压覆盖
+ssh quant@172.18.57.21 "tar -xzvf barter-rs.tar.gz"
 ```
 
 ### 首次部署检查清单
