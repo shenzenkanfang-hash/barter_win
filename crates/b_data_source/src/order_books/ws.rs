@@ -146,16 +146,16 @@ impl DepthStream {
             // 格式1: {"data":{"s":"BTCUSDT","bids":...,"asks":...}}
             // 格式2: {"data":{"depth":{"s":"BTCUSDT","bids":...,"asks":...}}}
             if let Some(data) = obj.get("data") {
-                let depth_obj = if let Some(d) = data.get("depth") {
-                    d
+                let depth_obj: Option<&serde_json::Value> = if let Some(d) = data.get("depth") {
+                    Some(d)
                 } else if data.get("s").is_some() {
-                    data
+                    Some(data)
                 } else {
                     None
                 };
 
                 if let Some(depth) = depth_obj {
-                    if let Some(symbol) = depth.get("s").and_then(|v| v.as_str()) {
+                    if let Some(symbol) = depth.get("s").and_then(|v: &serde_json::Value| v.as_str()) {
                         if let Some(json_str) = serde_json::to_string(&depth).ok() {
                             // 覆盖写入：每次只保留最新一条数据
                             let _ = self.write_overwrite(symbol, &json_str);
