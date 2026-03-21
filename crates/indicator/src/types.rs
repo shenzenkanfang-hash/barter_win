@@ -208,11 +208,19 @@ pub struct DayMarketStatusOutput {
 /// 日线级信号输入
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DaySignalInput {
-    pub pine_color_100_200: String,
-    pub pine_color_20_50: String,
-    pub pine_color_12_26: String,
+    // 12_26 周期 Pine 颜色
+    pub pine_bar_color_12_26: String,
+    pub pine_bg_color_12_26: String,
+    // 20_50 周期 Pine 颜色
+    pub pine_bar_color_20_50: String,
+    pub pine_bg_color_20_50: String,
+    // 100_200 周期 Pine 颜色
+    pub pine_bar_color_100_200: String,
+    pub pine_bg_color_100_200: String,
+    // TR 比率
     pub tr_ratio_5d_20d: Decimal,
     pub tr_ratio_20d_60d: Decimal,
+    // MA5 位置
     pub ma5_in_20d_ma5_pos: Decimal,
 }
 
