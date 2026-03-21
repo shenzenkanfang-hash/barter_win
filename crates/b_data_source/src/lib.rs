@@ -30,7 +30,7 @@ pub mod models;
 
 // Re-exports - Models (业务数据类型)
 pub use models::{MarketStream, MockMarketStream};
-pub use models::{KLine, Period, Tick, VolatilityStats};
+pub use models::{KLine, Period, Tick};
 
 // Re-exports - Data processing
 pub use kline_1m::{KLineSynthesizer, KlinePersistence};

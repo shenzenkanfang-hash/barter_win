@@ -1,9 +1,31 @@
 //! 波动率检测器 - 1m O-C 和 15m Close-Close 变化率
 
 use b_data_source::kline_1m::KLineSynthesizer;
-use b_data_source::models::types::{KLine, Period, VolatilityStats, Tick};
+use b_data_source::models::types::{KLine, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use serde::{Deserialize, Serialize};
+
+/// 波动率统计
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct VolatilityStats {
+    /// 是否高波动
+    pub is_high_volatility: bool,
+    /// 1m O-C 变化率
+    pub vol_1m: Decimal,
+    /// 15m Close-Close 变化率
+    pub vol_15m: Decimal,
+}
+
+impl Default for VolatilityStats {
+    fn default() -> Self {
+        Self {
+            is_high_volatility: false,
+            vol_1m: dec!(0),
+            vol_15m: dec!(0),
+        }
+    }
+}
 
 pub struct VolatilityDetector {
     /// 1m K线合成器
