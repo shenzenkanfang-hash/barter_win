@@ -112,14 +112,15 @@ impl DepthStream {
         Ok(self.file_handles.get_mut(&symbol_lower).unwrap())
     }
 
-    /// 覆盖写入文件（截断后写入最新数据）
+    /// 覆盖写入文件（截断后写入最新数据，确保监视器能看到）
     fn write_overwrite(&mut self, symbol: &str, json_str: &str) -> std::io::Result<()> {
         let symbol_lower = symbol.to_lowercase();
         let path = format!("{}/{}.json", self.base_dir, symbol_lower);
         let mut file = File::create(&path)?;
         file.write_all(json_str.as_bytes())?;
         file.write_all(b"\n")?;
-        file.flush()
+        file.flush()?;
+        file.sync_all()
     }
 
     /// 获取下一条消息并写入缓存
