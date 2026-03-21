@@ -142,11 +142,21 @@ impl DepthStream {
                 return Some(text);
             }
 
-            // 解析 Depth 数据
+            // 解析 Depth 数据 - 支持两种格式:
+            // 格式1: {"data":{"s":"BTCUSDT","bids":...,"asks":...}}
+            // 格式2: {"data":{"depth":{"s":"BTCUSDT","bids":...,"asks":...}}}
             if let Some(data) = obj.get("data") {
-                if let Some(depth_obj) = data.get("depth") {
-                    if let Some(symbol) = depth_obj.get("s").and_then(|v| v.as_str()) {
-                        if let Some(json_str) = serde_json::to_string(&depth_obj).ok() {
+                let depth_obj = if let Some(d) = data.get("depth") {
+                    d
+                } else if data.get("s").is_some() {
+                    data
+                } else {
+                    None
+                };
+
+                if let Some(depth) = depth_obj {
+                    if let Some(symbol) = depth.get("s").and_then(|v| v.as_str()) {
+                        if let Some(json_str) = serde_json::to_string(&depth).ok() {
                             // 覆盖写入：每次只保留最新一条数据
                             let _ = self.write_overwrite(symbol, &json_str);
                         }
