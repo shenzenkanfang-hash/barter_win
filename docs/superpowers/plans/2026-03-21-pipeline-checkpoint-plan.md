@@ -18,10 +18,14 @@
 
 ```
 crates/engine/src/
-├── pipeline.rs              # 【新建】Pipeline 封装 + Processor trait
-├── checkpoint.rs           # 【新建】CheckpointLogger trait + StageResult
-├── engine.rs              # 【修改】简化为持有 Pipeline
-└── lib.rs                 # 【修改】导出新模块
+├── core/                    # 核心引擎
+│   ├── mod.rs
+│   ├── pipeline.rs         # 【新建】Pipeline 封装 + Processor trait
+│   └── engine.rs           # 【修改】简化为持有 Pipeline
+├── shared/                  # 共享模块
+│   ├── mod.rs
+│   └── checkpoint.rs       # 【新建】CheckpointLogger trait + StageResult
+└── lib.rs                  # 【修改】导出新模块
 ```
 
 ---
@@ -29,9 +33,10 @@ crates/engine/src/
 ## Task 1: 定义 CheckpointLogger trait + StageResult
 
 **Files:**
-- Create: `crates/engine/src/checkpoint.rs`
+- Create: `crates/engine/src/shared/checkpoint.rs`
 - Modify: `crates/engine/src/lib.rs` (添加导出)
-- Test: `crates/engine/src/checkpoint.rs` (添加 #[cfg(test)] 模块)
+- Modify: `crates/engine/src/shared/mod.rs` (添加模块声明)
+- Test: `crates/engine/src/shared/checkpoint.rs` (添加 #[cfg(test)] 模块)
 
 - [ ] **Step 1: 创建 checkpoint.rs 文件**
 
@@ -327,7 +332,7 @@ cargo check -p engine
 - [ ] **Step 4: 提交**
 
 ```bash
-git add crates/engine/src/checkpoint.rs crates/engine/src/lib.rs
+git add crates/engine/src/shared/checkpoint.rs crates/engine/src/shared/mod.rs crates/engine/src/lib.rs
 git commit -m "feat(engine): 添加 Pipeline CheckpointLogger trait + StageResult"
 ```
 
@@ -336,8 +341,9 @@ git commit -m "feat(engine): 添加 Pipeline CheckpointLogger trait + StageResul
 ## Task 2: 创建 Pipeline 封装
 
 **Files:**
-- Create: `crates/engine/src/pipeline.rs`
-- Modify: `crates/engine/src/engine.rs`
+- Create: `crates/engine/src/core/pipeline.rs`
+- Modify: `crates/engine/src/core/engine.rs`
+- Modify: `crates/engine/src/core/mod.rs` (添加模块声明)
 - Modify: `crates/engine/src/lib.rs` (添加导出)
 
 - [ ] **Step 1: 创建 pipeline.rs 文件**
@@ -620,7 +626,7 @@ cargo check -p engine
 - [ ] **Step 5: 提交**
 
 ```bash
-git add crates/engine/src/pipeline.rs crates/engine/src/engine.rs crates/engine/src/lib.rs
+git add crates/engine/src/core/pipeline.rs crates/engine/src/core/mod.rs crates/engine/src/core/engine.rs crates/engine/src/lib.rs
 git commit -m "feat(engine): 添加 Pipeline 封装，清晰的流程控制"
 ```
 

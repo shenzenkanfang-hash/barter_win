@@ -736,12 +736,12 @@ impl SymbolPipeline {
 
 | 模块 | 文件 | 问题 | 风险等级 |
 |------|------|------|----------|
-| AccountPool | engine/src/account_pool.rs | 无锁保护 can_trade/freeze/update_equity | 🔴 致命 |
-| StrategyPool | engine/src/strategy_pool.rs | reserve_margin 非原子操作 | 🔴 致命 |
-| OrderCheck | engine/src/order_check.rs | reservations HashMap 并发写入 | 🔴 致命 |
-| PnlManager | engine/src/pnl_manager.rs | unrealized_pnl HashMap 并发写入 | 🔴 致命 |
-| PositionManager | engine/src/position_manager.rs | 多字段复合操作非原子 | 🔴 致命 |
-| CheckTable | engine/src/check_table.rs | 多线程写入同一 HashMap | 🟡 中等 |
+| AccountPool | engine/src/shared/account_pool.rs | 无锁保护 can_trade/freeze/update_equity | 🔴 致命 |
+| StrategyPool | engine/src/shared/strategy_pool.rs | reserve_margin 非原子操作 | 🔴 致命 |
+| OrderCheck | engine/src/risk/order_check.rs | reservations HashMap 并发写入 | 🔴 致命 |
+| PnlManager | engine/src/shared/pnl_manager.rs | unrealized_pnl HashMap 并发写入 | 🔴 致命 |
+| PositionManager | engine/src/position/position_manager.rs | 多字段复合操作非原子 | 🔴 致命 |
+| CheckTable | engine/src/shared/check_table.rs | 多线程写入同一 HashMap | 🟡 中等 |
 
 #### 问题详解
 
@@ -803,8 +803,8 @@ avg = (avg_prev * (period-1) + current) / period
 | 模块 | 文件 | 问题 | 影响 |
 |------|------|------|------|
 | KLineSynthesizer | market/src/kline.rs | clone 返回值 | 内存分配开销 |
-| PnlManager | engine/src/pnl_manager.rs | Vec.contains O(n) | 品种多时变慢 |
-| engine.rs | engine/src/engine.rs | 串行 on_tick | CPU 利用率低 |
+| PnlManager | engine/src/shared/pnl_manager.rs | Vec.contains O(n) | 品种多时变慢 |
+| engine.rs | engine/src/core/engine.rs | 串行 on_tick | CPU 利用率低 |
 
 #### KLineSynthesizer clone 问题
 
@@ -900,13 +900,13 @@ pub struct AccountPool {
 
 | 文件 | 改动 | 风险 |
 |------|------|------|
-| engine/src/account_pool.rs | 添加 RwLock<AccountInfo> | 低 |
-| engine/src/strategy_pool.rs | 添加 RwLock<allocations> | 低 |
-| engine/src/order_check.rs | 添加 RwLock<reservations> | 低 |
-| engine/src/pnl_manager.rs | Vec → HashSet，添加 RwLock | 低 |
-| engine/src/position_manager.rs | 添加 RwLock | 中 |
-| engine/src/check_table.rs | 添加 RwLock | 低 |
-| engine/src/engine.rs | 锁协调逻辑 | 中 |
+| engine/src/shared/account_pool.rs | 添加 RwLock<AccountInfo> | 低 |
+| engine/src/shared/strategy_pool.rs | 添加 RwLock<allocations> | 低 |
+| engine/src/risk/order_check.rs | 添加 RwLock<reservations> | 低 |
+| engine/src/shared/pnl_manager.rs | Vec → HashSet，添加 RwLock | 低 |
+| engine/src/position/position_manager.rs | 添加 RwLock | 中 |
+| engine/src/shared/check_table.rs | 添加 RwLock | 低 |
+| engine/src/core/engine.rs | 锁协调逻辑 | 中 |
 
 6.2 Phase B 改动清单
 --------------------------------------------------------------------------------
@@ -915,7 +915,7 @@ pub struct AccountPool {
 |------|------|------|
 | engine/src/symbol_pipeline.rs | 新建，提取品种逻辑 | 中 |
 | engine/src/orchestrator.rs | 新建，多品种编排 | 中 |
-| engine/src/engine.rs | 改为使用 Orchestrator | 高 |
+| engine/src/core/engine.rs | 改为使用 Orchestrator | 高 |
 
 6.3 Phase C 改动清单
 --------------------------------------------------------------------------------
@@ -1060,7 +1060,7 @@ Tick 输入 → 按 symbol 分组 → 发送到对应 pipeline
    - 等 Integration 完成后统一验证
 
 2. **改动范围控制**
-   - Phase A 只改 engine/src/account_pool.rs
+   - Phase A 只改 engine/src/shared/account_pool.rs
    - 不动其他模块
    - 保持向后兼容
 

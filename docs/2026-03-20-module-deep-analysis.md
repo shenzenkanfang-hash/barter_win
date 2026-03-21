@@ -403,7 +403,7 @@ pub struct FundPool {
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/account_pool.rs |
+| 文件 | crates/engine/src/shared/account_pool.rs |
 | 行数 | 339 |
 | 复杂度 | 高 |
 
@@ -541,7 +541,7 @@ impl AccountPool {
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/strategy_pool.rs |
+| 文件 | crates/engine/src/shared/strategy_pool.rs |
 | 行数 | 372 |
 
 ### 问题识别
@@ -605,7 +605,7 @@ T6: 线程B 设置 available -= 2000
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/check_table.rs |
+| 文件 | crates/engine/src/shared/check_table.rs |
 | 行数 | 144 |
 
 ### 问题识别
@@ -646,7 +646,7 @@ pub fn next_round_id(&mut self) -> u64 {
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/risk.rs |
+| 文件 | crates/engine/src/risk/risk.rs |
 | 行数 | 121 |
 
 ### 关键函数分析
@@ -721,7 +721,7 @@ impl TradingEngine {
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/risk_rechecker.rs |
+| 文件 | crates/engine/src/risk/risk_rechecker.rs |
 | 行数 | 207 |
 
 ### 问题识别
@@ -764,7 +764,7 @@ if ratio > dec!(0.9) { ... }  // 重复检查 2
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/order_check.rs |
+| 文件 | crates/engine/src/risk/order_check.rs |
 | 行数 | 374 |
 
 ### 问题识别
@@ -812,7 +812,7 @@ T4: 线程B 插入 order_1 (重复!)
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/position_manager.rs |
+| 文件 | crates/engine/src/position/position_manager.rs |
 | 行数 | 325 |
 
 ### 问题识别
@@ -849,7 +849,7 @@ current_pos.avg_price = total_value / total_qty;  // 🔴 Decimal 除法
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/pnl_manager.rs |
+| 文件 | crates/engine/src/shared/pnl_manager.rs |
 | 行数 | 336 |
 
 ### 问题识别
@@ -895,7 +895,7 @@ pub struct PnlManager {
 
 | 项目 | 内容 |
 |------|------|
-| 文件 | crates/engine/src/engine.rs |
+| 文件 | crates/engine/src/core/engine.rs |
 | 行数 | 359 |
 | 复杂度 | 高 |
 

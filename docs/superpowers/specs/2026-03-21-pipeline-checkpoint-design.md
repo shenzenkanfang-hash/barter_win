@@ -134,9 +134,12 @@ fn process_tick(&self, tick: &Tick) -> Option<TradingDecision> {
 
 ```
 crates/engine/src/
-├── checkpoint.rs          # CheckpointLogger trait + 实现
-├── pipeline_form.rs       # PipelineForm 集成 checkpoint
-└── engine.rs             # TradingEngine 集成 checkpoint
+├── core/                  # 核心引擎
+│   ├── engine.rs          # TradingEngine 集成 checkpoint
+│   └── pipeline_form.rs    # PipelineForm 集成 checkpoint
+├── shared/                # 共享模块
+│   └── checkpoint.rs      # CheckpointLogger trait + 实现
+└── lib.rs                # 模块导出
 
 src/
 ├── main.rs               # 集成 checkpoint logger
