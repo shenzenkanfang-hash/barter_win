@@ -29,7 +29,6 @@ pub mod futures_position;
 pub mod config;
 pub mod logs;
 pub mod models;
-pub mod claint;
 
 // Re-exports - Models (业务数据类型)
 pub use models::{MarketStream, MockMarketStream};
