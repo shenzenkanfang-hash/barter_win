@@ -129,9 +129,23 @@ impl SymbolRulesFetcher {
             min_notional: min_notional_val,
             max_notional: dec!(1000000),
             leverage: 1,
+            max_leverage: 20, // 默认值，会被 enrich_with_leverage_brackets 更新
             maker_fee: dec!(0.0002),
             taker_fee: dec!(0.0005),
         })
+    }
+
+    /// 用杠杆档位 API 丰富 SymbolRulesData
+    ///
+    /// # 参数
+    /// * `rules` - 交易规则数据（会被修改）
+    pub async fn enrich_with_leverage_brackets(&self, rules: &mut SymbolRulesData) -> Result<(), EngineError> {
+        if let Ok(brackets) = self.fetch_leverage_brackets(Some(&rules.symbol)).await {
+            if let Some(bracket) = brackets.first() {
+                rules.max_leverage = bracket.max_leverage;
+            }
+        }
+        Ok(())
     }
 
     /// 批量获取所有 USDT 交易对规则
@@ -209,6 +223,7 @@ impl SymbolRulesFetcher {
                 min_notional: min_notional_val,
                 max_notional: dec!(1000000),
                 leverage: 1,
+                max_leverage: 20,
                 maker_fee: dec!(0.0002),
                 taker_fee: dec!(0.0005),
             });
@@ -546,6 +561,8 @@ pub struct SymbolRulesData {
     pub max_notional: Decimal,
     /// 杠杆
     pub leverage: i32,
+    /// 最大可用杠杆（从杠杆档位API获取）
+    pub max_leverage: i32,
     /// 做市商费率
     pub maker_fee: Decimal,
     /// 吃单费率
@@ -572,6 +589,7 @@ mod tests {
             min_notional: dec!(10),
             max_notional: dec!(1000000),
             leverage: 1,
+            max_leverage: 20,
             maker_fee: dec!(0.0002),
             taker_fee: dec!(0.0005),
         };
