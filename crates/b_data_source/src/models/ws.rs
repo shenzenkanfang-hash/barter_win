@@ -4,7 +4,7 @@
 
 use crate::models::types::Tick;
 use async_trait::async_trait;
-use chrono::TimeZone;
+use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::sync::Mutex;
