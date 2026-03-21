@@ -1,10 +1,10 @@
-use crate::EngineError;
-use crate::account_pool::AccountPool;
-use crate::margin_config::StrategyLevel;
-use crate::minute_risk::calculate_minute_open_notional;
-use crate::position_manager::{Direction, LocalPositionManager};
-use crate::strategy_pool::StrategyPool;
-use crate::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, RiskEventRecord, format_decimal};
+use crate::shared::error::EngineError;
+use crate::shared::account_pool::AccountPool;
+use crate::shared::margin_config::StrategyLevel;
+use crate::risk::minute_risk::calculate_minute_open_notional;
+use crate::position::position_manager::{Direction, LocalPositionManager};
+use crate::core::strategy_pool::StrategyPool;
+use crate::persistence::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, RiskEventRecord, format_decimal};
 use fnv::FnvHashMap;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
@@ -1285,7 +1285,7 @@ impl SignalSynthesisLayer {
 // ExchangeGateway trait 实现
 // ============================================================================
 
-impl crate::gateway::ExchangeGateway for MockBinanceGateway {
+impl crate::order::gateway::ExchangeGateway for MockBinanceGateway {
     /// 下单
     fn place_order(&self, req: OrderRequest) -> Result<OrderResult, EngineError> {
         MockBinanceGateway::place_order(self, req)

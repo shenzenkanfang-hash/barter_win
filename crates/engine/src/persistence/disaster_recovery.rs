@@ -13,10 +13,10 @@
 //! 2. API 拉取核对账户（第二优先级）
 //! 3. 如果 API 数据更新，覆盖本地数据
 
-use crate::error::EngineError;
-use crate::memory_backup::{MemoryBackup, PositionSnapshot as MemoryPositionSnapshot};
-use crate::sqlite_persistence::SqliteRecordService;
-use crate::symbol_rules_fetcher::SymbolRulesFetcher;
+use crate::shared::error::EngineError;
+use crate::persistence::memory_backup::{MemoryBackup, PositionSnapshot as MemoryPositionSnapshot};
+use crate::persistence::sqlite_persistence::SqliteRecordService;
+use crate::shared::symbol_rules_fetcher::SymbolRulesFetcher;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -379,7 +379,7 @@ impl DisasterRecovery {
 
     /// 保存持仓到 SQLite（用于增量备份）
     pub fn save_position(&self, pos: &LocalPositionSnapshot) -> Result<(), EngineError> {
-        use crate::sqlite_persistence::LocalPositionRecord;
+        use crate::persistence::sqlite_persistence::LocalPositionRecord;
 
         // 保存多头
         if pos.long_qty > Decimal::ZERO {

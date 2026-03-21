@@ -1,6 +1,6 @@
-use crate::check_table::CheckTable;
-use crate::pipeline_form::PipelineForm;
-use crate::round_guard::RoundGuard;
+use crate::shared::check_table::CheckTable;
+use crate::core::pipeline_form::PipelineForm;
+use crate::shared::round_guard::RoundGuard;
 use indicator::{BigCycleCalculator, EMA, PineColor, PricePosition, RSI};
 use market::{KLine, KLineSynthesizer, Period, Tick};
 use rust_decimal::Decimal;
@@ -383,7 +383,7 @@ impl VolatilityChannel {
 
     /// 填入CheckEntry
     pub fn fill_check_entry(&mut self, form: &PipelineForm) {
-        let entry = crate::check_table::CheckEntry {
+        let entry = crate::shared::check_table::CheckEntry {
             symbol: form.symbol.clone(),
             strategy_id: form.strategy_id.clone(),
             period: form.period.clone(),

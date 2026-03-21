@@ -1,4 +1,4 @@
-use crate::error::EngineError;
+use crate::shared::error::EngineError;
 use rust_decimal::Decimal;
 use std::collections::HashSet;
 

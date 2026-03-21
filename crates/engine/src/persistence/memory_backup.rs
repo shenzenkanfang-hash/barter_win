@@ -35,7 +35,7 @@
 //!         └── {symbol}.json
 //! ```
 
-use crate::error::EngineError;
+use crate::shared::error::EngineError;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -49,7 +49,7 @@ use tokio::time::{interval, Duration};
 
 /// 内存备份根目录 (由 Platform::detect() 自动选择)
 pub fn memory_backup_dir() -> String {
-    crate::platform::Paths::new().memory_backup_dir
+    crate::shared::platform::Paths::new().memory_backup_dir
 }
 
 /// K线最大条目数
@@ -837,7 +837,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_backup_creation() {
-        let paths = crate::platform::Paths::new();
+        let paths = crate::shared::platform::Paths::new();
         let backup = MemoryBackup::new(&paths.memory_backup_dir, &paths.disk_sync_dir, 30);
         assert_eq!(backup.tmpfs_dir(), paths.memory_backup_dir);
         assert_eq!(backup.disk_dir(), paths.disk_sync_dir);

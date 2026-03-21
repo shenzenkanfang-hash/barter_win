@@ -1,6 +1,6 @@
-use crate::error::EngineError;
-use crate::gateway::ExchangeGateway;
-use crate::mock_binance_gateway::OrderResult;
+use crate::shared::error::EngineError;
+use crate::order::gateway::ExchangeGateway;
+use crate::order::mock_binance_gateway::OrderResult;
 use crate::risk::RiskPreChecker;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
@@ -155,7 +155,7 @@ impl OrderExecutor {
                 // 无操作
                 Ok(OrderResult {
                     order_id: String::new(),
-                    status: crate::mock_binance_gateway::OrderStatus::Cancelled,
+                    status: crate::order::mock_binance_gateway::OrderStatus::Cancelled,
                     filled_qty: Decimal::ZERO,
                     filled_price: Decimal::ZERO,
                     commission: Decimal::ZERO,

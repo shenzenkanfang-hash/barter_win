@@ -7,8 +7,8 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::account_pool::AccountPool;
-use crate::margin_config::{MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN, MAX_SINGLE_NOTIONAL};
+use crate::shared::account_pool::AccountPool;
+use crate::shared::margin_config::{MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN, MAX_SINGLE_NOTIONAL};
 
 /// 分钟级开仓结果
 #[derive(Debug, Clone)]

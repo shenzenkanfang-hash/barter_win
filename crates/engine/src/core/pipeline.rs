@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-use crate::checkpoint::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
-use crate::check_table::{CheckEntry, CheckTable};
+use crate::shared::checkpoint::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
+use crate::shared::check_table::{CheckEntry, CheckTable};
 use indicator::PineColor;
 use market::types::Tick;
 use rust_decimal::Decimal;

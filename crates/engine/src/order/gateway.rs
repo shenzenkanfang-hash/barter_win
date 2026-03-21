@@ -1,5 +1,5 @@
-use crate::error::EngineError;
-use crate::mock_binance_gateway::{MockAccount, MockPosition, OrderResult};
+use crate::shared::error::EngineError;
+use crate::order::mock_binance_gateway::{MockAccount, MockPosition, OrderResult};
 use strategy::types::OrderRequest;
 
 /// 交易所网关 trait

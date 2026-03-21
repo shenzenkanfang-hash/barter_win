@@ -4,7 +4,7 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use chrono::Utc;
 
-use crate::margin_config::{GlobalMarginConfig, MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN};
+use crate::shared::margin_config::{GlobalMarginConfig, MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN};
 
 /// 熔断状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,8 +1,8 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::error::EngineError;
-use crate::risk::VolatilityMode;
+use crate::shared::error::EngineError;
+use crate::risk::risk::VolatilityMode;
 
 /// 风控复核器 - 锁内复核
 ///

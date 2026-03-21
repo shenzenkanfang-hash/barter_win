@@ -747,7 +747,7 @@ impl IndicatorCsvWriter {
 impl SqliteRecordService {
     /// 使用默认路径创建服务（自动检测平台）
     pub fn with_default_path() -> Result<Self, EngineError> {
-        let db_path = crate::platform::Paths::new().sqlite_db();
+        let db_path = crate::shared::platform::Paths::new().sqlite_db();
         Self::new(db_path)
     }
 }
@@ -755,7 +755,7 @@ impl SqliteRecordService {
 impl IndicatorCsvWriter {
     /// 使用默认路径创建写入器（自动检测平台）
     pub fn with_default_path() -> Result<Self, EngineError> {
-        let file_path = crate::platform::Paths::new().csv_output();
+        let file_path = crate::shared::platform::Paths::new().csv_output();
         Self::new(file_path)
     }
 }

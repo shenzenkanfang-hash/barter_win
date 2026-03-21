@@ -1,24 +1,24 @@
-use crate::account_pool::{AccountPool, CircuitBreakerState};
-use crate::check_table::CheckTable;
-use crate::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
-use crate::error::EngineError;
-use crate::gateway::ExchangeGateway;
-use crate::market_status::{MarketStatus, MarketStatusDetector};
-use crate::memory_backup::MemoryBackup;
-use crate::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
-use crate::mode::ModeSwitcher;
+use crate::shared::account_pool::{AccountPool, CircuitBreakerState};
+use crate::shared::check_table::CheckTable;
+use crate::persistence::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
+use crate::shared::error::EngineError;
+use crate::order::gateway::ExchangeGateway;
+use crate::shared::market_status::{MarketStatus, MarketStatusDetector};
+use crate::persistence::memory_backup::MemoryBackup;
+use crate::order::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
+use crate::channel::mode::ModeSwitcher;
 use crate::order::OrderExecutor;
-use crate::order_check::OrderCheck;
+use crate::risk::order_check::OrderCheck;
 use crate::persistence::PersistenceService;
-use crate::position_exclusion::PositionExclusionChecker;
-use crate::position_manager::{Direction, LocalPositionManager};
-use crate::pnl_manager::PnlManager;
+use crate::position::position_exclusion::PositionExclusionChecker;
+use crate::position::position_manager::{Direction, LocalPositionManager};
+use crate::shared::pnl_manager::PnlManager;
 use crate::risk::RiskPreChecker;
 use crate::risk::VolatilityMode;
-use crate::risk_rechecker::RiskReChecker;
-use crate::round_guard::{RoundGuard, RoundGuardScope};
-use crate::strategy_pool::StrategyPool;
-use crate::thresholds::ThresholdConstants;
+use crate::risk::risk_rechecker::RiskReChecker;
+use crate::shared::round_guard::{RoundGuard, RoundGuardScope};
+use crate::core::strategy_pool::StrategyPool;
+use crate::risk::thresholds::ThresholdConstants;
 use indicator::{EMA, RSI};
 use market::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
@@ -305,12 +305,12 @@ impl TradingEngine {
     /// 1. 风控预检 (锁外)
     /// 2. 调用 gateway 执行订单
     /// 3. 更新持仓
-    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::mock_binance_gateway::OrderResult, crate::EngineError> {
+    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::order::mock_binance_gateway::OrderResult, crate::shared::error::EngineError> {
         let order_value = order.qty * order.price.unwrap_or(order.qty);
 
         // 1. 预占保证金
         self.strategy_pool.reserve_margin("main", order_value)
-            .map_err(|e| crate::EngineError::RiskCheckFailed(e))?;
+            .map_err(|e| crate::shared::error::EngineError::RiskCheckFailed(e))?;
 
         // 2. 一轮编码作用域 (RAII 自动管理)
         let _round_scope = RoundGuardScope::new(&self.round_guard);
@@ -336,7 +336,7 @@ impl TradingEngine {
         };
 
         // 4. 如果订单成功，更新持仓
-        if result.status == crate::mock_binance_gateway::OrderStatus::Filled {
+        if result.status == crate::order::mock_binance_gateway::OrderStatus::Filled {
             let direction = match order.side {
                 Side::Long => Direction::Long,
                 Side::Short => Direction::Short,
@@ -413,12 +413,12 @@ impl TradingEngine {
     }
 
     /// 获取网关账户信息
-    pub fn get_gateway_account(&self) -> crate::mock_binance_gateway::MockAccount {
+    pub fn get_gateway_account(&self) -> crate::order::mock_binance_gateway::MockAccount {
         self.gateway.get_account()
     }
 
     /// 获取网关持仓信息
-    pub fn get_gateway_position(&self, symbol: &str) -> Option<crate::mock_binance_gateway::MockPosition> {
+    pub fn get_gateway_position(&self, symbol: &str) -> Option<crate::order::mock_binance_gateway::MockPosition> {
         self.gateway.get_position(symbol)
     }
 
