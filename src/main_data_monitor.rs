@@ -58,11 +58,12 @@ struct VolatilitySignal {
     timestamp: String,
     symbol: String,
     signal_type: String,      // "ENTER_HIGH_VOL" | "EXIT_HIGH_VOL"
+    trigger_period: String,   // "1M" | "15M" | "BOTH" - 触发高波动的周期
     vol_1m: String,
     vol_15m: String,
     price: String,
-    threshold_1m: String,
-    threshold_15m: String,
+    threshold_1m: String,    // 3%
+    threshold_15m: String,    // 13%
 }
 
 /// 状态快照记录（每分钟）
@@ -172,7 +173,7 @@ struct TradeHandler {
     last_minute: Option<(u32, u32)>,
     last_vol_state: bool,
     // 上次打印状态的分钟
-    last_status_minute: Option<(u32, u32)>,
+    last_status_minute: Option<(u32, u32, u32)>,
 }
 
 impl TradeHandler {
@@ -240,10 +241,21 @@ impl TradeHandler {
 
         let (th_1m, th_15m) = self.detector.thresholds();
 
+        // 判断触发周期
+        let vol_1m_high = stats.vol_1m >= th_1m;
+        let vol_15m_high = stats.vol_15m >= th_15m;
+        let trigger_period = match (vol_1m_high, vol_15m_high) {
+            (true, true) => "BOTH",
+            (true, false) => "1M",
+            (false, true) => "15M",
+            (false, false) => "NONE",
+        };
+
         let signal = VolatilitySignal {
             timestamp: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
             symbol: self.symbol.clone(),
             signal_type: signal_type.to_string(),
+            trigger_period: trigger_period.to_string(),
             vol_1m: format!("{:.4}", stats.vol_1m),
             vol_15m: format!("{:.4}", stats.vol_15m),
             price: price.to_string(),
@@ -254,7 +266,8 @@ impl TradeHandler {
         // 输出到控制台
         if is_high {
             warn!(
-                "⚠️ HIGH VOLATILITY DETECTED! vol_1m={:.2}% vol_15m={:.2}% price={}",
+                "⚠️ HIGH VOL [{}] vol_1m={:.2}% vol_15m={:.2}% price={}",
+                trigger_period,
                 stats.vol_1m * dec!(100),
                 stats.vol_15m * dec!(100),
                 price
