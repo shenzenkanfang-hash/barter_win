@@ -63,7 +63,7 @@ DataFeeder (核心数据分发器)
     |       计算 15m Close-Close 变化率
     |       判断标准:
     |           - 1m 波动 >= 3%  进入高速通道
-    |           - 15m 波动 >= 13% 进入高速通道
+    |           - 15m 波动 >= 6%  进入高速通道 (v1.2 调整)
     |
     +-- OrderBook (订单簿)
     |       20档深度
@@ -99,7 +99,21 @@ for chunk in symbols.chunks(50) {
 四、指标层 (indicator crate)
 ================================================================================
 
-4.1 三层指标体系
+4.1 模块结构 (v1.3 重构)
+
+指标模块经过清理，保留以下核心文件：
+
+保留文件:
+- pine_indicator_full.rs  - Pine v5 完整指标 (PineColorDetector, EMA, RMA, DominantCycleRSI)
+- min_cycle.rs           - 大周期指标 (BigCycleCalculator)
+- indicator_1m.rs      - 1分钟指标 (v1.4 新增，100% 对齐 Python v2.6)
+
+已删除的零散指标:
+- ema.rs, rsi.rs, pine_color.rs, price_position.rs
+- tr_ratio.rs, velocity.rs, z_score.rs, big_cycle.rs, error.rs
+
+
+4.2 三层指标体系
 
 第一层: TR (True Range)
     波动率突破判断
@@ -121,7 +135,7 @@ for chunk in symbols.chunks(50) {
     公式: (close - low) / (high - low) * 100
 
 
-4.2 大周期指标 (BigCycleCalculator)
+4.3 大周期指标 (BigCycleCalculator)
 
 用于长周期趋势判断:
 
@@ -141,13 +155,30 @@ for chunk in symbols.chunks(50) {
     - 12/26 参数
 
 
-4.3 其他指标
+4.4 1分钟指标 (indicator_1m.rs, v1.4)
 
-- EMA: 指数移动平均 (增量计算 O(1))
-- RSI: 相对强弱指标
-- ZScore: Z分数 (标准化)
-- VelocityPercentile: 速度百分位
-- PriceDeviation: 价格偏离度
+100% 对齐 Python v2.6，实现以下指标:
+
+滚动窗口工具:
+- RollingMean: 滚动均值
+- RollingStd: 滚动标准差
+- RollingPercentile: 滚动百分位 (kind="weak")
+- RollingMax: 滚动最大值
+- RollingMin: 滚动最小值
+
+TR 指标:
+- tr_ratio: TR 比率
+- tr_ratio_zscore: TR 比率 Z-Score
+
+Z-Score:
+- zscore_1h_1m: 1小时 vs 1分钟 Z-Score
+- zscore_14_1m: 14周期 vs 1分钟 Z-Score
+
+高阶动能指标:
+- Jerk: 加速度导数
+- Norm jerk: 标准化 Jerk
+- Market force: 市场力
+- Acc efficiency: 加速效率
 
 
 ================================================================================
@@ -196,7 +227,7 @@ TradingMode:
 六、引擎层 (engine crate)
 ================================================================================
 
-6.1 Pipeline 架构 (新增)
+6.1 Pipeline 架构
 
 Pipeline 封装完整的交易流程，作为事件驱动的守门员：
 
@@ -273,7 +304,7 @@ High通道 (高速)
     - 独立判断不等待K线完成
 
 切换条件:
-    进入High: 1m >= 3% 或 15m >= 13%
+    进入High: 1m >= 3% 或 15m >= 6% (v1.2 调整)
     退出High: tr_ratio < 1 (波动率降低)
 
 
@@ -328,11 +359,22 @@ StrategyPool (策略资金池)
     - 再平衡
     - 保证金预占/释放
 
+MockBinanceGateway (模拟交易所, v1.1)
+    - 模拟账户 (MockAccount)
+    - 模拟持仓 (MockPosition)
+    - 模拟订单 (MockOrder)
+    - 模拟成交 (MockTrade)
+    - 风控检查 (RiskConfig)
+    - 频率限制 (10次/秒)
+    - 持仓限制 95%
+    - 维持保证金 0.5%
+
 PositionManager (持仓管理器)
-    - 多头持仓
-    - 空头持仓
-    - 未实现盈亏
-    - 持仓方向
+    - 方向 (Direction: Long/Short)
+    - 数量 (qty)
+    - 均价 (avg_price)
+    - 开仓时间 (open_time)
+    - 持仓费用 (position_cost)
 
 
 6.9 订单处理
@@ -364,14 +406,42 @@ SqlitePersistence (SQLite持久化)
     - channel_events: 通道切换事件
     - risk_events: 风控事件
     - indicator_events: 指标重要变化
+    + orders: 订单记录 (用于灾备恢复)
+    + sync_log: 同步日志
 
 IndicatorCsvWriter
     - 输出 indicator_comparison.csv
     - 用于与 Python 计算结果对比验证
 
+MemoryBackup (/dev/shm 内存备份, v1.1)
+    - 内存文件系统备份
+    - 定期同步到磁盘
+    - 目录结构:
+        - account.json: 账户信息
+        - trading_pairs.json: 交易品种列表
+        - symbol_rules.json: 规则汇总
+        - channel/: 通道数据
+        - symbols/: 品种数据 (kxian, depth, trades, indicators, position)
+        - tasks/: 任务池数据
+
+
+6.11 灾备恢复 (DisasterRecovery, v1.1)
+
+功能:
+- SQLite 本地仓位恢复
+- API 账户核对
+- 增量同步机制
+
+数据类型:
+- RecoveryData: 恢复数据容器
+- LocalPositionSnapshot: 本地持仓快照 (long_qty, long_avg_price, short_qty, short_avg_price)
+- OrderSnapshot: 订单快照
+- ApiPositionSnapshot: API 持仓快照
+- VerificationResult: 验证结果
+
 
 ================================================================================
-七、事件驱动架构 (重要更新)
+七、事件驱动架构
 ================================================================================
 
 7.1 Tick驱动 vs 事件驱动
@@ -447,7 +517,7 @@ Pipeline（守门员）
 
 8.3 高波动交易流程
 
-1. 检测到 1m >= 3% 或 15m >= 13%
+1. 检测到 1m >= 3% 或 15m >= 6%
 2. 切换到 High 通道
 3. 添加 Depth 订阅 (订单簿深度)
 4. 策略按 Tick 级判断
@@ -498,36 +568,61 @@ Pipeline（守门员）
 
 
 ================================================================================
-十、当前状态
+十、里程碑进度
 ================================================================================
 
-Phase 1-8, Phase A, Phase A.5 已完成
+v1.0: Integration & Testing
+    - TradingEngine, types.rs, websocket.rs, main.rs
+    - 状态: ✅ SHIPPED 2026-03-20
 
-市场数据层:
-- DataFeeder, VolatilityDetector, OrderBook, SymbolRegistry, KlinePersistence
+v1.1: MockBinanceGateway + SignalSynthesisLayer
+    - MockBinanceGateway (账户/持仓/订单/保证金/风控)
+    - SignalSynthesisLayer (通道退出逻辑)
+    - SQLite 持久化 (SqliteRecordService: 6张表)
+    - MemoryBackup (/dev/shm 内存备份)
+    - EventRecorder trait + NoOpEventRecorder + SqliteEventRecorder
+    - 状态: ✅ SHIPPED 2026-03-21
 
-指标层:
-- EMA, RSI, PineColor, BigCycleCalculator, ZScore, Velocity
+v1.2: Market Data Layer Enhancement
+    - DataFeeder: 核心数据分发器
+    - KlinePersistence: K线 Redis 持久化
+    - SymbolRegistry: 品种注册中心
+    - VolatilityDetector: 波动率检测器
+    - OrderBook: 订单簿模块 (L1/L2)
+    - WebSocket 重连指数退避机制
+    - Pine v5 完整指标模块
+    - 15m 波动率阈值调整: 13% -> 6%
+    - 状态: ✅ SHIPPED 2026-03-21
 
-策略层:
-- PinStrategy, TrendStrategy, Signal
+v1.3: Indicator Module Cleanup
+    - 保留 pine_indicator_full.rs - Pine v5 完整指标
+    - 保留 min_cycle.rs - 大周期指标
+    - 新增 indicator_1m.rs - 1分钟指标
+    - 删除零散指标: ema.rs, rsi.rs, pine_color.rs 等
+    - 状态: ✅ SHIPPED 2026-03-21
 
-引擎层:
-- TradingEngine, VolatilityChannel, SignalSynthesisLayer
-- Pipeline, CheckpointLogger, Processor trait
-- 风控体系 (RiskPreChecker, RiskReChecker, AccountPool)
-- 持久化 (SQLite, CSV)
+v1.4: Indicator System Enhancement
+    - indicator_1m.rs 100% 对齐 Python v2.6
+    - 百分位计算修正 (percentileofscore kind="weak")
+    - 滚动窗口工具 (RollingMean, RollingStd, RollingPercentile 等)
+    - TR 指标完善 (tr_ratio, tr_ratio_zscore)
+    - Z-Score 计算 (zscore_1h_1m, zscore_14_1m)
+    - 高阶动能指标 (Jerk, Norm jerk, Market force, Acc efficiency)
+    - 状态: ✅ SHIPPED 2026-03-21
 
-测试状态:
-- 138 个测试全部通过 (Pipeline 测试用例已完善)
+
+================================================================================
+十一、编译与测试状态
+================================================================================
 
 编译状态:
-- cargo check --all 通过
+- cargo check --all ✅ 通过
+- 17 个警告 (未使用字段等)
 
-架构决策记录:
-- 事件驱动优于 Tick驱动（日线/分钟级策略）
-- Pipeline 作为守门员分层过滤
-- 指标子线程后台计算不阻塞主线程
+测试:
+- 单元测试覆盖核心模块
+- MockBinanceGateway 测试: 4/4 通过
+- symbol_rules/thresholds 测试: 13/13 通过
 
 
 ================================================================================
