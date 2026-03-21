@@ -41,7 +41,7 @@
 40,e_strategy,MarketDetector.validate_data(),⚠️ 部分实现,数据有效性校验,Rust仅有基础校验
 41,e_strategy,MarketDetector._record_history(),❌ 未实现,检测历史记录,Rust无历史记录功能
 42,e_strategy,PinStatusDetector.load_indicator_data(),❌ 未实现,Redis指标数据加载,依赖Redis客户端
-43,e_strategy,TrendStatusDetector._validate_pine_color_groups(),❌ 未实现,Pine颜色分组校验,多周期分组校验缺失
+43,e_strategy,TrendStatusDetector._validate_pine_color_groups(),✅ 已实现,indicator/day/signal_generator.rs,分离 bar/bg 字段，完整校验逻辑
 44,d_risk_monitor,AccountPool(熔断保护),✅ 已实现,shared/account_pool.rs,四层架构完整实现,核心功能完整
 45,d_risk_monitor,StrategyPool(保证金池),✅ 已实现,core/strategy_pool.rs,四层架构完整实现,核心功能完整
 46,d_risk_monitor,OrderCheck(预占/确认/取消),✅ 已实现,risk/order_check.rs,四层架构完整实现,核心功能完整(Lua未集成)
