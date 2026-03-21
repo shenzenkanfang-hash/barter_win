@@ -1,5 +1,5 @@
 [package]
-name = "engine"
+name = "e_strategy"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,16 +8,11 @@ rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-strategy = { path = "../strategy" }
-account = { path = "../account" }
-market = { path = "../market" }
-indicator = { path = "../indicator" }
-tracing = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true }
 fnv = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
-rusqlite = { workspace = true }
-tempfile = { workspace = true }
-reqwest = { workspace = true }
+b_data_source = { path = "../b_data_source" }
+c_data_process = { path = "../c_data_process" }

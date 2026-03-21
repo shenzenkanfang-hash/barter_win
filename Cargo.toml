@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/*"]
+members = [
+    "crates/a_common",
+    "crates/b_data_source",
+    "crates/c_data_process",
+    "crates/d_risk_monitor",
+    "crates/e_strategy",
+    "crates/g_test",
+]
 resolver = "3"
 
 [package]
@@ -21,11 +28,11 @@ path = "src/main_data_monitor.rs"
 
 
 [dependencies]
-account = { path = "crates/account" }
-market = { path = "crates/market" }
-indicator = { path = "crates/indicator" }
-strategy = { path = "crates/strategy" }
-engine = { path = "crates/engine" }
+a_common = { path = "crates/a_common" }
+b_data_source = { path = "crates/b_data_source" }
+c_data_process = { path = "crates/c_data_process" }
+d_risk_monitor = { path = "crates/d_risk_monitor" }
+e_strategy = { path = "crates/e_strategy" }
 tokio = { workspace = true }
 rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }

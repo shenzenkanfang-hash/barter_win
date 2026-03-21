@@ -1,5 +1,5 @@
 [package]
-name = "strategy"
+name = "a_common"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,5 +9,8 @@ rust_decimal_macros = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-market = { path = "../market" }
-indicator = { path = "../indicator" }
+tracing = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true }

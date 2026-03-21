@@ -2,8 +2,8 @@
 //!
 //! 基于 Barter-rs 风格架构的高性能量化交易系统
 
-use engine::TradingEngine;
-use market::{MarketConnector, MockMarketConnector, MockMarketStream};
+use e_strategy::TradingEngine;
+use b_data_source::{MarketConnector, MockMarketConnector, MockMarketStream};
 use rust_decimal::Decimal;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
