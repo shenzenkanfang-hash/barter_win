@@ -224,3 +224,20 @@
 **Commit**: `d59a611` - 重构 indicator_1m.rs - 100% 对齐 Python v2.6
 
 **待继续**: 指标系统持续完善中
+
+---
+
+## v1.5: Python-Rust 功能对齐
+
+**Goal**: 根据Python-Rust功能验证结果，实现核心缺失功能
+
+**Deliverables:**
+- TrendStatusDetector: Pine颜色分组校验
+- LocalPositionManager: 统一接口 + 品种锁
+- sync_account/position_data: 交易所状态同步
+- TR比率排名: 20日百分比排名
+- SymbolRuleParser: 实时规则同步
+
+**Status**: IN PROGRESS (2026-03-21)
+
+**Phase Directory:** `.planning/phases/10-v1.5-py-rust-align/`

@@ -23,5 +23,5 @@ pub use platform::{Platform, Paths};
 pub use pnl_manager::PnlManager;
 pub use round_guard::{RoundGuard, RoundGuardScope};
 pub use symbol_rules::SymbolRules;
-pub use symbol_rules_fetcher::SymbolRulesFetcher;
+pub use symbol_rules_fetcher::{AccountInfo, PositionRisk, SymbolRulesFetcher};
 pub use telegram_notifier::{TelegramConfig, TelegramNotifier};

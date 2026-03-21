@@ -1,0 +1,52 @@
+{
+  "data": {
+    "project_name": "src",
+    "root_path": "./src",
+    "directories": [],
+    "files": [
+      {
+        "path": "main.rs",
+        "name": "main.rs",
+        "size": 1312,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.7,
+        "complexity_score": 0.0,
+        "last_modified": "1773985227"
+      },
+      {
+        "path": "main_data_monitor.rs",
+        "name": "main_data_monitor.rs",
+        "size": 15171,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.7,
+        "complexity_score": 0.0,
+        "last_modified": "1774060398"
+      },
+      {
+        "path": "main_data_printer.rs",
+        "name": "main_data_printer.rs",
+        "size": 3994,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.7,
+        "complexity_score": 0.0,
+        "last_modified": "1774037731"
+      }
+    ],
+    "total_files": 3,
+    "total_directories": 0,
+    "file_types": {
+      "rs": 3
+    },
+    "size_distribution": {
+      "small": 2,
+      "medium": 1
+    }
+  },
+  "timestamp": 1774089540,
+  "prompt_hash": "1a6e396a5212bff0c18cb8141f35c40a",
+  "token_usage": null,
+  "model_name": null
+}

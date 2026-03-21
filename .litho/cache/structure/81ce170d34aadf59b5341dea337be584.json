@@ -1,0 +1,4600 @@
+{
+  "data": {
+    "project_name": "trading-system",
+    "root_path": ".",
+    "directories": [
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\benches\\backtest",
+        "name": "backtest",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 14901,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\benches",
+        "name": "benches",
+        "file_count": 0,
+        "subdirectory_count": 1,
+        "total_size": 0,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\examples\\config",
+        "name": "config",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 4250,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\examples\\data",
+        "name": "data",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 8579,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\examples",
+        "name": "examples",
+        "file_count": 7,
+        "subdirectory_count": 2,
+        "total_size": 52569,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\backtest",
+        "name": "backtest",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 12603,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\action",
+        "name": "action",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 19849,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\audit",
+        "name": "audit",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 14301,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\asset",
+        "name": "asset",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 10554,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\connectivity",
+        "name": "connectivity",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 7966,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\instrument",
+        "name": "instrument",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 21711,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\order",
+        "name": "order",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 50280,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\trading",
+        "name": "trading",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 7188,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine\\state",
+        "name": "state",
+        "file_count": 4,
+        "subdirectory_count": 5,
+        "total_size": 63553,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\engine",
+        "name": "engine",
+        "file_count": 6,
+        "subdirectory_count": 3,
+        "total_size": 41859,
+        "importance_score": 0.30000000000000004
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\execution",
+        "name": "execution",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 38670,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\risk\\check",
+        "name": "check",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 4240,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\risk",
+        "name": "risk",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 4318,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\drawdown",
+        "name": "drawdown",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 21605,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric",
+        "name": "metric",
+        "file_count": 7,
+        "subdirectory_count": 1,
+        "total_size": 35183,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\dataset",
+        "name": "dataset",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 15819,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary",
+        "name": "summary",
+        "file_count": 5,
+        "subdirectory_count": 1,
+        "total_size": 42674,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\statistic",
+        "name": "statistic",
+        "file_count": 3,
+        "subdirectory_count": 2,
+        "total_size": 10812,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\strategy",
+        "name": "strategy",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 11439,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src\\system",
+        "name": "system",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 27234,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter\\src",
+        "name": "src",
+        "file_count": 4,
+        "subdirectory_count": 7,
+        "total_size": 13000,
+        "importance_score": 0.5
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter",
+        "name": "barter",
+        "file_count": 2,
+        "subdirectory_count": 3,
+        "total_size": 2779,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\examples",
+        "name": "examples",
+        "file_count": 9,
+        "subdirectory_count": 0,
+        "total_size": 29539,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\books",
+        "name": "books",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 30830,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\book",
+        "name": "book",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 14348,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\futures",
+        "name": "futures",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 34114,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\spot",
+        "name": "spot",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 27430,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance",
+        "name": "binance",
+        "file_count": 5,
+        "subdirectory_count": 3,
+        "total_size": 23178,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex",
+        "name": "bitfinex",
+        "file_count": 7,
+        "subdirectory_count": 0,
+        "total_size": 38532,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitmex",
+        "name": "bitmex",
+        "file_count": 6,
+        "subdirectory_count": 0,
+        "total_size": 19692,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\book",
+        "name": "book",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 8246,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\futures",
+        "name": "futures",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 958,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\spot",
+        "name": "spot",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 854,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit",
+        "name": "bybit",
+        "file_count": 6,
+        "subdirectory_count": 3,
+        "total_size": 33038,
+        "importance_score": 0.30000000000000004
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\coinbase",
+        "name": "coinbase",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 16438,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\future",
+        "name": "future",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 2657,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\option",
+        "name": "option",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 1464,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\perpetual",
+        "name": "perpetual",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 7056,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\spot",
+        "name": "spot",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 4778,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio",
+        "name": "gateio",
+        "file_count": 5,
+        "subdirectory_count": 4,
+        "total_size": 16057,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\book",
+        "name": "book",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 8220,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken",
+        "name": "kraken",
+        "file_count": 6,
+        "subdirectory_count": 1,
+        "total_size": 27812,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\okx",
+        "name": "okx",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 17900,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\exchange",
+        "name": "exchange",
+        "file_count": 2,
+        "subdirectory_count": 8,
+        "total_size": 8806,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\builder\\dynamic",
+        "name": "dynamic",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 54590,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\builder",
+        "name": "builder",
+        "file_count": 2,
+        "subdirectory_count": 1,
+        "total_size": 10149,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\reconnect",
+        "name": "reconnect",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 9005,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\streams",
+        "name": "streams",
+        "file_count": 2,
+        "subdirectory_count": 2,
+        "total_size": 5737,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\subscriber",
+        "name": "subscriber",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 11593,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\subscription",
+        "name": "subscription",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 27191,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src\\transformer",
+        "name": "transformer",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 4256,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data\\src",
+        "name": "src",
+        "file_count": 4,
+        "subdirectory_count": 6,
+        "total_size": 29341,
+        "importance_score": 0.5
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-data",
+        "name": "barter-data",
+        "file_count": 2,
+        "subdirectory_count": 2,
+        "total_size": 2817,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution\\src\\client\\binance",
+        "name": "binance",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 1,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution\\src\\client\\mock",
+        "name": "mock",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 10374,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution\\src\\client",
+        "name": "client",
+        "file_count": 1,
+        "subdirectory_count": 2,
+        "total_size": 3061,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution\\src\\exchange\\mock",
+        "name": "mock",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 25735,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution\\src\\exchange",
+        "name": "exchange",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 14,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution\\src\\order",
+        "name": "order",
+        "file_count": 4,
+        "subdirectory_count": 0,
+        "total_size": 15379,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution\\src",
+        "name": "src",
+        "file_count": 6,
+        "subdirectory_count": 3,
+        "total_size": 37897,
+        "importance_score": 0.7000000000000001
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-execution",
+        "name": "barter-execution",
+        "file_count": 2,
+        "subdirectory_count": 1,
+        "total_size": 2362,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-instrument\\src\\asset",
+        "name": "asset",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 6889,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-instrument\\src\\index",
+        "name": "index",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 29396,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\kind",
+        "name": "kind",
+        "file_count": 4,
+        "subdirectory_count": 0,
+        "total_size": 8728,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\market_data",
+        "name": "market_data",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 8038,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument",
+        "name": "instrument",
+        "file_count": 4,
+        "subdirectory_count": 2,
+        "total_size": 15076,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-instrument\\src",
+        "name": "src",
+        "file_count": 2,
+        "subdirectory_count": 3,
+        "total_size": 8795,
+        "importance_score": 0.5
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-instrument",
+        "name": "barter-instrument",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 920,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\examples",
+        "name": "examples",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 8146,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\collection",
+        "name": "collection",
+        "file_count": 4,
+        "subdirectory_count": 0,
+        "total_size": 13868,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\private",
+        "name": "private",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 4947,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\public",
+        "name": "public",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 486,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\rest",
+        "name": "rest",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 6463,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http",
+        "name": "http",
+        "file_count": 1,
+        "subdirectory_count": 3,
+        "total_size": 3333,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\websocket",
+        "name": "websocket",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 9981,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol",
+        "name": "protocol",
+        "file_count": 1,
+        "subdirectory_count": 2,
+        "total_size": 719,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\de",
+        "name": "de",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 7635,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\se",
+        "name": "se",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 4387,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\serde",
+        "name": "serde",
+        "file_count": 1,
+        "subdirectory_count": 2,
+        "total_size": 179,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\socket",
+        "name": "socket",
+        "file_count": 6,
+        "subdirectory_count": 0,
+        "total_size": 27450,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\ext",
+        "name": "ext",
+        "file_count": 4,
+        "subdirectory_count": 0,
+        "total_size": 17781,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\util",
+        "name": "util",
+        "file_count": 2,
+        "subdirectory_count": 0,
+        "total_size": 2771,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src\\stream",
+        "name": "stream",
+        "file_count": 2,
+        "subdirectory_count": 2,
+        "total_size": 7357,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration\\src",
+        "name": "src",
+        "file_count": 5,
+        "subdirectory_count": 5,
+        "total_size": 14252,
+        "importance_score": 0.5
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-integration",
+        "name": "barter-integration",
+        "file_count": 2,
+        "subdirectory_count": 2,
+        "total_size": 4129,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-macro\\src",
+        "name": "src",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 4116,
+        "importance_score": 0.4
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本\\barter-macro",
+        "name": "barter-macro",
+        "file_count": 2,
+        "subdirectory_count": 1,
+        "total_size": 1566,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\Bak_非必要指定不读取老版本",
+        "name": "Bak_非必要指定不读取老版本",
+        "file_count": 5,
+        "subdirectory_count": 6,
+        "total_size": 4177,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\crates\\account\\src",
+        "name": "src",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 1422,
+        "importance_score": 0.4
+      },
+      {
+        "path": ".\\crates\\account",
+        "name": "account",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 210,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\engine\\src\\channel",
+        "name": "channel",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 23460,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\engine\\src\\core",
+        "name": "core",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 66144,
+        "importance_score": 0.3
+      },
+      {
+        "path": ".\\crates\\engine\\src\\order",
+        "name": "order",
+        "file_count": 4,
+        "subdirectory_count": 0,
+        "total_size": 53035,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\engine\\src\\persistence",
+        "name": "persistence",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 115775,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\engine\\src\\position",
+        "name": "position",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 18613,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\engine\\src\\risk",
+        "name": "risk",
+        "file_count": 6,
+        "subdirectory_count": 0,
+        "total_size": 54645,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\crates\\engine\\src\\shared",
+        "name": "shared",
+        "file_count": 14,
+        "subdirectory_count": 0,
+        "total_size": 98490,
+        "importance_score": 0.2
+      },
+      {
+        "path": ".\\crates\\engine\\src",
+        "name": "src",
+        "file_count": 1,
+        "subdirectory_count": 7,
+        "total_size": 2947,
+        "importance_score": 0.5
+      },
+      {
+        "path": ".\\crates\\engine",
+        "name": "engine",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 639,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\indicator\\src\\day",
+        "name": "day",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 42189,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\indicator\\src\\min",
+        "name": "min",
+        "file_count": 5,
+        "subdirectory_count": 0,
+        "total_size": 36426,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\indicator\\src",
+        "name": "src",
+        "file_count": 4,
+        "subdirectory_count": 2,
+        "total_size": 41336,
+        "importance_score": 0.4
+      },
+      {
+        "path": ".\\crates\\indicator",
+        "name": "indicator",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 221,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\market\\src",
+        "name": "src",
+        "file_count": 12,
+        "subdirectory_count": 0,
+        "total_size": 63487,
+        "importance_score": 0.6000000000000001
+      },
+      {
+        "path": ".\\crates\\market",
+        "name": "market",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 671,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\strategy\\src\\min",
+        "name": "min",
+        "file_count": 0,
+        "subdirectory_count": 0,
+        "total_size": 0,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates\\strategy\\src",
+        "name": "src",
+        "file_count": 6,
+        "subdirectory_count": 1,
+        "total_size": 47402,
+        "importance_score": 0.6000000000000001
+      },
+      {
+        "path": ".\\crates\\strategy",
+        "name": "strategy",
+        "file_count": 1,
+        "subdirectory_count": 1,
+        "total_size": 324,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\crates",
+        "name": "crates",
+        "file_count": 0,
+        "subdirectory_count": 5,
+        "total_size": 0,
+        "importance_score": 0.1
+      },
+      {
+        "path": ".\\deploy",
+        "name": "deploy",
+        "file_count": 1,
+        "subdirectory_count": 0,
+        "total_size": 436,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\docs\\superpowers\\plans",
+        "name": "plans",
+        "file_count": 0,
+        "subdirectory_count": 0,
+        "total_size": 0,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\docs\\superpowers",
+        "name": "superpowers",
+        "file_count": 0,
+        "subdirectory_count": 1,
+        "total_size": 0,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\docs",
+        "name": "docs",
+        "file_count": 0,
+        "subdirectory_count": 1,
+        "total_size": 0,
+        "importance_score": 0.0
+      },
+      {
+        "path": ".\\src",
+        "name": "src",
+        "file_count": 3,
+        "subdirectory_count": 0,
+        "total_size": 20477,
+        "importance_score": 0.4
+      }
+    ],
+    "files": [
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\benches\\backtest\\mod.rs",
+        "name": "mod.rs",
+        "size": 14901,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 1717,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.30000000000000004,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\backtests_concurrent.rs",
+        "name": "backtests_concurrent.rs",
+        "size": 4699,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\config\\backtest_config.json",
+        "name": "backtest_config.json",
+        "size": 2224,
+        "extension": "json",
+        "is_core": false,
+        "importance_score": 0.4,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\config\\system_config.json",
+        "name": "system_config.json",
+        "size": 2026,
+        "extension": "json",
+        "is_core": false,
+        "importance_score": 0.4,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\data\\binance_spot_market_data_with_disconnect_events.json",
+        "name": "binance_spot_market_data_with_disconnect_events.json",
+        "size": 8579,
+        "extension": "json",
+        "is_core": false,
+        "importance_score": 0.30000000000000004,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\engine_async_with_historic_market_data_and_mock_execution.rs",
+        "name": "engine_async_with_historic_market_data_and_mock_execution.rs",
+        "size": 5068,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\engine_sync_with_audit_replica_engine_state.rs",
+        "name": "engine_sync_with_audit_replica_engine_state.rs",
+        "size": 4159,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\engine_sync_with_live_market_data_and_mock_execution_and_audit.rs",
+        "name": "engine_sync_with_live_market_data_and_mock_execution_and_audit.rs",
+        "size": 4181,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\engine_sync_with_multiple_strategies.rs",
+        "name": "engine_sync_with_multiple_strategies.rs",
+        "size": 12933,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\engine_sync_with_risk_manager_open_order_checks.rs",
+        "name": "engine_sync_with_risk_manager_open_order_checks.rs",
+        "size": 10128,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\examples\\statistical_trading_summary.rs",
+        "name": "statistical_trading_summary.rs",
+        "size": 11401,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\LICENSE",
+        "name": "LICENSE",
+        "size": 1062,
+        "extension": null,
+        "is_core": false,
+        "importance_score": 0.2,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\backtest\\market_data.rs",
+        "name": "market_data.rs",
+        "size": 2490,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\backtest\\mod.rs",
+        "name": "mod.rs",
+        "size": 8625,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\backtest\\summary.rs",
+        "name": "summary.rs",
+        "size": 1488,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\action\\cancel_orders.rs",
+        "name": "cancel_orders.rs",
+        "size": 2165,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\action\\close_positions.rs",
+        "name": "close_positions.rs",
+        "size": 2533,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\action\\generate_algo_orders.rs",
+        "name": "generate_algo_orders.rs",
+        "size": 5714,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\action\\mod.rs",
+        "name": "mod.rs",
+        "size": 2225,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\action\\send_requests.rs",
+        "name": "send_requests.rs",
+        "size": 7212,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\audit\\context.rs",
+        "name": "context.rs",
+        "size": 395,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\audit\\mod.rs",
+        "name": "mod.rs",
+        "size": 8067,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\audit\\state_replica.rs",
+        "name": "state_replica.rs",
+        "size": 5839,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\clock.rs",
+        "name": "clock.rs",
+        "size": 11704,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\command.rs",
+        "name": "command.rs",
+        "size": 951,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\error.rs",
+        "name": "error.rs",
+        "size": 1860,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\execution_tx.rs",
+        "name": "execution_tx.rs",
+        "size": 3468,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\mod.rs",
+        "name": "mod.rs",
+        "size": 16985,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\run.rs",
+        "name": "run.rs",
+        "size": 6891,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\asset\\filter.rs",
+        "name": "filter.rs",
+        "size": 546,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\asset\\mod.rs",
+        "name": "mod.rs",
+        "size": 10008,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\builder.rs",
+        "name": "builder.rs",
+        "size": 5361,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\connectivity\\mod.rs",
+        "name": "mod.rs",
+        "size": 7966,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\global.rs",
+        "name": "global.rs",
+        "size": 872,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\instrument\\data.rs",
+        "name": "data.rs",
+        "size": 4516,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\instrument\\filter.rs",
+        "name": "filter.rs",
+        "size": 1227,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\instrument\\mod.rs",
+        "name": "mod.rs",
+        "size": 15968,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\mod.rs",
+        "name": "mod.rs",
+        "size": 8880,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\order\\in_flight_recorder.rs",
+        "name": "in_flight_recorder.rs",
+        "size": 2310,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\order\\manager.rs",
+        "name": "manager.rs",
+        "size": 1140,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\order\\mod.rs",
+        "name": "mod.rs",
+        "size": 46830,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\position.rs",
+        "name": "position.rs",
+        "size": 48440,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\engine\\state\\trading\\mod.rs",
+        "name": "mod.rs",
+        "size": 7188,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\error.rs",
+        "name": "error.rs",
+        "size": 1396,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\execution\\builder.rs",
+        "name": "builder.rs",
+        "size": 17724,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\execution\\error.rs",
+        "name": "error.rs",
+        "size": 832,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\execution\\manager.rs",
+        "name": "manager.rs",
+        "size": 16821,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\execution\\mod.rs",
+        "name": "mod.rs",
+        "size": 1572,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\execution\\request.rs",
+        "name": "request.rs",
+        "size": 1721,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 9431,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\logging.rs",
+        "name": "logging.rs",
+        "size": 1805,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\risk\\check\\mod.rs",
+        "name": "mod.rs",
+        "size": 1978,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\risk\\check\\util.rs",
+        "name": "util.rs",
+        "size": 2262,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\risk\\mod.rs",
+        "name": "mod.rs",
+        "size": 4318,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\shutdown.rs",
+        "name": "shutdown.rs",
+        "size": 368,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\algorithm.rs",
+        "name": "algorithm.rs",
+        "size": 8017,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\calmar.rs",
+        "name": "calmar.rs",
+        "size": 9695,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\drawdown\\max.rs",
+        "name": "max.rs",
+        "size": 6175,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\drawdown\\mean.rs",
+        "name": "mean.rs",
+        "size": 5874,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\drawdown\\mod.rs",
+        "name": "mod.rs",
+        "size": 9556,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\mod.rs",
+        "name": "mod.rs",
+        "size": 386,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\profit_factor.rs",
+        "name": "profit_factor.rs",
+        "size": 3293,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\rate_of_return.rs",
+        "name": "rate_of_return.rs",
+        "size": 6390,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\sharpe.rs",
+        "name": "sharpe.rs",
+        "size": 4662,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\sortino.rs",
+        "name": "sortino.rs",
+        "size": 9075,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\metric\\win_rate.rs",
+        "name": "win_rate.rs",
+        "size": 1682,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\mod.rs",
+        "name": "mod.rs",
+        "size": 494,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\asset.rs",
+        "name": "asset.rs",
+        "size": 14314,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\dataset\\dispersion.rs",
+        "name": "dispersion.rs",
+        "size": 8329,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\dataset\\mod.rs",
+        "name": "mod.rs",
+        "size": 7490,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\display.rs",
+        "name": "display.rs",
+        "size": 11376,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\instrument.rs",
+        "name": "instrument.rs",
+        "size": 5795,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\mod.rs",
+        "name": "mod.rs",
+        "size": 8970,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\summary\\pnl.rs",
+        "name": "pnl.rs",
+        "size": 2219,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\statistic\\time.rs",
+        "name": "time.rs",
+        "size": 2301,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\strategy\\algo.rs",
+        "name": "algo.rs",
+        "size": 1199,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\strategy\\close_positions.rs",
+        "name": "close_positions.rs",
+        "size": 4679,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\strategy\\mod.rs",
+        "name": "mod.rs",
+        "size": 3941,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\strategy\\on_disconnect.rs",
+        "name": "on_disconnect.rs",
+        "size": 850,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\strategy\\on_trading_disabled.rs",
+        "name": "on_trading_disabled.rs",
+        "size": 770,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\system\\builder.rs",
+        "name": "builder.rs",
+        "size": 14870,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\system\\config.rs",
+        "name": "config.rs",
+        "size": 5066,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.9000000000000001,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter\\src\\system\\mod.rs",
+        "name": "mod.rs",
+        "size": 7298,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 1750,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.30000000000000004,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\dynamic_multi_stream_multi_exchange.rs",
+        "name": "dynamic_multi_stream_multi_exchange.rs",
+        "size": 3996,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\indexed_market_stream.rs",
+        "name": "indexed_market_stream.rs",
+        "size": 3406,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.7,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\multi_stream_multi_exchange.rs",
+        "name": "multi_stream_multi_exchange.rs",
+        "size": 3603,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\order_books_l1_streams.rs",
+        "name": "order_books_l1_streams.rs",
+        "size": 2703,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\order_books_l1_streams_multi_exchange.rs",
+        "name": "order_books_l1_streams_multi_exchange.rs",
+        "size": 2234,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\order_books_l2_manager.rs",
+        "name": "order_books_l2_manager.rs",
+        "size": 2887,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\order_books_l2_streams.rs",
+        "name": "order_books_l2_streams.rs",
+        "size": 2693,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\public_trades_streams.rs",
+        "name": "public_trades_streams.rs",
+        "size": 2747,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\examples\\public_trades_streams_multi_exchange.rs",
+        "name": "public_trades_streams_multi_exchange.rs",
+        "size": 5270,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\LICENSE",
+        "name": "LICENSE",
+        "size": 1067,
+        "extension": null,
+        "is_core": false,
+        "importance_score": 0.2,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\books\\manager.rs",
+        "name": "manager.rs",
+        "size": 4227,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\books\\map.rs",
+        "name": "map.rs",
+        "size": 2183,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\books\\mod.rs",
+        "name": "mod.rs",
+        "size": 24420,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\error.rs",
+        "name": "error.rs",
+        "size": 2753,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\event.rs",
+        "name": "event.rs",
+        "size": 7335,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\book\\l1.rs",
+        "name": "l1.rs",
+        "size": 6054,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\book\\l2.rs",
+        "name": "l2.rs",
+        "size": 6956,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\book\\mod.rs",
+        "name": "mod.rs",
+        "size": 1338,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\channel.rs",
+        "name": "channel.rs",
+        "size": 2906,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\futures\\l2.rs",
+        "name": "l2.rs",
+        "size": 26912,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\futures\\liquidation.rs",
+        "name": "liquidation.rs",
+        "size": 5054,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\futures\\mod.rs",
+        "name": "mod.rs",
+        "size": 2148,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\market.rs",
+        "name": "market.rs",
+        "size": 2051,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\mod.rs",
+        "name": "mod.rs",
+        "size": 5362,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\spot\\l2.rs",
+        "name": "l2.rs",
+        "size": 25896,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\spot\\mod.rs",
+        "name": "mod.rs",
+        "size": 1534,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 3760,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\binance\\trade.rs",
+        "name": "trade.rs",
+        "size": 9099,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex\\channel.rs",
+        "name": "channel.rs",
+        "size": 906,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex\\market.rs",
+        "name": "market.rs",
+        "size": 1675,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex\\message.rs",
+        "name": "message.rs",
+        "size": 8308,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex\\mod.rs",
+        "name": "mod.rs",
+        "size": 4579,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 12224,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex\\trade.rs",
+        "name": "trade.rs",
+        "size": 4009,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitfinex\\validator.rs",
+        "name": "validator.rs",
+        "size": 6831,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitmex\\channel.rs",
+        "name": "channel.rs",
+        "size": 873,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitmex\\market.rs",
+        "name": "market.rs",
+        "size": 1684,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitmex\\message.rs",
+        "name": "message.rs",
+        "size": 1329,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitmex\\mod.rs",
+        "name": "mod.rs",
+        "size": 3856,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitmex\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 4451,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bitmex\\trade.rs",
+        "name": "trade.rs",
+        "size": 7499,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\book\\l1.rs",
+        "name": "l1.rs",
+        "size": 955,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\book\\l2.rs",
+        "name": "l2.rs",
+        "size": 4463,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\book\\mod.rs",
+        "name": "mod.rs",
+        "size": 2828,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\channel.rs",
+        "name": "channel.rs",
+        "size": 1846,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\futures\\mod.rs",
+        "name": "mod.rs",
+        "size": 958,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\market.rs",
+        "name": "market.rs",
+        "size": 1735,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\message.rs",
+        "name": "message.rs",
+        "size": 4614,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\mod.rs",
+        "name": "mod.rs",
+        "size": 5979,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\spot\\mod.rs",
+        "name": "mod.rs",
+        "size": 854,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 5478,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\bybit\\trade.rs",
+        "name": "trade.rs",
+        "size": 13386,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\coinbase\\channel.rs",
+        "name": "channel.rs",
+        "size": 959,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\coinbase\\market.rs",
+        "name": "market.rs",
+        "size": 1643,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\coinbase\\mod.rs",
+        "name": "mod.rs",
+        "size": 3258,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\coinbase\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 5503,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\coinbase\\trade.rs",
+        "name": "trade.rs",
+        "size": 5075,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\channel.rs",
+        "name": "channel.rs",
+        "size": 2092,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\future\\mod.rs",
+        "name": "mod.rs",
+        "size": 2657,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\market.rs",
+        "name": "market.rs",
+        "size": 2722,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\message.rs",
+        "name": "message.rs",
+        "size": 2048,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\mod.rs",
+        "name": "mod.rs",
+        "size": 4700,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\option\\mod.rs",
+        "name": "mod.rs",
+        "size": 1464,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\perpetual\\mod.rs",
+        "name": "mod.rs",
+        "size": 2729,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\perpetual\\trade.rs",
+        "name": "trade.rs",
+        "size": 4327,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\spot\\mod.rs",
+        "name": "mod.rs",
+        "size": 1500,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\spot\\trade.rs",
+        "name": "trade.rs",
+        "size": 3278,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\gateio\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 4495,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\book\\l1.rs",
+        "name": "l1.rs",
+        "size": 8164,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\book\\mod.rs",
+        "name": "mod.rs",
+        "size": 56,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\channel.rs",
+        "name": "channel.rs",
+        "size": 1312,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\market.rs",
+        "name": "market.rs",
+        "size": 1584,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\message.rs",
+        "name": "message.rs",
+        "size": 5204,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\mod.rs",
+        "name": "mod.rs",
+        "size": 3681,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 5403,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\kraken\\trade.rs",
+        "name": "trade.rs",
+        "size": 10628,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\mod.rs",
+        "name": "mod.rs",
+        "size": 6193,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\okx\\channel.rs",
+        "name": "channel.rs",
+        "size": 899,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\okx\\market.rs",
+        "name": "market.rs",
+        "size": 2559,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\okx\\mod.rs",
+        "name": "mod.rs",
+        "size": 3300,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\okx\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 5306,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\okx\\trade.rs",
+        "name": "trade.rs",
+        "size": 5836,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\exchange\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 2613,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\instrument.rs",
+        "name": "instrument.rs",
+        "size": 2709,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 16544,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\builder\\dynamic\\indexed.rs",
+        "name": "indexed.rs",
+        "size": 6621,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\builder\\dynamic\\mod.rs",
+        "name": "mod.rs",
+        "size": 47969,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\builder\\mod.rs",
+        "name": "mod.rs",
+        "size": 5444,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\builder\\multi.rs",
+        "name": "multi.rs",
+        "size": 4705,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\consumer.rs",
+        "name": "consumer.rs",
+        "size": 3747,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\mod.rs",
+        "name": "mod.rs",
+        "size": 1990,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\reconnect\\mod.rs",
+        "name": "mod.rs",
+        "size": 1534,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\streams\\reconnect\\stream.rs",
+        "name": "stream.rs",
+        "size": 7471,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscriber\\mapper.rs",
+        "name": "mapper.rs",
+        "size": 3002,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscriber\\mod.rs",
+        "name": "mod.rs",
+        "size": 3749,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscriber\\validator.rs",
+        "name": "validator.rs",
+        "size": 4842,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscription\\book.rs",
+        "name": "book.rs",
+        "size": 3667,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscription\\candle.rs",
+        "name": "candle.rs",
+        "size": 965,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscription\\liquidation.rs",
+        "name": "liquidation.rs",
+        "size": 962,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscription\\mod.rs",
+        "name": "mod.rs",
+        "size": 20638,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\subscription\\trade.rs",
+        "name": "trade.rs",
+        "size": 959,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\transformer\\mod.rs",
+        "name": "mod.rs",
+        "size": 1272,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-data\\src\\transformer\\stateless.rs",
+        "name": "stateless.rs",
+        "size": 2984,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 1290,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.30000000000000004,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\LICENSE",
+        "name": "LICENSE",
+        "size": 1072,
+        "extension": null,
+        "is_core": false,
+        "importance_score": 0.2,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\balance.rs",
+        "name": "balance.rs",
+        "size": 684,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\client\\binance\\mod.rs",
+        "name": "mod.rs",
+        "size": 1,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\client\\mock\\mod.rs",
+        "name": "mod.rs",
+        "size": 10374,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\client\\mod.rs",
+        "name": "mod.rs",
+        "size": 3061,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\error.rs",
+        "name": "error.rs",
+        "size": 5074,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\exchange\\mock\\account.rs",
+        "name": "account.rs",
+        "size": 4676,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\exchange\\mock\\mod.rs",
+        "name": "mod.rs",
+        "size": 16956,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\exchange\\mock\\request.rs",
+        "name": "request.rs",
+        "size": 4103,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\exchange\\mod.rs",
+        "name": "mod.rs",
+        "size": 14,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\indexer.rs",
+        "name": "indexer.rs",
+        "size": 9829,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 5740,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\map.rs",
+        "name": "map.rs",
+        "size": 14381,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\order\\id.rs",
+        "name": "id.rs",
+        "size": 2438,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\order\\mod.rs",
+        "name": "mod.rs",
+        "size": 7871,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\order\\request.rs",
+        "name": "request.rs",
+        "size": 1498,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\order\\state.rs",
+        "name": "state.rs",
+        "size": 3572,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-execution\\src\\trade.rs",
+        "name": "trade.rs",
+        "size": 2189,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 920,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\asset\\mod.rs",
+        "name": "mod.rs",
+        "size": 3481,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\asset\\name.rs",
+        "name": "name.rs",
+        "size": 3408,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\exchange.rs",
+        "name": "exchange.rs",
+        "size": 4411,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\index\\builder.rs",
+        "name": "builder.rs",
+        "size": 10969,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\index\\error.rs",
+        "name": "error.rs",
+        "size": 1105,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\index\\mod.rs",
+        "name": "mod.rs",
+        "size": 17322,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\kind\\future.rs",
+        "name": "future.rs",
+        "size": 866,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\kind\\mod.rs",
+        "name": "mod.rs",
+        "size": 4526,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\kind\\option.rs",
+        "name": "option.rs",
+        "size": 2659,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\kind\\perpetual.rs",
+        "name": "perpetual.rs",
+        "size": 677,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\market_data\\kind.rs",
+        "name": "kind.rs",
+        "size": 1926,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\market_data\\mod.rs",
+        "name": "mod.rs",
+        "size": 6112,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\mod.rs",
+        "name": "mod.rs",
+        "size": 8456,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\name.rs",
+        "name": "name.rs",
+        "size": 4691,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\quote.rs",
+        "name": "quote.rs",
+        "size": 745,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\instrument\\spec.rs",
+        "name": "spec.rs",
+        "size": 1184,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-instrument\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 4384,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 3055,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.30000000000000004,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\examples\\signed_get_request.rs",
+        "name": "signed_get_request.rs",
+        "size": 4404,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\examples\\simple_websocket_integration.rs",
+        "name": "simple_websocket_integration.rs",
+        "size": 3742,
+        "extension": "rs",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\LICENSE",
+        "name": "LICENSE",
+        "size": 1074,
+        "extension": null,
+        "is_core": false,
+        "importance_score": 0.2,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\channel.rs",
+        "name": "channel.rs",
+        "size": 4511,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\collection\\mod.rs",
+        "name": "mod.rs",
+        "size": 298,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\collection\\none_one_or_many.rs",
+        "name": "none_one_or_many.rs",
+        "size": 5961,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\collection\\one_or_many.rs",
+        "name": "one_or_many.rs",
+        "size": 5335,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\collection\\snapshot.rs",
+        "name": "snapshot.rs",
+        "size": 2274,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\error.rs",
+        "name": "error.rs",
+        "size": 2208,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 4274,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\metric.rs",
+        "name": "metric.rs",
+        "size": 2003,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\mod.rs",
+        "name": "mod.rs",
+        "size": 3333,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\private\\encoder.rs",
+        "name": "encoder.rs",
+        "size": 799,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\private\\mod.rs",
+        "name": "mod.rs",
+        "size": 4148,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\public\\mod.rs",
+        "name": "mod.rs",
+        "size": 486,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\rest\\client.rs",
+        "name": "client.rs",
+        "size": 5119,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\http\\rest\\mod.rs",
+        "name": "mod.rs",
+        "size": 1344,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\mod.rs",
+        "name": "mod.rs",
+        "size": 719,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\protocol\\websocket\\mod.rs",
+        "name": "mod.rs",
+        "size": 9981,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\de\\error.rs",
+        "name": "error.rs",
+        "size": 579,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\de\\mod.rs",
+        "name": "mod.rs",
+        "size": 4207,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\de\\util.rs",
+        "name": "util.rs",
+        "size": 2849,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\mod.rs",
+        "name": "mod.rs",
+        "size": 179,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\se\\error.rs",
+        "name": "error.rs",
+        "size": 147,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\serde\\se\\mod.rs",
+        "name": "mod.rs",
+        "size": 4240,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\socket\\backoff.rs",
+        "name": "backoff.rs",
+        "size": 2283,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\socket\\mod.rs",
+        "name": "mod.rs",
+        "size": 5248,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\socket\\on_connect_err.rs",
+        "name": "on_connect_err.rs",
+        "size": 7066,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\socket\\on_stream_err.rs",
+        "name": "on_stream_err.rs",
+        "size": 5718,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\socket\\on_stream_err_filter.rs",
+        "name": "on_stream_err_filter.rs",
+        "size": 5237,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\socket\\update.rs",
+        "name": "update.rs",
+        "size": 1898,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\data.rs",
+        "name": "data.rs",
+        "size": 3669,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\ext\\forward_by.rs",
+        "name": "forward_by.rs",
+        "size": 6028,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\ext\\forward_clone_by.rs",
+        "name": "forward_clone_by.rs",
+        "size": 5311,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\ext\\indexed.rs",
+        "name": "indexed.rs",
+        "size": 3671,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\ext\\mod.rs",
+        "name": "mod.rs",
+        "size": 2771,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\mod.rs",
+        "name": "mod.rs",
+        "size": 3688,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\util\\merge.rs",
+        "name": "merge.rs",
+        "size": 2642,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\stream\\util\\mod.rs",
+        "name": "mod.rs",
+        "size": 129,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-integration\\src\\subscription.rs",
+        "name": "subscription.rs",
+        "size": 1256,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-macro\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 503,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-macro\\LICENSE",
+        "name": "LICENSE",
+        "size": 1063,
+        "extension": null,
+        "is_core": false,
+        "importance_score": 0.2,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\barter-macro\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 4116,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 2212,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.30000000000000004,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\LICENSE",
+        "name": "LICENSE",
+        "size": 1086,
+        "extension": null,
+        "is_core": false,
+        "importance_score": 0.2,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\release-plz.toml",
+        "name": "release-plz.toml",
+        "size": 716,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\rust-toolchain.toml",
+        "name": "rust-toolchain.toml",
+        "size": 117,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Bak_非必要指定不读取老版本\\rustfmt.toml",
+        "name": "rustfmt.toml",
+        "size": 46,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1772704862"
+      },
+      {
+        "path": "Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 1577,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.30000000000000004,
+        "complexity_score": 0.0,
+        "last_modified": "1774054820"
+      },
+      {
+        "path": "crates\\account\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 210,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1773948919"
+      },
+      {
+        "path": "crates\\account\\src\\error.rs",
+        "name": "error.rs",
+        "size": 367,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1773971533"
+      },
+      {
+        "path": "crates\\account\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 55,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1773949794"
+      },
+      {
+        "path": "crates\\account\\src\\types.rs",
+        "name": "types.rs",
+        "size": 1000,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1773948911"
+      },
+      {
+        "path": "crates\\engine\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 639,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1774036243"
+      },
+      {
+        "path": "crates\\engine\\src\\channel\\channel.rs",
+        "name": "channel.rs",
+        "size": 22624,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080705"
+      },
+      {
+        "path": "crates\\engine\\src\\channel\\mod.rs",
+        "name": "mod.rs",
+        "size": 138,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774080156"
+      },
+      {
+        "path": "crates\\engine\\src\\channel\\mode.rs",
+        "name": "mode.rs",
+        "size": 698,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1773971677"
+      },
+      {
+        "path": "crates\\engine\\src\\core\\engine.rs",
+        "name": "engine.rs",
+        "size": 29366,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080593"
+      },
+      {
+        "path": "crates\\engine\\src\\core\\mod.rs",
+        "name": "mod.rs",
+        "size": 315,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774080170"
+      },
+      {
+        "path": "crates\\engine\\src\\core\\pipeline.rs",
+        "name": "pipeline.rs",
+        "size": 17793,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080335"
+      },
+      {
+        "path": "crates\\engine\\src\\core\\pipeline_form.rs",
+        "name": "pipeline_form.rs",
+        "size": 6659,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773987139"
+      },
+      {
+        "path": "crates\\engine\\src\\core\\strategy_pool.rs",
+        "name": "strategy_pool.rs",
+        "size": 12011,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773987139"
+      },
+      {
+        "path": "crates\\engine\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 2947,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080190"
+      },
+      {
+        "path": "crates\\engine\\src\\order\\gateway.rs",
+        "name": "gateway.rs",
+        "size": 726,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774080362"
+      },
+      {
+        "path": "crates\\engine\\src\\order\\mock_binance_gateway.rs",
+        "name": "mock_binance_gateway.rs",
+        "size": 46408,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080650"
+      },
+      {
+        "path": "crates\\engine\\src\\order\\mod.rs",
+        "name": "mod.rs",
+        "size": 415,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774080112"
+      },
+      {
+        "path": "crates\\engine\\src\\order\\order.rs",
+        "name": "order.rs",
+        "size": 5486,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080612"
+      },
+      {
+        "path": "crates\\engine\\src\\persistence\\disaster_recovery.rs",
+        "name": "disaster_recovery.rs",
+        "size": 20544,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080558"
+      },
+      {
+        "path": "crates\\engine\\src\\persistence\\memory_backup.rs",
+        "name": "memory_backup.rs",
+        "size": 32211,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774084447"
+      },
+      {
+        "path": "crates\\engine\\src\\persistence\\mod.rs",
+        "name": "mod.rs",
+        "size": 1107,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080144"
+      },
+      {
+        "path": "crates\\engine\\src\\persistence\\persistence.rs",
+        "name": "persistence.rs",
+        "size": 10346,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773979293"
+      },
+      {
+        "path": "crates\\engine\\src\\persistence\\sqlite_persistence.rs",
+        "name": "sqlite_persistence.rs",
+        "size": 51567,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774080679"
+      },
+      {
+        "path": "crates\\engine\\src\\position\\mod.rs",
+        "name": "mod.rs",
+        "size": 235,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774080126"
+      },
+      {
+        "path": "crates\\engine\\src\\position\\position_exclusion.rs",
+        "name": "position_exclusion.rs",
+        "size": 9197,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773987499"
+      },
+      {
+        "path": "crates\\engine\\src\\position\\position_manager.rs",
+        "name": "position_manager.rs",
+        "size": 9181,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773982660"
+      },
+      {
+        "path": "crates\\engine\\src\\risk\\minute_risk.rs",
+        "name": "minute_risk.rs",
+        "size": 14941,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080447"
+      },
+      {
+        "path": "crates\\engine\\src\\risk\\mod.rs",
+        "name": "mod.rs",
+        "size": 436,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774080097"
+      },
+      {
+        "path": "crates\\engine\\src\\risk\\order_check.rs",
+        "name": "order_check.rs",
+        "size": 11948,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773985841"
+      },
+      {
+        "path": "crates\\engine\\src\\risk\\risk.rs",
+        "name": "risk.rs",
+        "size": 8534,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080464"
+      },
+      {
+        "path": "crates\\engine\\src\\risk\\risk_rechecker.rs",
+        "name": "risk_rechecker.rs",
+        "size": 10502,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080482"
+      },
+      {
+        "path": "crates\\engine\\src\\risk\\thresholds.rs",
+        "name": "thresholds.rs",
+        "size": 8284,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773994652"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\account_pool.rs",
+        "name": "account_pool.rs",
+        "size": 20670,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080500"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\checkpoint.rs",
+        "name": "checkpoint.rs",
+        "size": 7744,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774041180"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\checkpoint_integration.rs",
+        "name": "checkpoint_integration.rs",
+        "size": 4260,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774047730"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\check_table.rs",
+        "name": "check_table.rs",
+        "size": 4253,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773987248"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\error.rs",
+        "name": "error.rs",
+        "size": 758,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774073058"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\margin_config.rs",
+        "name": "margin_config.rs",
+        "size": 5970,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.9000000000000001,
+        "complexity_score": 0.0,
+        "last_modified": "1774078498"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\market_status.rs",
+        "name": "market_status.rs",
+        "size": 9558,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773975469"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\mod.rs",
+        "name": "mod.rs",
+        "size": 1082,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080082"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\platform.rs",
+        "name": "platform.rs",
+        "size": 5000,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774075090"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\pnl_manager.rs",
+        "name": "pnl_manager.rs",
+        "size": 10849,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773985873"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\round_guard.rs",
+        "name": "round_guard.rs",
+        "size": 3090,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773987478"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\symbol_rules.rs",
+        "name": "symbol_rules.rs",
+        "size": 6631,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1773994645"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\symbol_rules_fetcher.rs",
+        "name": "symbol_rules_fetcher.rs",
+        "size": 11276,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774073326"
+      },
+      {
+        "path": "crates\\engine\\src\\shared\\telegram_notifier.rs",
+        "name": "telegram_notifier.rs",
+        "size": 7349,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774080570"
+      },
+      {
+        "path": "crates\\indicator\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 221,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1773968817"
+      },
+      {
+        "path": "crates\\indicator\\src\\day\\indicator_1d.rs",
+        "name": "indicator_1d.rs",
+        "size": 26685,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774019753"
+      },
+      {
+        "path": "crates\\indicator\\src\\day\\market_status_generator.rs",
+        "name": "market_status_generator.rs",
+        "size": 3581,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774032661"
+      },
+      {
+        "path": "crates\\indicator\\src\\day\\mod.rs",
+        "name": "mod.rs",
+        "size": 396,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774035700"
+      },
+      {
+        "path": "crates\\indicator\\src\\day\\price_control_generator.rs",
+        "name": "price_control_generator.rs",
+        "size": 267,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774032103"
+      },
+      {
+        "path": "crates\\indicator\\src\\day\\signal_generator.rs",
+        "name": "signal_generator.rs",
+        "size": 11260,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774032740"
+      },
+      {
+        "path": "crates\\indicator\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 551,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774035692"
+      },
+      {
+        "path": "crates\\indicator\\src\\min\\indicator_1m.rs",
+        "name": "indicator_1m.rs",
+        "size": 18169,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774027034"
+      },
+      {
+        "path": "crates\\indicator\\src\\min\\market_status_generator.rs",
+        "name": "market_status_generator.rs",
+        "size": 6218,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774032602"
+      },
+      {
+        "path": "crates\\indicator\\src\\min\\mod.rs",
+        "name": "mod.rs",
+        "size": 282,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774031323"
+      },
+      {
+        "path": "crates\\indicator\\src\\min\\price_control_generator.rs",
+        "name": "price_control_generator.rs",
+        "size": 5164,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774032639"
+      },
+      {
+        "path": "crates\\indicator\\src\\min\\signal_generator.rs",
+        "name": "signal_generator.rs",
+        "size": 6593,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774032648"
+      },
+      {
+        "path": "crates\\indicator\\src\\pine_indicator_full.rs",
+        "name": "pine_indicator_full.rs",
+        "size": 21788,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774035662"
+      },
+      {
+        "path": "crates\\indicator\\src\\trading_trigger.rs",
+        "name": "trading_trigger.rs",
+        "size": 11189,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774032806"
+      },
+      {
+        "path": "crates\\indicator\\src\\types.rs",
+        "name": "types.rs",
+        "size": 7808,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774035685"
+      },
+      {
+        "path": "crates\\market\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 671,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1774047258"
+      },
+      {
+        "path": "crates\\market\\src\\binance_ws.rs",
+        "name": "binance_ws.rs",
+        "size": 6374,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774034602"
+      },
+      {
+        "path": "crates\\market\\src\\data_feeder.rs",
+        "name": "data_feeder.rs",
+        "size": 27521,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774038985"
+      },
+      {
+        "path": "crates\\market\\src\\error.rs",
+        "name": "error.rs",
+        "size": 813,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774011844"
+      },
+      {
+        "path": "crates\\market\\src\\kline.rs",
+        "name": "kline.rs",
+        "size": 2502,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774013103"
+      },
+      {
+        "path": "crates\\market\\src\\kline_persistence.rs",
+        "name": "kline_persistence.rs",
+        "size": 3615,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774012537"
+      },
+      {
+        "path": "crates\\market\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 801,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774047262"
+      },
+      {
+        "path": "crates\\market\\src\\orderbook.rs",
+        "name": "orderbook.rs",
+        "size": 2258,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774012406"
+      },
+      {
+        "path": "crates\\market\\src\\recovery.rs",
+        "name": "recovery.rs",
+        "size": 6758,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774047914"
+      },
+      {
+        "path": "crates\\market\\src\\symbol_registry.rs",
+        "name": "symbol_registry.rs",
+        "size": 4019,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774034527"
+      },
+      {
+        "path": "crates\\market\\src\\types.rs",
+        "name": "types.rs",
+        "size": 1363,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774034400"
+      },
+      {
+        "path": "crates\\market\\src\\volatility.rs",
+        "name": "volatility.rs",
+        "size": 5019,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774057303"
+      },
+      {
+        "path": "crates\\market\\src\\websocket.rs",
+        "name": "websocket.rs",
+        "size": 2444,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774034614"
+      },
+      {
+        "path": "crates\\strategy\\Cargo.toml",
+        "name": "Cargo.toml",
+        "size": 324,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1774034884"
+      },
+      {
+        "path": "crates\\strategy\\src\\error.rs",
+        "name": "error.rs",
+        "size": 354,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1773949612"
+      },
+      {
+        "path": "crates\\strategy\\src\\lib.rs",
+        "name": "lib.rs",
+        "size": 451,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.6,
+        "complexity_score": 0.0,
+        "last_modified": "1774034807"
+      },
+      {
+        "path": "crates\\strategy\\src\\pin_strategy.rs",
+        "name": "pin_strategy.rs",
+        "size": 26830,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774020545"
+      },
+      {
+        "path": "crates\\strategy\\src\\traits.rs",
+        "name": "traits.rs",
+        "size": 1968,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774034819"
+      },
+      {
+        "path": "crates\\strategy\\src\\trend_strategy.rs",
+        "name": "trend_strategy.rs",
+        "size": 14978,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774017781"
+      },
+      {
+        "path": "crates\\strategy\\src\\types.rs",
+        "name": "types.rs",
+        "size": 2821,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 0.8,
+        "complexity_score": 0.0,
+        "last_modified": "1774034803"
+      },
+      {
+        "path": "deploy\\data-monitor.service",
+        "name": "data-monitor.service",
+        "size": 436,
+        "extension": "service",
+        "is_core": false,
+        "importance_score": 0.0,
+        "complexity_score": 0.0,
+        "last_modified": "1774059864"
+      },
+      {
+        "path": "rustfmt.toml",
+        "name": "rustfmt.toml",
+        "size": 47,
+        "extension": "toml",
+        "is_core": false,
+        "importance_score": 0.1,
+        "complexity_score": 0.0,
+        "last_modified": "1773948899"
+      },
+      {
+        "path": "src\\main.rs",
+        "name": "main.rs",
+        "size": 1312,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1773985227"
+      },
+      {
+        "path": "src\\main_data_monitor.rs",
+        "name": "main_data_monitor.rs",
+        "size": 15171,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1774060398"
+      },
+      {
+        "path": "src\\main_data_printer.rs",
+        "name": "main_data_printer.rs",
+        "size": 3994,
+        "extension": "rs",
+        "is_core": true,
+        "importance_score": 1.0,
+        "complexity_score": 0.0,
+        "last_modified": "1774037731"
+      },
+      {
+        "path": "verify_rust_vs_python.py",
+        "name": "verify_rust_vs_python.py",
+        "size": 2257,
+        "extension": "py",
+        "is_core": false,
+        "importance_score": 0.5,
+        "complexity_score": 0.0,
+        "last_modified": "1774005860"
+      }
+    ],
+    "total_files": 362,
+    "total_directories": 119,
+    "file_types": {
+      "py": 1,
+      "toml": 17,
+      "rs": 334,
+      "json": 3,
+      "service": 1
+    },
+    "size_distribution": {
+      "tiny": 66,
+      "medium": 51,
+      "small": 245
+    }
+  },
+  "timestamp": 1774088342,
+  "prompt_hash": "81ce170d34aadf59b5341dea337be584",
+  "token_usage": null,
+  "model_name": null
+}

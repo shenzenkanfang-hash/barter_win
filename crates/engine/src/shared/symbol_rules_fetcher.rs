@@ -209,6 +209,88 @@ impl SymbolRulesFetcher {
         info!("从币安 API 获取了 {} 个 USDT 交易对规则", rules.len());
         Ok(rules)
     }
+
+    /// 从币安 API 获取账户信息
+    ///
+    /// # 返回
+    /// * `AccountInfo` - 账户信息
+    pub async fn fetch_account_info(&self) -> Result<AccountInfo, EngineError> {
+        let url = format!("{}/api/v3/account", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {}",
+                resp.status()
+            )));
+        }
+
+        let info: BinanceAccountInfo = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        Ok(AccountInfo {
+            account_type: info.account_type,
+            can_trade: info.can_trade,
+            can_withdraw: info.can_withdraw,
+            can_deposit: info.can_deposit,
+            update_time: info.update_time,
+        })
+    }
+
+    /// 从币安 API 获取指定交易对的持仓风险信息
+    ///
+    /// # 参数
+    /// * `symbol` - 交易对名称，如 "BTCUSDT"
+    ///
+    /// # 返回
+    /// * `PositionRisk` - 持仓风险信息
+    pub async fn fetch_position_risk(&self, symbol: &str) -> Result<PositionRisk, EngineError> {
+        let url = format!("{}/api/v3/positionRisk", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[("symbol", symbol)])
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {}",
+                resp.status()
+            )));
+        }
+
+        let positions: Vec<BinancePositionRisk> = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        // 找到指定交易对的持仓
+        let pos = positions
+            .into_iter()
+            .find(|p| p.symbol == symbol)
+            .ok_or_else(|| EngineError::SymbolNotFound(symbol.to_string()))?;
+
+        Ok(PositionRisk {
+            symbol: pos.symbol,
+            position_side: pos.position_side,
+            quantity: pos.position_amt,
+            entry_price: pos.entry_price,
+            mark_price: pos.mark_price,
+            unrealized_pnl: pos.unrealizedProfit,
+            leverage: pos.leverage,
+            isolated: pos.isolated,
+            margin_ratio: pos.margin_ratio,
+        })
+    }
 }
 
 impl Default for SymbolRulesFetcher {
@@ -261,6 +343,79 @@ pub struct BinanceFilter {
     pub tick_size: Option<String>,
     #[serde(rename = "minNotional")]
     pub min_notional: Option<String>,
+}
+
+/// 币安账户信息
+#[derive(Debug, Clone, Deserialize)]
+pub struct BinanceAccountInfo {
+    #[serde(rename = "accountType")]
+    pub account_type: String,
+    #[serde(rename = "canTrade")]
+    pub can_trade: bool,
+    #[serde(rename = "canWithdraw")]
+    pub can_withdraw: bool,
+    #[serde(rename = "canDeposit")]
+    pub can_deposit: bool,
+    #[serde(rename = "updateTime")]
+    pub update_time: i64,
+}
+
+/// 币安持仓风险信息
+#[derive(Debug, Clone, Deserialize)]
+pub struct BinancePositionRisk {
+    pub symbol: String,
+    #[serde(rename = "positionSide")]
+    pub position_side: String,
+    #[serde(rename = "positionAmt")]
+    pub position_amt: String,
+    #[serde(rename = "entryPrice")]
+    pub entry_price: String,
+    #[serde(rename = "markPrice")]
+    pub mark_price: String,
+    #[serde(rename = "unrealizedProfit")]
+    pub unrealizedProfit: String,
+    pub leverage: i32,
+    pub isolated: bool,
+    #[serde(rename = "marginRatio")]
+    pub margin_ratio: String,
+}
+
+/// 账户信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountInfo {
+    /// 账户类型
+    pub account_type: String,
+    /// 是否可以交易
+    pub can_trade: bool,
+    /// 是否可以提币
+    pub can_withdraw: bool,
+    /// 是否可以充币
+    pub can_deposit: bool,
+    /// 更新时间
+    pub update_time: i64,
+}
+
+/// 持仓风险信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionRisk {
+    /// 交易对
+    pub symbol: String,
+    /// 持仓方向
+    pub position_side: String,
+    /// 持仓数量
+    pub quantity: String,
+    /// 入场价格
+    pub entry_price: String,
+    /// 标记价格
+    pub mark_price: String,
+    /// 未实现盈亏
+    pub unrealized_pnl: String,
+    /// 杠杆倍数
+    pub leverage: i32,
+    /// 是否是逐仓
+    pub isolated: bool,
+    /// 保证金率
+    pub margin_ratio: String,
 }
 
 // ============================================================================
@@ -356,5 +511,73 @@ mod tests {
 
         let test_fetcher = SymbolRulesFetcher::with_api_base("https://testnet.binance.vision");
         assert_eq!(test_fetcher.api_base, "https://testnet.binance.vision");
+    }
+
+    #[test]
+    fn test_account_info_deserialization() {
+        let json = r#"{
+            "accountType": "SPOT",
+            "canTrade": true,
+            "canWithdraw": true,
+            "canDeposit": true,
+            "updateTime": 1234567890
+        }"#;
+
+        let info: BinanceAccountInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.account_type, "SPOT");
+        assert_eq!(info.can_trade, true);
+        assert_eq!(info.update_time, 1234567890);
+    }
+
+    #[test]
+    fn test_position_risk_deserialization() {
+        let json = r#"{
+            "symbol": "BTCUSDT",
+            "positionSide": "BOTH",
+            "positionAmt": "1.5",
+            "entryPrice": "50000.0",
+            "markPrice": "51000.0",
+            "unrealizedProfit": "1500.0",
+            "leverage": 10,
+            "isolated": false,
+            "marginRatio": "0.02"
+        }"#;
+
+        let pos: BinancePositionRisk = serde_json::from_str(json).unwrap();
+        assert_eq!(pos.symbol, "BTCUSDT");
+        assert_eq!(pos.position_side, "BOTH");
+        assert_eq!(pos.leverage, 10);
+    }
+
+    #[test]
+    fn test_account_info_struct() {
+        let info = AccountInfo {
+            account_type: "SPOT".to_string(),
+            can_trade: true,
+            can_withdraw: true,
+            can_deposit: true,
+            update_time: 1234567890,
+        };
+
+        assert_eq!(info.account_type, "SPOT");
+        assert_eq!(info.can_trade, true);
+    }
+
+    #[test]
+    fn test_position_risk_struct() {
+        let pos = PositionRisk {
+            symbol: "BTCUSDT".to_string(),
+            position_side: "BOTH".to_string(),
+            quantity: "1.5".to_string(),
+            entry_price: "50000.0".to_string(),
+            mark_price: "51000.0".to_string(),
+            unrealized_pnl: "1500.0".to_string(),
+            leverage: 10,
+            isolated: false,
+            margin_ratio: "0.02".to_string(),
+        };
+
+        assert_eq!(pos.symbol, "BTCUSDT");
+        assert_eq!(pos.leverage, 10);
     }
 }
