@@ -1,9 +1,9 @@
 //! 波动率检测器 - 1m O-C 和 15m Close-Close 变化率
 
+use b_data_source::kline_1m::KLineSynthesizer;
+use b_data_source::models::types::{KLine, Period, VolatilityStats, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use crate::kline_1m::KLineSynthesizer;
-use crate::models::types::{KLine, Period, VolatilityStats, Tick};
 
 pub struct VolatilityDetector {
     /// 1m K线合成器

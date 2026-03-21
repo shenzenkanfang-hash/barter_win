@@ -11,6 +11,8 @@ pub mod trading_trigger;
 
 pub mod volatility_rank;
 
+pub mod volatility;
+
 pub use volatility_rank::{VolatilityEntry, VolatilityRank};
 pub use pine_indicator_full::{PineColorDetector as PineColorDetectorV5, colors, EMA, RSI};
 pub use types::*;

@@ -20,7 +20,6 @@ pub mod kline_1m;
 pub mod kline_1d;
 pub mod order_books;
 pub mod symbol_rules;
-pub mod volatility;
 pub mod recovery;
 
 // Futures data modules
@@ -37,7 +36,6 @@ pub use models::{KLine, Period, Tick, VolatilityStats};
 pub use kline_1m::{KLineSynthesizer, KlinePersistence};
 pub use symbol_rules::SymbolRegistry;
 pub use order_books::OrderBook;
-pub use volatility::VolatilityDetector;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 
 // Re-exports - Futures data
