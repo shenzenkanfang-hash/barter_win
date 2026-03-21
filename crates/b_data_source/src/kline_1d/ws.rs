@@ -144,6 +144,16 @@ impl Kline1dStream {
         Ok(self.file_handles.get_mut(&symbol_lower).unwrap())
     }
 
+    /// 覆盖写入文件（截断后写入最新数据）
+    fn write_overwrite(&mut self, symbol: &str, json_str: &str) -> std::io::Result<()> {
+        let symbol_lower = symbol.to_lowercase();
+        let path = format!("{}/{}.json", self.base_dir, symbol_lower);
+        let mut file = File::create(&path)?;
+        file.write_all(json_str.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.flush()
+    }
+
     /// 获取下一条消息并写入缓存
     pub async fn next_message(&mut self) -> Option<String> {
         use futures_util::StreamExt;
@@ -178,11 +188,8 @@ impl Kline1dStream {
                     kline.get("s").and_then(|v| v.as_str()),
                     serde_json::to_string(&kline).ok(),
                 ) {
-                    if let Ok(ref mut f) = self.get_file(symbol) {
-                        let _ = f.write_all(json_str.as_bytes());
-                        let _ = f.write_all(b"\n");
-                        let _ = f.flush();
-                    }
+                    // 覆盖写入：每次只保留最新一条数据
+                    let _ = self.write_overwrite(symbol, &json_str);
                 }
             }
         }
