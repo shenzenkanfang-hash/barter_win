@@ -250,6 +250,28 @@ impl SqliteRecordService {
                 details TEXT NOT NULL DEFAULT ''
             );
 
+            -- 订单记录表（用于灾备恢复）
+            CREATE TABLE IF NOT EXISTS orders (
+                order_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                qty TEXT NOT NULL,
+                price TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                filled_at TEXT
+            );
+
+            -- 同步日志表
+            CREATE TABLE IF NOT EXISTS sync_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sync_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                target TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT ''
+            );
+
             -- 创建索引
             CREATE INDEX IF NOT EXISTS idx_account_snapshots_ts ON account_snapshots(ts);
             CREATE INDEX IF NOT EXISTS idx_exchange_positions_ts ON exchange_positions(ts);
@@ -257,6 +279,9 @@ impl SqliteRecordService {
             CREATE INDEX IF NOT EXISTS idx_channel_events_ts ON channel_events(ts);
             CREATE INDEX IF NOT EXISTS idx_risk_events_ts ON risk_events(ts);
             CREATE INDEX IF NOT EXISTS idx_indicator_events_ts ON indicator_events(ts);
+            CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
+            CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+            CREATE INDEX IF NOT EXISTS idx_sync_log_timestamp ON sync_log(timestamp);
         "#).map_err(|e| EngineError::Other(format!("初始化表失败: {}", e)))?;
 
         Ok(())
@@ -478,6 +503,169 @@ impl SqliteRecordService {
                 action_taken: row.get(8)?,
                 details: row.get(9)?,
             })
+        }).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        records.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))
+    }
+
+    // ========== 订单记录 ==========
+
+    /// 订单记录（用于灾备恢复）
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct OrderRecord {
+        pub order_id: String,
+        pub symbol: String,
+        pub side: String,
+        pub qty: String,
+        pub price: String,
+        pub status: String,
+        pub created_at: String,
+        pub filled_at: Option<String>,
+    }
+
+    /// 保存订单记录
+    pub fn save_order(&self, order: OrderRecord) -> Result<(), EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO orders (order_id, symbol, side, qty, price, status, created_at, filled_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                order.order_id,
+                order.symbol,
+                order.side,
+                order.qty,
+                order.price,
+                order.status,
+                order.created_at,
+                order.filled_at,
+            ],
+        ).map_err(|e| EngineError::Other(format!("保存订单失败: {}", e)))?;
+        Ok(())
+    }
+
+    /// 获取所有订单
+    pub fn get_all_orders(&self) -> Result<Vec<OrderRecord>, EngineError> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT order_id, symbol, side, qty, price, status, created_at, filled_at FROM orders ORDER BY created_at DESC")
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        let records = stmt.query_map([], |row| {
+            Ok(OrderRecord {
+                order_id: row.get(0)?,
+                symbol: row.get(1)?,
+                side: row.get(2)?,
+                qty: row.get(3)?,
+                price: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+                filled_at: row.get(7)?,
+            })
+        }).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        records.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))
+    }
+
+    /// 获取指定交易对的所有订单
+    pub fn get_orders_by_symbol(&self, symbol: &str) -> Result<Vec<OrderRecord>, EngineError> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT order_id, symbol, side, qty, price, status, created_at, filled_at FROM orders WHERE symbol = ?1 ORDER BY created_at DESC")
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        let records = stmt.query_map(params![symbol], |row| {
+            Ok(OrderRecord {
+                order_id: row.get(0)?,
+                symbol: row.get(1)?,
+                side: row.get(2)?,
+                qty: row.get(3)?,
+                price: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+                filled_at: row.get(7)?,
+            })
+        }).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        records.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))
+    }
+
+    // ========== 同步日志 ==========
+
+    /// 同步日志条目
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct SyncLogRecord {
+        pub sync_type: String,
+        pub source: String,
+        pub target: String,
+        pub timestamp: String,
+        pub details: String,
+    }
+
+    /// 保存同步日志
+    pub fn save_sync_log(&self, log: SyncLogRecord) -> Result<(), EngineError> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO sync_log (sync_type, source, target, timestamp, details) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                log.sync_type,
+                log.source,
+                log.target,
+                log.timestamp,
+                log.details,
+            ],
+        ).map_err(|e| EngineError::Other(format!("保存同步日志失败: {}", e)))?;
+        Ok(())
+    }
+
+    /// 获取最近的同步日志
+    pub fn get_recent_sync_logs(&self, limit: usize) -> Result<Vec<SyncLogRecord>, EngineError> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare("SELECT sync_type, source, target, timestamp, details FROM sync_log ORDER BY id DESC LIMIT ?1")
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        let records = stmt.query_map([limit], |row| {
+            Ok(SyncLogRecord {
+                sync_type: row.get(0)?,
+                source: row.get(1)?,
+                target: row.get(2)?,
+                timestamp: row.get(3)?,
+                details: row.get(4)?,
+            })
+        }).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        records.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))
+    }
+
+    // ========== 仓位恢复（用于灾备） ==========
+
+    /// 获取最新的本地仓位（按 symbol 分组）
+    pub fn get_latest_positions(&self) -> Result<Vec<(String, String, String, String, String, String)>, EngineError> {
+        let conn = self.conn.lock();
+        // 按 symbol 分组，每组取最新的一条记录
+        let mut stmt = conn
+            .prepare(
+                "SELECT ts, symbol, direction, qty, avg_price, remark
+                 FROM local_positions lp1
+                 WHERE ts = (
+                     SELECT MAX(ts) FROM local_positions lp2 WHERE lp2.symbol = lp1.symbol
+                 )
+                 ORDER BY ts DESC"
+            )
+            .map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
+
+        let records = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?.to_string(),
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
         }).map_err(|e| EngineError::Other(format!("查询失败: {}", e)))?;
 
         records.collect::<Result<Vec<_>, _>>()

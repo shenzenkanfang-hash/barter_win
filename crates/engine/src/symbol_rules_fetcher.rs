@@ -1,0 +1,359 @@
+#![forbid(unsafe_code)]
+
+//! SymbolRules 交易规则获取器
+//!
+//! 从币安 API 拉取交易对规则，包括价格/数量精度、手续费、下单限制等。
+//!
+//! # 使用方式
+//!
+//! ```rust,ignore
+//! let fetcher = SymbolRulesFetcher::new();
+//! let rules = fetcher.fetch_symbol_rules("BTCUSDT").await?;
+//! println!("BTCUSDT price precision: {}", rules.price_precision);
+//! ```
+
+use crate::EngineError;
+use reqwest::Client;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tracing::{info, warn};
+
+/// SymbolRules 获取器
+pub struct SymbolRulesFetcher {
+    client: Client,
+    api_base: String,
+}
+
+impl SymbolRulesFetcher {
+    /// 创建新的获取器
+    pub fn new() -> Self {
+        Self {
+            client: Client::new(),
+            api_base: "https://api.binance.com".to_string(),
+        }
+    }
+
+    /// 创建带自定义 API 地址的获取器（用于测试）
+    pub fn with_api_base(api_base: &str) -> Self {
+        Self {
+            client: Client::new(),
+            api_base: api_base.to_string(),
+        }
+    }
+
+    /// 从币安 API 获取单个交易对规则
+    ///
+    /// # 参数
+    /// * `symbol` - 交易对名称，如 "BTCUSDT"
+    ///
+    /// # 返回
+    /// * `SymbolRulesData` - 交易规则数据
+    pub async fn fetch_symbol_rules(&self, symbol: &str) -> Result<SymbolRulesData, EngineError> {
+        let url = format!("{}/api/v3/exchangeInfo", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {}",
+                resp.status()
+            )));
+        }
+
+        let info: BinanceExchangeInfo = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        let symbol_info = info
+            .symbols
+            .iter()
+            .find(|s| s.symbol == symbol)
+            .ok_or_else(|| EngineError::SymbolNotFound(symbol.to_string()))?;
+
+        // 解析 filters
+        let price_filter = symbol_info
+            .filters
+            .iter()
+            .find(|f| f.filter_type == "PRICE_FILTER");
+        let lot_size = symbol_info
+            .filters
+            .iter()
+            .find(|f| f.filter_type == "LOT_SIZE");
+        let min_notional = symbol_info
+            .filters
+            .iter()
+            .find(|f| f.filter_type == "MIN_NOTIONAL");
+
+        let tick_size = price_filter
+            .and_then(|f| f.tick_size.as_ref())
+            .and_then(|s| s.parse::<Decimal>().ok())
+            .unwrap_or(decimal!(0.01));
+
+        let min_qty = lot_size
+            .and_then(|f| f.min_qty.as_ref())
+            .and_then(|s| s.parse::<Decimal>().ok())
+            .unwrap_or(decimal!(0.000001));
+
+        let step_size = lot_size
+            .and_then(|f| f.step_size.as_ref())
+            .and_then(|s| s.parse::<Decimal>().ok())
+            .unwrap_or(decimal!(0.000001));
+
+        let min_notional_val = min_notional
+            .and_then(|f| f.min_notional.as_ref())
+            .and_then(|s| s.parse::<Decimal>().ok())
+            .unwrap_or(decimal!(10));
+
+        Ok(SymbolRulesData {
+            symbol: symbol.to_string(),
+            price_precision: symbol_info.pricePrecision as u8,
+            quantity_precision: symbol_info.quantityPrecision as u8,
+            tick_size,
+            min_qty,
+            step_size,
+            min_notional: min_notional_val,
+            max_notional: decimal!(1000000),
+            leverage: 1,
+            maker_fee: decimal!(0.0002),
+            taker_fee: decimal!(0.0005),
+        })
+    }
+
+    /// 批量获取所有 USDT 交易对规则
+    ///
+    /// # 返回
+    /// * `Vec<SymbolRulesData>` - 所有 USDT 交易对规则列表
+    pub async fn fetch_all_usdt_symbol_rules(&self) -> Result<Vec<SymbolRulesData>, EngineError> {
+        let url = format!("{}/api/v3/exchangeInfo", self.api_base);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "API 返回错误状态: {}",
+                resp.status()
+            )));
+        }
+
+        let info: BinanceExchangeInfo = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        let mut rules = Vec::new();
+        for symbol in info
+            .symbols
+            .iter()
+            .filter(|s| s.quoteAsset == "USDT" && s.status == "TRADING")
+        {
+            // 解析 filters
+            let price_filter = symbol
+                .filters
+                .iter()
+                .find(|f| f.filter_type == "PRICE_FILTER");
+            let lot_size = symbol
+                .filters
+                .iter()
+                .find(|f| f.filter_type == "LOT_SIZE");
+            let min_notional = symbol
+                .filters
+                .iter()
+                .find(|f| f.filter_type == "MIN_NOTIONAL");
+
+            let tick_size = price_filter
+                .and_then(|f| f.tick_size.as_ref())
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .unwrap_or(decimal!(0.01));
+
+            let min_qty = lot_size
+                .and_then(|f| f.min_qty.as_ref())
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .unwrap_or(decimal!(0.000001));
+
+            let step_size = lot_size
+                .and_then(|f| f.step_size.as_ref())
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .unwrap_or(decimal!(0.000001));
+
+            let min_notional_val = min_notional
+                .and_then(|f| f.min_notional.as_ref())
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .unwrap_or(decimal!(10));
+
+            rules.push(SymbolRulesData {
+                symbol: symbol.symbol.clone(),
+                price_precision: symbol.pricePrecision as u8,
+                quantity_precision: symbol.quantityPrecision as u8,
+                tick_size,
+                min_qty,
+                step_size,
+                min_notional: min_notional_val,
+                max_notional: decimal!(1000000),
+                leverage: 1,
+                maker_fee: decimal!(0.0002),
+                taker_fee: decimal!(0.0005),
+            });
+        }
+
+        info!("从币安 API 获取了 {} 个 USDT 交易对规则", rules.len());
+        Ok(rules)
+    }
+}
+
+impl Default for SymbolRulesFetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// 币安 API 数据结构
+// ============================================================================
+
+/// 币安交易所信息
+#[derive(Debug, Clone, Deserialize)]
+pub struct BinanceExchangeInfo {
+    pub timezone: String,
+    #[serde(rename = "serverTime")]
+    pub server_time: i64,
+    pub symbols: Vec<BinanceSymbol>,
+}
+
+/// 币安交易对信息
+#[derive(Debug, Clone, Deserialize)]
+pub struct BinanceSymbol {
+    pub symbol: String,
+    pub status: String,
+    #[serde(rename = "baseAsset")]
+    pub baseAsset: String,
+    #[serde(rename = "quoteAsset")]
+    pub quoteAsset: String,
+    #[serde(rename = "pricePrecision")]
+    pub pricePrecision: i32,
+    #[serde(rename = "quantityPrecision")]
+    pub quantityPrecision: i32,
+    pub filters: Vec<BinanceFilter>,
+}
+
+/// 币安过滤器
+#[derive(Debug, Clone, Deserialize)]
+pub struct BinanceFilter {
+    #[serde(rename = "filterType")]
+    pub filter_type: String,
+    #[serde(rename = "minQty")]
+    pub min_qty: Option<String>,
+    #[serde(rename = "maxQty")]
+    pub max_qty: Option<String>,
+    #[serde(rename = "stepSize")]
+    pub step_size: Option<String>,
+    #[serde(rename = "tickSize")]
+    pub tick_size: Option<String>,
+    #[serde(rename = "minNotional")]
+    pub min_notional: Option<String>,
+}
+
+// ============================================================================
+// SymbolRulesData - 交易规则数据
+// ============================================================================
+
+/// 交易规则数据
+///
+/// 用于存储从 API 获取的交易对规则信息。
+/// 与 memory_backup::SymbolRulesData 结构一致。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolRulesData {
+    /// 交易对
+    pub symbol: String,
+    /// 价格精度
+    pub price_precision: u8,
+    /// 数量精度
+    pub quantity_precision: u8,
+    /// 步长
+    pub tick_size: Decimal,
+    /// 最小数量
+    pub min_qty: Decimal,
+    /// 步长数量
+    pub step_size: Decimal,
+    /// 最小名义价值
+    pub min_notional: Decimal,
+    /// 最大名义价值
+    pub max_notional: Decimal,
+    /// 杠杆
+    pub leverage: i32,
+    /// 做市商费率
+    pub maker_fee: Decimal,
+    /// 吃单费率
+    pub taker_fee: Decimal,
+}
+
+// ============================================================================
+// 单元测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_symbol_rules_data_creation() {
+        let rules = SymbolRulesData {
+            symbol: "BTCUSDT".to_string(),
+            price_precision: 2,
+            quantity_precision: 6,
+            tick_size: decimal!(0.01),
+            min_qty: decimal!(0.00001),
+            step_size: decimal!(0.00001),
+            min_notional: decimal!(10),
+            max_notional: decimal!(1000000),
+            leverage: 1,
+            maker_fee: decimal!(0.0002),
+            taker_fee: decimal!(0.0005),
+        };
+
+        assert_eq!(rules.symbol, "BTCUSDT");
+        assert_eq!(rules.price_precision, 2);
+        assert_eq!(rules.quantity_precision, 6);
+    }
+
+    #[test]
+    fn test_binance_symbol_deserialization() {
+        let json = r#"{
+            "symbol": "BTCUSDT",
+            "status": "TRADING",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "pricePrecision": 2,
+            "quantityPrecision": 6,
+            "filters": [
+                {"filterType": "PRICE_FILTER", "minPrice": "0.01", "maxPrice": "1000000", "tickSize": "0.01"},
+                {"filterType": "LOT_SIZE", "minQty": "0.00001", "maxQty": "9000", "stepSize": "0.00001"},
+                {"filterType": "MIN_NOTIONAL", "minNotional": "10"}
+            ]
+        }"#;
+
+        let symbol: BinanceSymbol = serde_json::from_str(json).unwrap();
+        assert_eq!(symbol.symbol, "BTCUSDT");
+        assert_eq!(symbol.quoteAsset, "USDT");
+        assert_eq!(symbol.pricePrecision, 2);
+        assert_eq!(symbol.filters.len(), 3);
+    }
+
+    #[test]
+    fn test_fetcher_creation() {
+        let fetcher = SymbolRulesFetcher::new();
+        assert_eq!(fetcher.api_base, "https://api.binance.com");
+
+        let test_fetcher = SymbolRulesFetcher::with_api_base("https://testnet.binance.vision");
+        assert_eq!(test_fetcher.api_base, "https://testnet.binance.vision");
+    }
+}

@@ -1,5 +1,6 @@
 use crate::account_pool::{AccountPool, CircuitBreakerState};
 use crate::check_table::CheckTable;
+use crate::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
 use crate::error::EngineError;
 use crate::gateway::ExchangeGateway;
 use crate::market_status::{MarketStatus, MarketStatusDetector};
@@ -91,6 +92,9 @@ pub struct TradingEngine {
 
     // 内存备份管理器
     memory_backup: Option<Arc<MemoryBackup>>,
+
+    // 灾备恢复管理器
+    disaster_recovery: Option<Arc<DisasterRecovery>>,
 
     // 一轮编码守卫
     round_guard: RoundGuard,
@@ -184,6 +188,7 @@ impl TradingEngine {
             strategy_pool,
             persistence: PersistenceService::new(),
             memory_backup: None,
+            disaster_recovery: None,
             round_guard: RoundGuard::new(),
             check_table: CheckTable::new(),
             thresholds: ThresholdConstants::production(),
@@ -502,6 +507,111 @@ impl TradingEngine {
     /// 检查引擎是否正在运行
     pub fn is_running(&self) -> bool {
         self.is_running.load(Ordering::SeqCst)
+    }
+
+    // ============================================================================
+    // 灾备恢复功能
+    // ============================================================================
+
+    /// 启用灾备恢复系统
+    ///
+    /// # 参数
+    /// * `db_path` - SQLite 数据库路径
+    pub fn enable_disaster_recovery(&mut self, db_path: std::path::PathBuf) -> Result<(), EngineError> {
+        let recovery = DisasterRecovery::new(db_path)?;
+        self.disaster_recovery = Some(Arc::new(recovery));
+        info!("灾备恢复系统已启用");
+        Ok(())
+    }
+
+    /// 从灾备恢复并启动引擎
+    ///
+    /// 恢复流程:
+    /// 1. SQLite 恢复本地仓位（第一优先级）
+    /// 2. API 核对账户（第二优先级，可选）
+    /// 3. 恢复持仓到 position_manager
+    pub async fn recover_and_start(&mut self) -> Result<(), EngineError> {
+        let disaster_recovery = self.disaster_recovery
+            .as_ref()
+            .ok_or_else(|| EngineError::Other("灾备恢复系统未启用".to_string()))?;
+
+        // 1. SQLite 恢复本地仓位
+        let data = disaster_recovery.recover_and_start().await?;
+
+        // 2. 恢复持仓到 position_manager
+        for pos in data.positions {
+            self.restore_position_from_snapshot(&pos)?;
+        }
+
+        // 3. 恢复订单记录
+        for order in data.orders {
+            self.restore_order_from_snapshot(&order)?;
+        }
+
+        info!("灾备恢复完成，共恢复 {} 个持仓, {} 个订单",
+            data.positions.len(), data.orders.len());
+
+        Ok(())
+    }
+
+    /// 从快照恢复持仓
+    fn restore_position_from_snapshot(&mut self, pos: &RecoveryPosition) -> Result<(), EngineError> {
+        // 恢复多头
+        if pos.long_qty > Decimal::ZERO {
+            self.position_manager.open_position(
+                Direction::Long,
+                pos.long_qty,
+                pos.long_avg_price,
+                chrono::Utc::now().timestamp(),
+            );
+        }
+
+        // 恢复空头
+        if pos.short_qty > Decimal::ZERO {
+            self.position_manager.open_position(
+                Direction::Short,
+                pos.short_qty,
+                pos.short_avg_price,
+                chrono::Utc::now().timestamp(),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 从快照恢复订单
+    fn restore_order_from_snapshot(&mut self, _order: &RecoveryOrder) -> Result<(), EngineError> {
+        // 订单恢复逻辑：如果需要可以在此添加订单记录恢复
+        // 目前主要用于审计目的
+        Ok(())
+    }
+
+    /// 保存当前持仓到灾备系统
+    ///
+    /// 在仓位变化时调用，用于持久化当前状态
+    pub fn save_position_to_disaster_recovery(&self, symbol: &str) -> Result<(), EngineError> {
+        let disaster_recovery = self.disaster_recovery
+            .as_ref()
+            .ok_or_else(|| EngineError::Other("灾备恢复系统未启用".to_string()))?;
+
+        let pos = self.position_manager.get_position(symbol);
+        let snapshot = RecoveryPosition {
+            symbol: symbol.to_string(),
+            long_qty: pos.long_qty,
+            long_avg_price: pos.long_avg_price,
+            short_qty: pos.short_qty,
+            short_avg_price: pos.short_avg_price,
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        disaster_recovery.save_position(&snapshot)?;
+        info!("持仓已保存到灾备系统: {}", symbol);
+        Ok(())
+    }
+
+    /// 获取灾备恢复管理器
+    pub fn get_disaster_recovery(&self) -> Option<&Arc<DisasterRecovery>> {
+        self.disaster_recovery.as_ref()
     }
 }
 

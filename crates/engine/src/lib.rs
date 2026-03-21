@@ -6,6 +6,7 @@ pub mod pipeline;
 pub mod account_pool;
 pub mod channel;
 pub mod check_table;
+pub mod disaster_recovery;
 pub mod engine;
 pub mod error;
 pub mod gateway;
@@ -26,6 +27,7 @@ pub mod round_guard;
 pub mod sqlite_persistence;
 pub mod strategy_pool;
 pub mod symbol_rules;
+pub mod symbol_rules_fetcher;
 pub mod telegram_notifier;
 pub mod thresholds;
 
@@ -64,9 +66,14 @@ pub use sqlite_persistence::{
     AccountSnapshotRecord, ChannelEventRecord, EventRecorder, ExchangePositionRecord,
     IndicatorCsvWriter, IndicatorComparisonRow, IndicatorEventRecord,
     LocalPositionRecord, NoOpEventRecorder, RiskEventRecord, SqliteEventRecorder,
-    SqliteRecordService, format_decimal,
+    SqliteRecordService, format_decimal, OrderRecord, SyncLogRecord,
 };
 pub use strategy_pool::{StrategyAllocation, StrategyPool};
 pub use symbol_rules::SymbolRules;
+pub use symbol_rules_fetcher::SymbolRulesFetcher;
+pub use disaster_recovery::{
+    AccountSnapshot, ApiPositionSnapshot, DisasterRecovery, LocalPositionSnapshot,
+    OrderSnapshot, RecoveryData, SyncLogEntry, VerificationResult,
+};
 pub use telegram_notifier::{TelegramConfig, TelegramNotifier};
 pub use thresholds::ThresholdConstants;
