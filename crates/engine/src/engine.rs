@@ -429,11 +429,11 @@ impl TradingEngine {
 
     /// 启用内存备份系统
     ///
-    /// 在后台启动内存备份任务，定期将 /dev/shm/backup/ 同步到磁盘。
+    /// 在后台启动内存备份任务，定期将 E:/shm/backup/ 同步到磁盘。
     ///
     /// # 参数
-    /// * `tmpfs_dir` - 内存文件系统目录 (如 "/dev/shm/backup/")
-    /// * `disk_dir` - 磁盘备份目录 (如 "data/backup/")
+    /// * `tmpfs_dir` - 高速内存盘目录 (如 "E:/shm/backup/")
+    /// * `disk_dir` - 磁盘备份目录 (如 "E:/backup/sync/")
     /// * `sync_interval_secs` - 同步间隔（秒），默认30秒
     pub fn enable_memory_backup(
         &mut self,

@@ -1,14 +1,14 @@
 #![forbid(unsafe_code)]
 
-//! 内存备份系统 - /dev/shm 内存文件系统备份
+//! 内存备份系统 - 高速内存文件系统备份
 //!
-//! 将实时交易数据保存到内存文件系统 (/dev/shm)，定期同步到磁盘。
+//! 将实时交易数据保存到高速内存盘 (E:/shm/backup)，定期同步到磁盘。
 //! 用于快速读写高频交易数据，同时保证数据持久性。
 //!
 //! # 目录结构
 //!
 //! ```ignore
-//! /dev/shm/backup/
+//! E:/shm/backup/
 //! ├── account.json              # 账户信息
 //! ├── trading_pairs.json        # 交易品种列表
 //! ├── symbol_rules.json         # 规则汇总
@@ -47,8 +47,8 @@ use tokio::time::{interval, Duration};
 // 常量定义
 // ============================================================================
 
-/// 内存备份根目录
-pub const MEMORY_BACKUP_DIR: &str = "/dev/shm/backup";
+/// 内存备份根目录 (Windows: E盘高速内存盘)
+pub const MEMORY_BACKUP_DIR: &str = "E:/shm/backup";
 
 /// K线最大条目数
 const MAX_KXIAN_ENTRIES: usize = 1000;
@@ -410,16 +410,16 @@ impl Default for KxianCache {
 
 /// 内存备份管理器
 ///
-/// 将实时交易数据保存到内存文件系统 (/dev/shm)，定期同步到磁盘。
+/// 将实时交易数据保存到高速内存盘 (E:/shm/backup)，定期同步到磁盘。
 ///
 /// # 设计原则
-/// - 高频数据写入内存文件系统，避免磁盘 IO 瓶颈
+/// - 高频数据写入高速内存盘，避免磁盘 IO 瓶颈
 /// - 定期同步到磁盘，保证数据持久性
 /// - 限制内存使用，防止无限增长
 pub struct MemoryBackup {
-    /// 内存文件系统目录 (如 /dev/shm/backup/)
+    /// 高速内存盘目录 (如 E:/shm/backup/)
     tmpfs_dir: String,
-    /// 磁盘备份目录 (如 data/backup/)
+    /// 磁盘备份目录 (如 E:/backup/sync/)
     disk_dir: String,
     /// 同步间隔（秒）
     sync_interval_secs: u64,
@@ -455,10 +455,10 @@ impl MemoryBackup {
 
     /// 同步到磁盘
     ///
-    /// 将内存文件系统中的所有数据同步到磁盘目录。
+    /// 将高速内存盘中的所有数据同步到磁盘备份目录。
     pub async fn sync_to_disk(&self) -> Result<(), EngineError> {
-        // 1. 读取 /dev/shm/backup/ 所有文件
-        // 2. 复制到 data/backup/
+        // 1. 读取 E:/shm/backup/ 所有文件
+        // 2. 复制到 E:/backup/sync/
         // 3. 记录同步时间
 
         let tmp_path = Path::new(&self.tmpfs_dir);
@@ -835,9 +835,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_backup_creation() {
-        let backup = MemoryBackup::new("/dev/shm/backup", "data/backup", 30);
-        assert_eq!(backup.tmpfs_dir(), "/dev/shm/backup");
-        assert_eq!(backup.disk_dir(), "data/backup");
+        let backup = MemoryBackup::new("E:/shm/backup", "E:/backup/sync", 30);
+        assert_eq!(backup.tmpfs_dir(), "E:/shm/backup");
+        assert_eq!(backup.disk_dir(), "E:/backup/sync");
     }
 
     #[tokio::test]

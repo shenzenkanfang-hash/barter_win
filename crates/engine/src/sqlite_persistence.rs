@@ -747,7 +747,7 @@ impl IndicatorCsvWriter {
 impl SqliteRecordService {
     /// 使用默认路径创建服务
     pub fn with_default_path() -> Result<Self, EngineError> {
-        let db_path = PathBuf::from("data/trading_events.db");
+        let db_path = PathBuf::from("E:/backup/trading_events.db");
         Self::new(db_path)
     }
 }
@@ -755,7 +755,7 @@ impl SqliteRecordService {
 impl IndicatorCsvWriter {
     /// 使用默认路径创建写入器
     pub fn with_default_path() -> Result<Self, EngineError> {
-        let file_path = PathBuf::from("output/indicator_comparison.csv");
+        let file_path = PathBuf::from("E:/backup/output/indicator_comparison.csv");
         Self::new(file_path)
     }
 }
