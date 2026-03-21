@@ -12,6 +12,8 @@ pub use a_common::api::{FuturesAccountResponse, FuturesAsset, FuturesPositionRes
 pub use a_common::ws::{BinanceTradeStream, BinanceWsConnector, BinanceTradeMsg, BinanceKlineMsg, BinanceDepthMsg};
 pub use a_common::ws::{MarketConnector, MockMarketConnector};
 pub use a_common::MarketError;
+pub use a_common::config::{Platform, Paths};
+pub use a_common::logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
 
 // Sub-modules
 pub mod kline_1m;
@@ -25,8 +27,6 @@ pub mod recovery;
 pub mod futures;
 
 // Organized modules
-pub mod config;
-pub mod logs;
 pub mod models;
 
 // Re-exports - Models (业务数据类型)
