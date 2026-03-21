@@ -211,7 +211,7 @@ impl DisasterRecovery {
     fn load_positions_from_sqlite(&self) -> Result<Vec<LocalPositionSnapshot>, EngineError> {
         // 通过 SqliteRecordService 查询本地持仓
         // 注意：这里使用一个简化的方法直接读取 SQLite
-        let conn = self.sqlite.conn.lock();
+        let conn = self.sqlite.lock();
 
         let mut stmt = conn
             .prepare(
@@ -287,7 +287,7 @@ impl DisasterRecovery {
     /// 从 SQLite 加载本地订单
     fn load_orders_from_sqlite(&self) -> Result<Vec<OrderSnapshot>, EngineError> {
         // 直接查询 SQLite orders 表（如果存在）
-        let conn = self.sqlite.conn.lock();
+        let conn = self.sqlite.lock();
 
         // 检查 orders 表是否存在
         let table_exists: i32 = conn
@@ -419,7 +419,7 @@ impl DisasterRecovery {
     /// 保存订单到 SQLite（用于增量备份）
     pub fn save_order(&self, order: &OrderSnapshot) -> Result<(), EngineError> {
         // 创建 orders 表（如果不存在）
-        let conn = self.sqlite.conn.lock();
+        let conn = self.sqlite.lock();
         conn.execute(
             "CREATE TABLE IF NOT EXISTS orders (
                 order_id TEXT PRIMARY KEY,

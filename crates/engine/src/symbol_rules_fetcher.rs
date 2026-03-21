@@ -15,6 +15,7 @@
 use crate::EngineError;
 use reqwest::Client;
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -93,22 +94,22 @@ impl SymbolRulesFetcher {
         let tick_size = price_filter
             .and_then(|f| f.tick_size.as_ref())
             .and_then(|s| s.parse::<Decimal>().ok())
-            .unwrap_or(decimal!(0.01));
+            .unwrap_or(dec!(0.01));
 
         let min_qty = lot_size
             .and_then(|f| f.min_qty.as_ref())
             .and_then(|s| s.parse::<Decimal>().ok())
-            .unwrap_or(decimal!(0.000001));
+            .unwrap_or(dec!(0.000001));
 
         let step_size = lot_size
             .and_then(|f| f.step_size.as_ref())
             .and_then(|s| s.parse::<Decimal>().ok())
-            .unwrap_or(decimal!(0.000001));
+            .unwrap_or(dec!(0.000001));
 
         let min_notional_val = min_notional
             .and_then(|f| f.min_notional.as_ref())
             .and_then(|s| s.parse::<Decimal>().ok())
-            .unwrap_or(decimal!(10));
+            .unwrap_or(dec!(10));
 
         Ok(SymbolRulesData {
             symbol: symbol.to_string(),
@@ -118,10 +119,10 @@ impl SymbolRulesFetcher {
             min_qty,
             step_size,
             min_notional: min_notional_val,
-            max_notional: decimal!(1000000),
+            max_notional: dec!(1000000),
             leverage: 1,
-            maker_fee: decimal!(0.0002),
-            taker_fee: decimal!(0.0005),
+            maker_fee: dec!(0.0002),
+            taker_fee: dec!(0.0005),
         })
     }
 
@@ -173,22 +174,22 @@ impl SymbolRulesFetcher {
             let tick_size = price_filter
                 .and_then(|f| f.tick_size.as_ref())
                 .and_then(|s| s.parse::<Decimal>().ok())
-                .unwrap_or(decimal!(0.01));
+                .unwrap_or(dec!(0.01));
 
             let min_qty = lot_size
                 .and_then(|f| f.min_qty.as_ref())
                 .and_then(|s| s.parse::<Decimal>().ok())
-                .unwrap_or(decimal!(0.000001));
+                .unwrap_or(dec!(0.000001));
 
             let step_size = lot_size
                 .and_then(|f| f.step_size.as_ref())
                 .and_then(|s| s.parse::<Decimal>().ok())
-                .unwrap_or(decimal!(0.000001));
+                .unwrap_or(dec!(0.000001));
 
             let min_notional_val = min_notional
                 .and_then(|f| f.min_notional.as_ref())
                 .and_then(|s| s.parse::<Decimal>().ok())
-                .unwrap_or(decimal!(10));
+                .unwrap_or(dec!(10));
 
             rules.push(SymbolRulesData {
                 symbol: symbol.symbol.clone(),
@@ -198,10 +199,10 @@ impl SymbolRulesFetcher {
                 min_qty,
                 step_size,
                 min_notional: min_notional_val,
-                max_notional: decimal!(1000000),
+                max_notional: dec!(1000000),
                 leverage: 1,
-                maker_fee: decimal!(0.0002),
-                taker_fee: decimal!(0.0005),
+                maker_fee: dec!(0.0002),
+                taker_fee: dec!(0.0005),
             });
         }
 
@@ -310,14 +311,14 @@ mod tests {
             symbol: "BTCUSDT".to_string(),
             price_precision: 2,
             quantity_precision: 6,
-            tick_size: decimal!(0.01),
-            min_qty: decimal!(0.00001),
-            step_size: decimal!(0.00001),
-            min_notional: decimal!(10),
-            max_notional: decimal!(1000000),
+            tick_size: dec!(0.01),
+            min_qty: dec!(0.00001),
+            step_size: dec!(0.00001),
+            min_notional: dec!(10),
+            max_notional: dec!(1000000),
             leverage: 1,
-            maker_fee: decimal!(0.0002),
-            taker_fee: decimal!(0.0005),
+            maker_fee: dec!(0.0002),
+            taker_fee: dec!(0.0005),
         };
 
         assert_eq!(rules.symbol, "BTCUSDT");

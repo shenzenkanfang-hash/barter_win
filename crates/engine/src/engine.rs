@@ -538,6 +538,10 @@ impl TradingEngine {
         // 1. SQLite 恢复本地仓位
         let data = disaster_recovery.recover_and_start().await?;
 
+        // 保存长度用于日志
+        let positions_len = data.positions.len();
+        let orders_len = data.orders.len();
+
         // 2. 恢复持仓到 position_manager
         for pos in data.positions {
             self.restore_position_from_snapshot(&pos)?;
@@ -549,7 +553,7 @@ impl TradingEngine {
         }
 
         info!("灾备恢复完成，共恢复 {} 个持仓, {} 个订单",
-            data.positions.len(), data.orders.len());
+            positions_len, orders_len);
 
         Ok(())
     }
@@ -594,18 +598,20 @@ impl TradingEngine {
             .as_ref()
             .ok_or_else(|| EngineError::Other("灾备恢复系统未启用".to_string()))?;
 
-        let pos = self.position_manager.get_position(symbol);
-        let snapshot = RecoveryPosition {
-            symbol: symbol.to_string(),
-            long_qty: pos.long_qty,
-            long_avg_price: pos.long_avg_price,
-            short_qty: pos.short_qty,
-            short_avg_price: pos.short_avg_price,
-            updated_at: chrono::Utc::now().to_rfc3339(),
-        };
-
-        disaster_recovery.save_position(&snapshot)?;
-        info!("持仓已保存到灾备系统: {}", symbol);
+        // 使用 gateway 获取持仓（返回 MockPosition，包含 long_qty/short_qty）
+        let pos = self.gateway.get_position(symbol);
+        if let Some(pos) = pos {
+            let snapshot = RecoveryPosition {
+                symbol: symbol.to_string(),
+                long_qty: pos.long_qty,
+                long_avg_price: pos.long_avg_price,
+                short_qty: pos.short_qty,
+                short_avg_price: pos.short_avg_price,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+            disaster_recovery.save_position(&snapshot)?;
+            info!("持仓已保存到灾备系统: {}", symbol);
+        }
         Ok(())
     }
 

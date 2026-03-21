@@ -132,6 +132,29 @@ pub struct IndicatorComparisonRow {
     pub channel_type: String,
 }
 
+/// 订单记录（用于灾备恢复）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderRecord {
+    pub order_id: String,
+    pub symbol: String,
+    pub side: String,
+    pub qty: String,
+    pub price: String,
+    pub status: String,
+    pub created_at: String,
+    pub filled_at: Option<String>,
+}
+
+/// 同步日志条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncLogRecord {
+    pub sync_type: String,
+    pub source: String,
+    pub target: String,
+    pub timestamp: String,
+    pub details: String,
+}
+
 // ============================================================================
 // SQLite 记录服务
 // ============================================================================
@@ -142,6 +165,10 @@ pub struct SqliteRecordService {
 }
 
 impl SqliteRecordService {
+    /// 获取数据库连接的锁
+    pub fn lock(&self) -> parking_lot::MutexGuard<'_, Connection> {
+        self.conn.lock()
+    }
     /// 创建 SQLite 记录服务
     pub fn new(db_path: PathBuf) -> Result<Self, EngineError> {
         // 确保目录存在
@@ -511,19 +538,6 @@ impl SqliteRecordService {
 
     // ========== 订单记录 ==========
 
-    /// 订单记录（用于灾备恢复）
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct OrderRecord {
-        pub order_id: String,
-        pub symbol: String,
-        pub side: String,
-        pub qty: String,
-        pub price: String,
-        pub status: String,
-        pub created_at: String,
-        pub filled_at: Option<String>,
-    }
-
     /// 保存订单记录
     pub fn save_order(&self, order: OrderRecord) -> Result<(), EngineError> {
         let conn = self.conn.lock();
@@ -592,16 +606,6 @@ impl SqliteRecordService {
     }
 
     // ========== 同步日志 ==========
-
-    /// 同步日志条目
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct SyncLogRecord {
-        pub sync_type: String,
-        pub source: String,
-        pub target: String,
-        pub timestamp: String,
-        pub details: String,
-    }
 
     /// 保存同步日志
     pub fn save_sync_log(&self, log: SyncLogRecord) -> Result<(), EngineError> {

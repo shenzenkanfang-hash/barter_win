@@ -26,6 +26,9 @@ pub enum EngineError {
     #[error("内存备份错误: {0}")]
     MemoryBackup(String),
 
+    #[error("交易对不存在: {0}")]
+    SymbolNotFound(String),
+
     #[error("其他错误: {0}")]
     Other(String),
 }

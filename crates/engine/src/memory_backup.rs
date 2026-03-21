@@ -492,7 +492,8 @@ impl MemoryBackup {
                 fs::create_dir_all(&dst_path).await.map_err(|e| {
                     EngineError::MemoryBackup(format!("创建目录失败: {}", e))
                 })?;
-                self.sync_directory(&src_path, &dst_path).await?;
+                // 使用 Box::pin 解决异步递归问题
+                Box::pin(self.sync_directory(&src_path, &dst_path)).await?;
             } else {
                 // 文件直接复制
                 fs::copy(&src_path, &dst_path).await.map_err(|e| {
