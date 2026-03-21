@@ -60,7 +60,7 @@ impl Kline1mStream {
     pub async fn new(symbols: Vec<String>) -> Result<Self, a_common::MarketError> {
         let paths = Paths::new();
         let base_dir = format!(
-            "{}/kline-1m-实时",
+            "{}/kline_1m_realtime",
             paths.memory_backup_dir
         );
 
