@@ -4,7 +4,7 @@
 
 use crate::models::types::Tick;
 use async_trait::async_trait;
-use chrono::{TimeZone, Utc};
+use chrono::TimeZone;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -70,8 +70,8 @@ impl MarketStream for MockMarketStream {
 
 /// 真实 Binance WebSocket 市场数据流
 pub struct BinanceMarketStream {
-    /// WebSocket 连接器
-    connector: Arc<Mutex<a_common::ws::BinanceWsConnector>>,
+    /// WebSocket 连接器 (保留用于未来重连逻辑)
+    _connector: Arc<Mutex<a_common::ws::BinanceWsConnector>>,
     /// 交易消息流
     stream: Arc<Mutex<Option<a_common::ws::BinanceTradeStream>>>,
 }
@@ -85,7 +85,7 @@ impl BinanceMarketStream {
         tracing::info!("BinanceMarketStream 连接成功: {}", symbol);
 
         Ok(Self {
-            connector: Arc::new(Mutex::new(connector)),
+            _connector: Arc::new(Mutex::new(connector)),
             stream: Arc::new(Mutex::new(Some(stream))),
         })
     }
