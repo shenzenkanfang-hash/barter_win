@@ -1,5 +1,7 @@
 use crate::EngineError;
 use crate::account_pool::AccountPool;
+use crate::margin_config::StrategyLevel;
+use crate::minute_risk::calculate_minute_open_notional;
 use crate::position_manager::{Direction, LocalPositionManager};
 use crate::strategy_pool::StrategyPool;
 use crate::sqlite_persistence::{AccountSnapshotRecord, EventRecorder, ExchangePositionRecord, RiskEventRecord, format_decimal};
@@ -1064,17 +1066,37 @@ impl SignalSynthesisLayer {
     /// 合成最终交易决策
     ///
     /// 根据信号和持仓状态，合成最终的交易决策
+    ///
+    /// # 参数
+    /// - `signal`: 交易信号
+    /// - `position_side`: 当前持仓方向
+    /// - `current_price`: 当前价格
+    /// - `symbol`: 交易品种
+    /// - `account_pool`: 账户保证金池 (用于计算风控数量)
+    /// - `current_symbol_count`: 当前交易品种数量
+    /// - `leverage`: 杠杆倍数 (默认 10)
     pub fn synthesize(
         &self,
         signal: strategy::types::Signal,
         position_side: Option<strategy::types::Side>,
         current_price: Decimal,
         symbol: &str,
+        account_pool: &AccountPool,
+        current_symbol_count: Decimal,
+        leverage: Decimal,
     ) -> strategy::types::TradingDecision {
         use strategy::types::{Side, TradingDecision, TradingAction};
 
         let state = self.channel_state.read();
         let channel_type = state.channel_type;
+
+        // 计算风控开仓数量
+        let open_qty = self.calculate_open_qty_for_channel(
+            account_pool,
+            current_symbol_count,
+            current_price,
+            leverage,
+        );
 
         match signal {
             strategy::types::Signal::LongEntry => {
@@ -1090,7 +1112,7 @@ impl SignalSynthesisLayer {
                     TradingDecision::open_long(
                         symbol.to_string(),
                         current_price,
-                        dec!(0.001), // TODO: 按风控计算数量
+                        open_qty,
                         format!("通道 {:?} 做多入场", channel_type),
                     )
                 }
@@ -1108,7 +1130,7 @@ impl SignalSynthesisLayer {
                     TradingDecision::open_short(
                         symbol.to_string(),
                         current_price,
-                        dec!(0.001), // TODO: 按风控计算数量
+                        open_qty,
                         format!("通道 {:?} 做空入场", channel_type),
                     )
                 }
@@ -1167,6 +1189,53 @@ impl SignalSynthesisLayer {
                 )
             }
         }
+    }
+
+    /// 根据账户保证金和通道类型计算开仓数量
+    ///
+    /// 使用分钟级风控计算实际可开仓名义价值，然后转换为数量
+    ///
+    /// # 参数
+    /// - `account_pool`: 账户保证金池
+    /// - `current_symbol_count`: 当前交易品种数量
+    /// - `current_price`: 当前价格
+    /// - `leverage`: 杠杆倍数 (默认 10)
+    ///
+    /// # 返回
+    /// - 计算出的开仓数量
+    pub fn calculate_open_qty_for_channel(
+        &self,
+        account_pool: &AccountPool,
+        current_symbol_count: Decimal,
+        current_price: Decimal,
+        leverage: Decimal,
+    ) -> Decimal {
+        use rust_decimal::Decimal;
+
+        // 使用分钟级风控计算
+        let result = calculate_minute_open_notional(
+            account_pool,
+            current_symbol_count,
+            leverage,
+        );
+
+        // 如果满足最小阈值，使用计算出的名义价值
+        let notional = if result.meets_min_threshold {
+            result.actual_notional_per_symbol
+        } else {
+            // 不满足阈值时返回0，让调用方处理
+            return Decimal::ZERO;
+        };
+
+        // 将名义价值转换为数量
+        if current_price <= Decimal::ZERO {
+            return dec!(0.001); // 最小默认值
+        }
+
+        let qty = notional / current_price;
+
+        // 确保不低于最小数量
+        qty.max(dec!(0.001))
     }
 }
 
