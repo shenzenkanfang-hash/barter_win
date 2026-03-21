@@ -25,7 +25,7 @@
 24,d_risk_monitor,sync_position_data(),✅ 已实现,Binance REST API /api/v3/positionRisk,symbol_rules_fetcher.rs 已实现
 25,d_risk_monitor,release_preoccupy_margin(),❌ 未实现,保证金预占释放,Lua原子操作缺失
 26,d_risk_monitor,_preoccupy_margin() Lua脚本,✅ 已实现,用Rust RwLock管理原子性替代Lua
-27,c_data_process,TR比率排名,❌ 未实现,20日百分比排名,indicator模块尚未实现
+27,c_data_process,TR比率排名,✅ 已实现,indicator/volatility_rank.rs,VolatilityRank 内存数组 O(1)更新 O(logN)获取
 28,c_data_process,速度百分位,❌ 未实现,多窗口动能指标,indicator模块尚未实现
 29,c_data_process,加速度百分位,❌ 未实现,多窗口动能指标,indicator模块尚未实现
 30,c_data_process,Power百分位,❌ 未实现,Power指标及百分比排位,indicator模块尚未实现
