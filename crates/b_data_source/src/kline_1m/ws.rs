@@ -51,7 +51,12 @@ pub struct Kline1mStream {
 }
 
 impl Kline1mStream {
-    /// 创建 1m K线流管理器 (分片订阅: 每批50个，间隔200ms)
+    /// 创建 1m K线流管理器 (分片订阅: 每批50个，间隔500ms)
+    ///
+    /// Binance WebSocket 约束:
+    /// - Base URL: wss://fstream.binance.com
+    /// - 单连接最多 1024 个 streams
+    /// - 每秒最多 10 个订阅消息
     pub async fn new(symbols: Vec<String>) -> Result<Self, a_common::MarketError> {
         let paths = Paths::new();
         let base_dir = format!(
@@ -59,28 +64,37 @@ impl Kline1mStream {
             paths.memory_backup_dir
         );
 
-        let url = "wss://stream.binancefuture.com/stream".to_string();
+        // 分片订阅参数
+        const BATCH_SIZE: usize = 50;
+        const BATCH_INTERVAL_MS: u64 = 500;
 
-        // 连接
+        // 构建所有 streams
+        let streams: Vec<String> = symbols
+            .iter()
+            .map(|s| format!("{}@kline_1m", s.to_lowercase()))
+            .collect();
+
+        tracing::info!(
+            "Kline1mStream subscribing to {} symbols in {} batches ({}ms interval)",
+            symbols.len(),
+            (streams.len() + BATCH_SIZE - 1) / BATCH_SIZE,
+            BATCH_INTERVAL_MS
+        );
+
+        // 建立单一 WebSocket 连接
+        let url = "wss://fstream.binance.com/stream".to_string();
         let (ws, _) = connect_async(&url)
             .await
             .map_err(|e| a_common::MarketError::WebSocketConnectionFailed(e.to_string()))?;
 
         let (mut write, read) = ws.split();
 
-        // 分片订阅: 每批50个，间隔500ms
-        const BATCH_SIZE: usize = 50;
-        const BATCH_INTERVAL_MS: u64 = 500;
-
-        for (i, batch) in symbols.chunks(BATCH_SIZE).enumerate() {
-            let streams: Vec<String> = batch
-                .iter()
-                .map(|s| format!("{}@kline_1m", s.to_lowercase()))
-                .collect();
-
+        // 分批发送订阅消息
+        let total_batches = (streams.len() + BATCH_SIZE - 1) / BATCH_SIZE;
+        for (i, batch) in streams.chunks(BATCH_SIZE).enumerate() {
             let subscribe_msg = serde_json::json!({
                 "method": "SUBSCRIBE",
-                "params": streams,
+                "params": batch.to_vec(),
                 "id": i as i64 + 1
             });
 
@@ -89,17 +103,20 @@ impl Kline1mStream {
                 .await
                 .map_err(|e| a_common::MarketError::WebSocketError(e.to_string()))?;
 
-            if i < symbols.chunks(BATCH_SIZE).len() - 1 {
+            tracing::debug!(
+                "Sent subscription batch {}/{} ({} streams)",
+                i + 1,
+                total_batches,
+                batch.len()
+            );
+
+            // 批次间等待（最后一个批次后不需要等待）
+            if i < total_batches - 1 {
                 sleep(Duration::from_millis(BATCH_INTERVAL_MS)).await;
             }
         }
 
-        tracing::info!(
-            "Kline1mStream subscribed to {} symbols in {} batches",
-            symbols.len(),
-            (symbols.len() + BATCH_SIZE - 1) / BATCH_SIZE
-        );
-        tracing::info!("Kline1mStream using memory backup dir: {}", base_dir);
+        tracing::info!("Kline1mStream all subscriptions sent, using memory backup dir: {}", base_dir);
 
         Ok(Self {
             base_dir,
