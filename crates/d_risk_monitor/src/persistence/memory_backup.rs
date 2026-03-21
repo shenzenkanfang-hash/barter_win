@@ -99,16 +99,16 @@ pub const TRADES_DIR: &str = "trades/";
 pub const RULES_DIR: &str = "rules/";
 
 // K线目录
-pub const KLINE_1M_REALTIME_DIR: &str = "kline-1m-实时/";
-pub const KLINE_1M_HISTORY_DIR: &str = "kline-1m-历史/";
-pub const KLINE_1D_REALTIME_DIR: &str = "kline-1d-实时/";
-pub const KLINE_1D_HISTORY_DIR: &str = "kline-1d-历史/";
+pub const KLINE_1M_REALTIME_DIR: &str = "kline_1m_realtime/";
+pub const KLINE_1M_HISTORY_DIR: &str = "kline_1m_history/";
+pub const KLINE_1D_REALTIME_DIR: &str = "kline_1d_realtime/";
+pub const KLINE_1D_HISTORY_DIR: &str = "kline_1d_history/";
 
 // 指标目录
-pub const INDICATORS_1M_REALTIME_DIR: &str = "indicators-1m-实时/";
-pub const INDICATORS_1M_HISTORY_DIR: &str = "indicators-1m-历史/";
-pub const INDICATORS_1D_REALTIME_DIR: &str = "indicators-1d-实时/";
-pub const INDICATORS_1D_HISTORY_DIR: &str = "indicators-1d-历史/";
+pub const INDICATORS_1M_REALTIME_DIR: &str = "indicators_1m_realtime/";
+pub const INDICATORS_1M_HISTORY_DIR: &str = "indicators_1m_history/";
+pub const INDICATORS_1D_REALTIME_DIR: &str = "indicators_1d_realtime/";
+pub const INDICATORS_1D_HISTORY_DIR: &str = "indicators_1d_history/";
 
 // 任务池
 pub const TASKS_DIR: &str = "tasks/";
