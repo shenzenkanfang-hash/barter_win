@@ -232,12 +232,15 @@
 **Goal**: 根据Python-Rust功能验证结果，实现核心缺失功能
 
 **Deliverables:**
-- TrendStatusDetector: Pine颜色分组校验
-- LocalPositionManager: 统一接口 + 品种锁
-- sync_account/position_data: 交易所状态同步
-- TR比率排名: 20日百分比排名
-- SymbolRuleParser: 实时规则同步
+- TrendStatusDetector: Pine颜色分组校验 ✅ (signal_generator.rs)
+- LocalPositionManager: 统一接口 + 品种锁 ✅ (已确认 RwLock 保护)
+- sync_account/position_data: 交易所状态同步 ✅ (symbol_rules_fetcher.rs)
+- TR比率排名: 20日百分比排名 🔄 进行中
+- SymbolRuleParser: 实时规则同步 ✅ (symbol_rules_fetcher.rs)
 
 **Status**: IN PROGRESS (2026-03-21)
+- ✅ fetch_account_info - 账户信息 API
+- ✅ fetch_position_risk - 持仓风险 API
+- 🔄 TR比率排名 - indicator 模块
 
 **Phase Directory:** `.planning/phases/10-v1.5-py-rust-align/`
