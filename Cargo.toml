@@ -26,6 +26,10 @@ path = "src/main_data_printer.rs"
 name = "data-monitor"
 path = "src/main_data_monitor.rs"
 
+[[bin]]
+name = "symbol-rules-viewer"
+path = "src/main_symbol_rules_viewer.rs"
+
 
 [dependencies]
 a_common = { path = "crates/a_common" }
