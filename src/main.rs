@@ -1,43 +1,44 @@
-//! 量化交易系统 Rust 版 - 主入口
+//! Trading System Rust Version - Main Entry
 //!
-//! 基于 Barter-rs 风格架构的高性能量化交易系统
+//! High-performance trading system based on Barter-rs architecture
 
-use e_strategy::TradingEngine;
-use b_data_source::{MarketConnector, MockMarketConnector, MockMarketStream};
-use rust_decimal::Decimal;
+use b_data_source::BinanceMultiStream;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 初始化 tracing
+    // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    tracing::info!("量化交易系统启动");
+    tracing::info!("Trading system starting");
 
-    // 1. 创建市场数据流 (模拟)
-    let mut connector = MockMarketConnector::new();
-    connector.subscribe("BTCUSDT").await?;
-    let market_stream = Box::new(MockMarketStream::new(
-        "BTCUSDT".to_string(),
-        Decimal::try_from(50000.0).unwrap(),
-    ));
+    // 3 output files (overwrite mode)
+    let trade_path = "E:/logs/trade.log";
+    let kline_path = "E:/logs/kline.log";
+    let depth_path = "E:/logs/depth.log";
 
-    // 2. 创建交易引擎 (初始资金 100000)
-    let mut engine = TradingEngine::new(
-        market_stream,
-        "BTCUSDT".to_string(),
-        Decimal::try_from(100000.0).unwrap(),
-    );
+    // Create multi-stream writer for market data
+    let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
+    let mut multi_stream = BinanceMultiStream::new(trade_path, kline_path, depth_path, symbols).await?;
 
-    // 4. 运行引擎 (使用内部 run 方法，会在内部处理循环)
-    tracing::info!("开始模拟交易...");
+    tracing::info!("Connected to Binance WebSocket, streaming market data to 3 files");
+    tracing::info!("Trade -> {}", trade_path);
+    tracing::info!("Kline -> {}", kline_path);
+    tracing::info!("Depth -> {}", depth_path);
 
-    // 使用 run_with_timeout 替代直接调用 run()
-    engine.run_with_timeout(10).await;
+    // Main loop - continuously read and write messages
+    loop {
+        if let Some(_msg) = multi_stream.next_message().await {
+            // Message already written to file by MultiStreamWriter
+        } else {
+            tracing::warn!("Stream ended");
+            break;
+        }
+    }
 
-    tracing::info!("模拟交易结束");
+    tracing::info!("Trading system stopped");
 
     Ok(())
 }

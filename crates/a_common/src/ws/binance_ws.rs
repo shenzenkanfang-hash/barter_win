@@ -273,3 +273,90 @@ impl BinanceTradeStream {
         serde_json::from_str::<BinanceDepthMsg>(text).ok()
     }
 }
+
+/// Combined Stream 类型 - 用于 /stream 接口的复合流订阅
+///
+/// 该类型同时保存读写两端，支持订阅后接收多路数据
+pub struct BinanceCombinedStream {
+    /// Write end for sending subscribe/unsubscribe
+    write: futures_util::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        Message,
+    >,
+    /// Read end for receiving messages
+    read: futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    >,
+    /// 是否已订阅
+    subscribed: bool,
+}
+
+impl BinanceCombinedStream {
+    /// 连接到 combined stream URL
+    pub async fn connect(url: &str) -> Result<Self, MarketError> {
+        let (ws_stream, _) = connect_async(url)
+            .await
+            .map_err(|e| MarketError::WebSocketConnectionFailed(e.to_string()))?;
+
+        let (write, read) = ws_stream.split();
+
+        tracing::info!("BinanceCombinedStream connected: {}", url);
+
+        Ok(Self {
+            write,
+            read,
+            subscribed: false,
+        })
+    }
+
+    /// 发送订阅消息
+    pub async fn subscribe(&mut self, streams: &[String]) -> Result<(), MarketError> {
+        let msg = serde_json::json!({
+            "method": "SUBSCRIBE",
+            "params": streams,
+            "id": chrono::Utc::now().timestamp_millis()
+        });
+
+        let text = serde_json::to_string(&msg)
+            .map_err(|e| MarketError::SerializeError(e.to_string()))?;
+
+        self.write.send(Message::Text(text.into()))
+            .await
+            .map_err(|e| MarketError::WebSocketError(e.to_string()))?;
+
+        self.subscribed = true;
+        tracing::info!("Subscribed to streams: {:?}", streams);
+
+        Ok(())
+    }
+
+    /// 获取下一条原始消息
+    pub async fn next_message(&mut self) -> Option<String> {
+        while let Some(msg) = self.read.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    return Some(text.to_string());
+                }
+                Ok(Message::Ping(data)) => {
+                    // 回复 ping
+                    let _ = self.write.send(Message::Pong(data)).await;
+                }
+                Ok(Message::Close(_)) => {
+                    tracing::warn!("WebSocket connection closed");
+                    break;
+                }
+                Err(e) => {
+                    tracing::error!("WebSocket error: {}", e);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// 检查是否已订阅
+    pub fn is_subscribed(&self) -> bool {
+        self.subscribed
+    }
+}

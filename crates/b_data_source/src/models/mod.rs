@@ -10,4 +10,4 @@ pub mod types;
 pub mod ws;
 
 pub use types::{KLine, Period, Tick};
-pub use ws::{MarketStream, MockMarketStream};
+pub use ws::{BinanceMarketStream, BinanceMultiStream, MarketStream, MockMarketStream};

@@ -9,7 +9,7 @@ pub use a_common::api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, Symb
 pub use a_common::api::{BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket};
 pub use a_common::api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
 pub use a_common::api::{FuturesAccountResponse, FuturesAsset, FuturesPositionResponse};
-pub use a_common::ws::{BinanceTradeStream, BinanceWsConnector, BinanceTradeMsg, BinanceKlineMsg, BinanceDepthMsg};
+pub use a_common::ws::{BinanceTradeStream, BinanceCombinedStream, BinanceWsConnector, BinanceTradeMsg, BinanceKlineMsg, BinanceDepthMsg};
 pub use a_common::ws::{MarketConnector, MockMarketConnector};
 pub use a_common::MarketError;
 pub use a_common::config::{Platform, Paths};
@@ -29,7 +29,7 @@ pub mod futures;
 pub mod models;
 
 // Re-exports - Models (业务数据类型)
-pub use models::{MarketStream, MockMarketStream};
+pub use models::{BinanceMarketStream, BinanceMultiStream, MarketStream, MockMarketStream};
 pub use models::{KLine, Period, Tick};
 
 // Re-exports - Data processing

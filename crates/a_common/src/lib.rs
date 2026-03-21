@@ -35,5 +35,5 @@ pub use claint::{EngineError, MarketError};
 pub use util::{TelegramConfig, TelegramNotifier};
 
 // Re-exports - WS
-pub use ws::{BinanceTradeStream, BinanceWsConnector};
+pub use ws::{BinanceTradeStream, BinanceCombinedStream, BinanceWsConnector};
 pub use ws::{MarketConnector, MockMarketConnector};
