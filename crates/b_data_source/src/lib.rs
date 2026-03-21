@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod api;
 pub mod binance_ws;
 pub mod data_feeder;
 pub mod error;

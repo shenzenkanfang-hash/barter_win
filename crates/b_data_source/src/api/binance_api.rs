@@ -1,53 +1,112 @@
 #![forbid(unsafe_code)]
 
-//! SymbolRules 交易规则获取器
+//! 币安 API 网关
 //!
-//! 从币安 API 拉取交易对规则，包括价格/数量精度，手续费，下单限制等。
+//! 从币安 API 拉取交易对规则，包括价格/数量精度、手续费、下单限制等。
+//! 包含限速规则和请求管理。
 //!
 //! # 使用方式
 //!
 //! ```rust,ignore
-//! let fetcher = SymbolRulesFetcher::new();
-//! let rules = fetcher.fetch_symbol_rules("BTCUSDT").await?;
+//! let api = BinanceApiGateway::new();
+//! let rules = api.fetch_symbol_rules("BTCUSDT").await?;
 //! println!("BTCUSDT price precision: {}", rules.price_precision);
 //! ```
 
-use crate::error::EngineError;
+use a_common::error::EngineError;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use parking_lot::Mutex;
 use tracing::{info, warn};
 
-/// SymbolRules 获取器
-pub struct SymbolRulesFetcher {
-    client: Client,
-    api_base: String,
+/// API 限速器
+#[derive(Debug)]
+pub struct RateLimiter {
+    /// 每分钟请求数限制
+    requests_per_minute: u32,
+    /// 当前窗口起始时间
+    window_start: Mutex<Instant>,
+    /// 当前窗口内请求数
+    request_count: Mutex<u32>,
 }
 
-impl SymbolRulesFetcher {
-    /// 创建新的获取器（现货 API）
+impl RateLimiter {
+    /// 创建新的限速器
+    pub fn new(requests_per_minute: u32) -> Self {
+        Self {
+            requests_per_minute,
+            window_start: Mutex::new(Instant::now()),
+            request_count: Mutex::new(0),
+        }
+    }
+
+    /// 获取请求许可（如果超过限制则等待）
+    pub async fn acquire(&self) {
+        loop {
+            let elapsed = {
+                let mut window_start = self.window_start.lock();
+                let mut request_count = self.request_count.lock();
+
+                let elapsed = window_start.elapsed();
+                if elapsed > Duration::from_secs(60) {
+                    // 重置窗口
+                    *window_start = Instant::now();
+                    *request_count = 0;
+                }
+
+                if *request_count >= self.requests_per_minute {
+                    // 等待直到窗口结束
+                    let wait_time = Duration::from_secs(60) - elapsed;
+                    drop(window_start);
+                    drop(request_count);
+                    tokio::time::sleep(wait_time).await;
+                    continue;
+                }
+
+                *request_count += 1;
+                elapsed
+            };
+            break;
+        }
+    }
+}
+
+/// 币安 API 网关
+pub struct BinanceApiGateway {
+    client: Client,
+    api_base: String,
+    rate_limiter: Arc<RateLimiter>,
+}
+
+impl BinanceApiGateway {
+    /// 创建新的网关（现货 API）
     pub fn new() -> Self {
         Self {
             client: Client::new(),
             api_base: "https://api.binance.com".to_string(),
+            rate_limiter: Arc::new(RateLimiter::new(1200)), // 币安现货 API 限制
         }
     }
 
-    /// 创建 USDT 合约 API 获取器
+    /// 创建 USDT 合约 API 网关
     pub fn new_futures() -> Self {
         Self {
             client: Client::new(),
             api_base: "https://fapi.binance.com".to_string(),
+            rate_limiter: Arc::new(RateLimiter::new(2400)), // 合约 API 限制更高
         }
     }
 
-    /// 创建带自定义 API 地址的获取器（用于测试）
+    /// 创建带自定义 API 地址的网关（用于测试）
     pub fn with_api_base(api_base: &str) -> Self {
         Self {
             client: Client::new(),
             api_base: api_base.to_string(),
+            rate_limiter: Arc::new(RateLimiter::new(1200)),
         }
     }
 
@@ -59,6 +118,8 @@ impl SymbolRulesFetcher {
     /// # 返回
     /// * `SymbolRulesData` - 交易规则数据
     pub async fn fetch_symbol_rules(&self, symbol: &str) -> Result<SymbolRulesData, EngineError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}/api/v3/exchangeInfo", self.api_base);
         let resp = self
             .client
@@ -153,6 +214,8 @@ impl SymbolRulesFetcher {
     /// # 返回
     /// * `Vec<SymbolRulesData>` - 所有 USDT 交易对规则列表
     pub async fn fetch_all_usdt_symbol_rules(&self) -> Result<Vec<SymbolRulesData>, EngineError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}/api/v3/exchangeInfo", self.api_base);
         let resp = self
             .client
@@ -238,6 +301,8 @@ impl SymbolRulesFetcher {
     /// # 返回
     /// * `BinanceAccountInfo` - 账户信息
     pub async fn fetch_account_info(&self) -> Result<BinanceAccountInfo, EngineError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}/api/v3/account", self.api_base);
         let resp = self
             .client
@@ -275,6 +340,8 @@ impl SymbolRulesFetcher {
     /// # 返回
     /// * `PositionRisk` - 持仓风险信息
     pub async fn fetch_position_risk(&self, symbol: &str) -> Result<PositionRisk, EngineError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}/api/v3/positionRisk", self.api_base);
         let resp = self
             .client
@@ -323,6 +390,8 @@ impl SymbolRulesFetcher {
     /// # 返回
     /// * `Vec<LeverageBracket>` - 杠杆档位列表
     pub async fn fetch_leverage_brackets(&self, symbol: Option<&str>) -> Result<Vec<LeverageBracket>, EngineError> {
+        self.rate_limiter.acquire().await;
+
         let url = format!("{}/fapi/v1/leverageBracket", self.api_base);
         let resp = self
             .client
@@ -380,11 +449,14 @@ impl SymbolRulesFetcher {
     }
 }
 
-impl Default for SymbolRulesFetcher {
+impl Default for BinanceApiGateway {
     fn default() -> Self {
         Self::new()
     }
 }
+
+// 兼容性别名
+pub type SymbolRulesFetcher = BinanceApiGateway;
 
 // ============================================================================
 // 币安 API 数据结构
@@ -525,7 +597,6 @@ pub struct LeverageBracket {
 /// 交易规则数据
 ///
 /// 用于存储从 API 获取的交易对规则信息。
-/// 与 memory_backup::SymbolRulesData 结构一致。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolRulesData {
     /// 交易对
@@ -609,10 +680,10 @@ mod tests {
 
     #[test]
     fn test_fetcher_creation() {
-        let fetcher = SymbolRulesFetcher::new();
+        let fetcher = BinanceApiGateway::new();
         assert_eq!(fetcher.api_base, "https://api.binance.com");
 
-        let test_fetcher = SymbolRulesFetcher::with_api_base("https://testnet.binance.vision");
+        let test_fetcher = BinanceApiGateway::with_api_base("https://testnet.binance.vision");
         assert_eq!(test_fetcher.api_base, "https://testnet.binance.vision");
     }
 
@@ -686,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_new_futures() {
-        let fetcher = SymbolRulesFetcher::new_futures();
+        let fetcher = BinanceApiGateway::new_futures();
         assert_eq!(fetcher.api_base, "https://fapi.binance.com");
     }
 
@@ -718,5 +789,11 @@ mod tests {
 
         assert_eq!(bracket.symbol, "BTCUSDT");
         assert_eq!(bracket.max_leverage, 20);
+    }
+
+    #[test]
+    fn test_rate_limiter() {
+        let limiter = RateLimiter::new(10);
+        assert_eq!(limiter.requests_per_minute, 10);
     }
 }
