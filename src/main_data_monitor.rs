@@ -27,8 +27,8 @@ use tracing_subscriber::fmt::format::FmtSpan;
 #[command(name = "trading-system")]
 #[command(about = "量化交易系统 - 实时监控")]
 struct Args {
-    /// 交易对符号列表，如 BTCUSDT ETHUSDT (空格分隔)
-    #[arg(short, long, default_value = "BTCUSDT", value_delimiter = ' ')]
+    /// 交易对符号列表，逗号分隔，如 BTCUSDT,ETHUSDT,SOLUSDT
+    #[arg(short, long, default_value = "BTCUSDT", value_delimiter = ',')]
     symbols: Vec<String>,
 
     /// 日志输出目录
