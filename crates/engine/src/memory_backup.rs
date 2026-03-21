@@ -47,8 +47,10 @@ use tokio::time::{interval, Duration};
 // 常量定义
 // ============================================================================
 
-/// 内存备份根目录 (Windows: E盘高速内存盘)
-pub const MEMORY_BACKUP_DIR: &str = "E:/shm/backup";
+/// 内存备份根目录 (由 Platform::detect() 自动选择)
+pub fn memory_backup_dir() -> String {
+    crate::platform::Paths::new().memory_backup_dir
+}
 
 /// K线最大条目数
 const MAX_KXIAN_ENTRIES: usize = 1000;
@@ -835,9 +837,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_backup_creation() {
-        let backup = MemoryBackup::new("E:/shm/backup", "E:/backup/sync", 30);
-        assert_eq!(backup.tmpfs_dir(), "E:/shm/backup");
-        assert_eq!(backup.disk_dir(), "E:/backup/sync");
+        let paths = crate::platform::Paths::new();
+        let backup = MemoryBackup::new(&paths.memory_backup_dir, &paths.disk_sync_dir, 30);
+        assert_eq!(backup.tmpfs_dir(), paths.memory_backup_dir);
+        assert_eq!(backup.disk_dir(), paths.disk_sync_dir);
     }
 
     #[tokio::test]
