@@ -2,7 +2,9 @@
 //!
 //! High-performance trading system based on Barter-rs architecture
 
+use a_common::config::Paths;
 use b_data_source::BinanceMultiStream;
+use std::fs;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -14,10 +16,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Trading system starting");
 
-    // 3 output files (overwrite mode)
-    let trade_path = "E:/logs/trade.log";
-    let kline_path = "E:/logs/kline.log";
-    let depth_path = "E:/logs/depth.log";
+    // 使用平台自适应路径配置
+    let paths = Paths::new();
+    let platform = paths.platform();
+
+    // 3 output files - 使用平台自适应路径
+    let base_dir = if platform.is_windows() {
+        "E:/logs".to_string()
+    } else {
+        "data/logs".to_string()
+    };
+
+    // 确保目录存在
+    fs::create_dir_all(&base_dir)?;
+
+    let trade_path = format!("{}/trade.log", base_dir);
+    let kline_path = format!("{}/kline.log", base_dir);
+    let depth_path = format!("{}/depth.log", base_dir);
+
+    tracing::info!("Platform: {:?}", platform);
+    tracing::info!("Output directory: {}", base_dir);
 
     // Create multi-stream writer for market data
     let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
