@@ -26,8 +26,8 @@
 - 引擎执行蓝图
 
 交易系统也一样：
-- c_data_process: 设计各种策略蓝图（指标组合、信号条件）
-- d_risk_monitor: 引擎的硬性约束（交易所规则）
+- d_blueprint: 设计各种策略蓝图（通道、策略类型、CheckTable）
+- e_risk_monitor: 引擎的硬性约束（交易所规则）
 - f_engine: 真正的执行引擎（运行时）
 
 ================================================================================
@@ -36,8 +36,9 @@
 
 a_common     — 工具层（API/WS通用组件）
 b_data_source — 数据/网关层（纯粹调用，无业务逻辑）
-c_data_process — 策略蓝图层（信号生成、可配置组合）
-d_risk_monitor — 合规约束层（交易所硬性规则）
+c_data_process — 信号生成层（指标计算、信号生成）
+d_blueprint — 策略蓝图层（通道、策略类型、CheckTable）
+e_risk_monitor — 合规约束层（交易所硬性规则）
 f_engine    — 引擎运行时层
 
     ┌─────────────────────────────────────────────────────────┐
@@ -48,35 +49,28 @@ f_engine    — 引擎运行时层
     ┌─────────────────────────────────────────────────────────┐
     │                    b_data_source                         │
     │        数据/网关层: 纯粹调用，无任何业务逻辑            │
-    │        - exchange/: 纯粹下单 API                       │
-    │        - api/: Binance REST API                         │
-    │        - ws/: Binance WebSocket                        │
     └─────────────────────────────────────────────────────────┘
                               │
     ┌─────────────────────────────────────────────────────────┐
     │                   c_data_process                         │
-    │           策略蓝图层: 指标计算、信号生成器              │
-    │           - min/: 分钟级信号状态机                       │
-    │           - day/: 日线级信号状态机                      │
-    │           - real_time/: 实时指标                        │
-    │           - trend/: 趋势指标                            │
-    │           - position/: 仓位相关指标                     │
+    │           信号生成层: 指标计算、信号生成                │
+    │           - min/: 分钟级信号生成                       │
+    │           - day/: 日线级信号生成                       │
     └─────────────────────────────────────────────────────────┘
                               │
     ┌─────────────────────────────────────────────────────────┐
-    │                   d_risk_monitor                         │
+    │                   d_blueprint                           │
+    │           策略蓝图层: 通道、策略类型、CheckTable       │
+    └─────────────────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────────────────────────────────────┐
+    │                   e_risk_monitor                         │
     │              合规约束层: 交易所硬性规则                  │
-    │           - 风控预检（锁外）                            │
-    │           - 风控复核（锁内）                           │
-    │           - 账户池、策略池                              │
     └─────────────────────────────────────────────────────────┘
                               │
     ┌─────────────────────────────────────────────────────────┐
     │                      f_engine                            │
     │              引擎运行时层: 协调执行                      │
-    │           - TradingEngine 主循环                        │
-    │           - CheckTable 汇总判断                        │
-    │           - 持久化、灾备恢复                            │
     └─────────────────────────────────────────────────────────┘
 
 ================================================================================
@@ -89,13 +83,13 @@ f_engine    — 引擎运行时层
 指标计算 (c_data_process) → 产生交易信号
     │
     ▼
-CheckTable 汇总判断
+CheckTable 汇总判断 (d_blueprint)
     │
     ▼
-风控预检 (d_risk_monitor) ← 锁外执行
+风控预检 (e_risk_monitor) ← 锁外执行
     │
     ▼
-风控复核 (d_risk_monitor) ← 获锁后执行
+风控复核 (e_risk_monitor) ← 获锁后执行
     │
     ▼
 引擎最终下单调用 (f_engine)
@@ -104,7 +98,7 @@ CheckTable 汇总判断
 网关纯粹执行 (b_data_source)
     │
     ▼
-状态更新 + 数据存储 (f_engine + d_risk_monitor)
+状态更新 + 数据存储 (f_engine + e_risk_monitor)
 
 ================================================================================
 crates/ 目录结构
@@ -123,28 +117,24 @@ crates/
 │   ├── market/       # KLineSynthesizer、MarketStream
 │   └── types/        # Tick、KLine
 │
-├── c_data_process/    # 策略蓝图层: 指标、信号生成器
+├── c_data_process/    # 信号生成层: 指标、信号生成器
 │   ├── src/
-│   │   ├── min/          # 分钟级最终信号状态机
-│   │   │   ├── trading_trigger.rs  ← 最终信号（波动率选择策略）
-│   │   │   ├── signal_generator.rs
-│   │   │   ├── market_status_generator.rs
-│   │   │   └── price_control_generator.rs
-│   │   ├── day/          # 日线级最终信号状态机
+│   │   ├── min/          # 分钟级信号生成
+│   │   ├── day/          # 日线级信号生成
 │   │   ├── real_time/    # 实时价格指标
 │   │   ├── trend/        # 历史趋势指标
 │   │   ├── position/     # 仓位相关指标
 │   │   └── types.rs      # Signal, TradingDecision 等
 │   └── pipeline_form.rs  # 流水线表单
 │
-├── d_risk_monitor/    # 合规约束层
-│   ├── risk/          # RiskPreChecker、RiskReChecker
-│   ├── position/      # PositionManager
-│   ├── persistence/   # SQLite、MemoryBackup、灾备恢复
-│   └── shared/        # AccountPool、PnlManager、CheckTable
+├── d_blueprint/       # 策略蓝图层: 通道、策略类型、CheckTable
+│   ├── channel/      # 通道管理
+│   ├── strategy/     # 策略定义
+│   └── shared/        # CheckTable
 │
-├── e_strategy/        # 策略层（已合并入 f_engine 设计）
-│   └── channel/       # 通道模式切换
+├── e_risk_monitor/    # 合规约束层
+│   ├── risk/          # RiskPreChecker、RiskReChecker
+│   └── position/      # PositionManager
 │
 └── f_engine/          # 引擎运行时层
     ├── core/          # TradingEngine、Pipeline、StrategyPool
