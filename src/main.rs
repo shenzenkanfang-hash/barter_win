@@ -186,16 +186,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let status = test_resp.status();
                         let headers = test_resp.headers();
 
-                        let weight = headers.get("x-mbx-used-weight-1m")
+                        // Binance 返回的累计已用权重
+                        let binance_weight = headers.get("x-mbx-used-weight-1m")
                             .and_then(|v| v.to_str().ok())
                             .unwrap_or("-");
-                        let orders = headers.get("x-mbx-order-count-1m")
+                        let binance_orders = headers.get("x-mbx-order-count-1m")
                             .and_then(|v| v.to_str().ok())
                             .unwrap_or("-");
 
                         // 从网关获取限速器状态
                         let limiter = gateway.rate_limiter().lock();
-                        let (weight_rate, orders_rate) = limiter.usage_rate();
+                        let (weight_rate, _orders_rate) = limiter.usage_rate();
                         let near_limit = limiter.is_near_limit();
                         drop(limiter);
 
@@ -203,14 +204,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let blocked = elapsed > std::time::Duration::from_secs(1);
                         let status_str = if blocked { "⚠️ SLOW" } else { "OK" };
 
+                        // 打印：序号 | 耗时 | 状态 | Binance累计权重 | 使用率% | 是否接近限流 | 状态
                         println!(
-                            "[#{:06}] {:.3}s | {} | weight={} ({:.0}%) | near_limit={} | {}",
+                            "#{:06} | {:.3}s | {} | binance累计={} | {:.0}% | {}",
                             rate_test_count,
                             elapsed.as_secs_f64(),
                             status,
-                            weight,
+                            binance_weight,
                             weight_rate * 100.0,
-                            near_limit,
                             status_str
                         );
 
@@ -220,7 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Err(e) => {
-                        println!("[#{:06}] ERROR: {:?}", rate_test_count, e);
+                        println!("#{:06} | ERROR: {:?}", rate_test_count, e);
                     }
                 }
             }
