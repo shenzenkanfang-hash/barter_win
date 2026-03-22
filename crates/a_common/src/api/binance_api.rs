@@ -160,45 +160,52 @@ impl RateLimiter {
     }
 
     /// 获取请求许可（如果超过限制则等待）
+    ///
+    /// 注意：由于 Header 返回的是累计已用权重，我们采用保守策略：
+    /// - 每次请求后从 Header 更新累计值
+    /// - 如果累计值达到 80% 阈值，在下次请求前等待
     pub async fn acquire(&self) {
         loop {
-            let elapsed = {
+            let (elapsed, weight, orders) = {
                 let mut window_start = self.window_start.lock();
-                let mut used_weight = self.used_weight.lock();
-                let mut used_orders = self.used_orders.lock();
+                let used_weight = *self.used_weight.lock();
+                let used_orders = *self.used_orders.lock();
 
                 let elapsed = window_start.elapsed();
+
+                // 如果超过60秒，窗口重置，限流值也清零
                 if elapsed > Duration::from_secs(60) {
-                    // 重置窗口
                     *window_start = Instant::now();
-                    *used_weight = 0;
-                    *used_orders = 0;
+                    println!("[RateLimiter] 窗口重置");
+                    break;
                 }
 
-                if *used_weight >= self.request_weight_limit {
-                    // REQUEST_WEIGHT 超限，等待
+                // 保守策略：如果已用权重超过 80% 阈值，等待
+                let weight_threshold = (self.request_weight_limit as f64 * 0.8) as u32;
+                let orders_threshold = (self.orders_limit as f64 * 0.8) as u32;
+
+                if used_weight > weight_threshold {
                     let wait_time = Duration::from_secs(60) - elapsed;
-                    println!("[RateLimiter] REQUEST_WEIGHT 超限，等待 {} 秒", wait_time.as_secs());
+                    println!("[RateLimiter] REQUEST_WEIGHT {} > 80%阈值{}，等待 {} 秒",
+                        used_weight, weight_threshold, wait_time.as_secs());
                     drop(window_start);
-                    drop(used_weight);
-                    drop(used_orders);
                     tokio::time::sleep(wait_time).await;
                     continue;
                 }
 
-                if *used_orders >= self.orders_limit {
-                    // ORDERS 超限，等待
+                if used_orders > orders_threshold {
                     let wait_time = Duration::from_secs(60) - elapsed;
-                    println!("[RateLimiter] ORDERS 超限，等待 {} 秒", wait_time.as_secs());
+                    println!("[RateLimiter] ORDERS {} > 80%阈值{}，等待 {} 秒",
+                        used_orders, orders_threshold, wait_time.as_secs());
                     drop(window_start);
-                    drop(used_weight);
-                    drop(used_orders);
                     tokio::time::sleep(wait_time).await;
                     continue;
                 }
 
-                elapsed
+                (elapsed, used_weight, used_orders)
             };
+
+            // 通过检查，可以发送请求
             break;
         }
     }
