@@ -1,0 +1,20 @@
+[package]
+name = "f_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+a_common = { path = "../a_common" }
+b_data_source = { path = "../b_data_source" }
+c_data_process = { path = "../c_data_process" }
+d_risk_monitor = { path = "../d_risk_monitor" }
+
+parking_lot = "0.12"
+rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+fnv = { workspace = true }
+async-trait = { workspace = true }
