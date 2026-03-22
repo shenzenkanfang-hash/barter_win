@@ -18,5 +18,3 @@ b_data_source = { path = "../b_data_source" }
 c_data_process = { path = "../c_data_process" }
 d_risk_monitor = { path = "../d_risk_monitor" }
 a_common = { path = "../a_common" }
-f_engine = { path = "../f_engine" }
-h_sandbox = { path = "../h_sandbox" }

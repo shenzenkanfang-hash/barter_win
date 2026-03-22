@@ -1,4 +1,4 @@
-use crate::strategy::TradingMode;
+use crate::strategy::types::TradingMode;
 
 /// 交易模式切换器
 ///

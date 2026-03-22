@@ -5,7 +5,7 @@ use d_risk_monitor::risk::RiskPreChecker;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use crate::strategy::types::{OrderRequest, OrderType, Side};
+use e_strategy::strategy::types::{OrderRequest, OrderType, Side};
 
 /// 订单执行器
 ///

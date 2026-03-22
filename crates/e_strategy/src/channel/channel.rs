@@ -6,8 +6,7 @@ use b_data_source::{KLine, KLineSynthesizer, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::sync::Arc;
-use crate::strategy::types::Signal;
-use crate::strategy::StrategyId;
+use crate::strategy::types::{Signal, StrategyId};
 
 /// 通道类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
