@@ -342,7 +342,11 @@ impl BinanceApiGateway {
         for symbol in &trading_symbols {
             let file_path = format!("{}/{}.json", base_dir, symbol.symbol.to_lowercase());
             if let Ok(json_str) = serde_json::to_string_pretty(symbol) {
-                let _ = std::fs::write(&file_path, json_str.as_bytes());
+                if let Err(e) = std::fs::write(&file_path, json_str.as_bytes()) {
+                    warn!("保存失败 {}: {}", symbol.symbol, e);
+                } else {
+                    info!("已保存: {}", symbol.symbol);
+                }
             }
         }
 
