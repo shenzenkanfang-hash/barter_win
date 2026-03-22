@@ -208,6 +208,17 @@ impl Kline1dStream {
             }
         }
 
+        // 时间戳校验：必须大于最后一条
+        let last_time = data.last()
+            .and_then(|k| k.as_array().and_then(|a| a.get(5)))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if t <= last_time {
+            tracing::debug!("Skip duplicate/disordered kline: t={} <= last={}", t, last_time);
+            return Ok(());
+        }
+
         // 追加新K线
         data.push(ohlcvt);
 
