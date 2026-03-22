@@ -14,7 +14,7 @@
 //! 3. 如果 API 数据更新，覆盖本地数据
 
 use a_common::EngineError;
-use crate::persistence::memory_backup::{MemoryBackup, PositionSnapshot as MemoryPositionSnapshot};
+use a_common::backup::{MemoryBackup, PositionSnapshot as MemoryPositionSnapshot};
 use crate::persistence::sqlite_persistence::SqliteRecordService;
 use a_common::api::SymbolRulesFetcher;
 use rust_decimal::Decimal;

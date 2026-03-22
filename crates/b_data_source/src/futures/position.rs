@@ -63,7 +63,7 @@ pub struct FuturesPositionData {
 
 impl FuturesPositionData {
     /// 从 API 响应解析
-    fn from_response(resp: FuturesPositionResponse) -> Self {
+    pub fn from_response(resp: FuturesPositionResponse) -> Self {
         let qty = Decimal::from_str(&resp.position_amt).unwrap_or_default();
         let entry_price = Decimal::from_str(&resp.entry_price).unwrap_or_default();
         let mark_price = Decimal::from_str(&resp.mark_price).unwrap_or_default();

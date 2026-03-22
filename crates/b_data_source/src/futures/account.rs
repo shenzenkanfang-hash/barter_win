@@ -50,24 +50,30 @@ pub struct FuturesAccountData {
     pub available: Decimal,
     /// 已用保证金
     pub margin_used: Decimal,
+    /// 有效保证金 = 总保证金 + 未实现盈亏
+    pub effective_margin: Decimal,
     /// 更新时间戳
     pub update_time: i64,
 }
 
 impl FuturesAccountData {
     /// 从 API 响应解析
-    fn from_response(resp: FuturesAccountResponse) -> Self {
+    pub fn from_response(resp: FuturesAccountResponse) -> Self {
         let total_margin_balance =
             Decimal::from_str(&resp.total_margin_balance).unwrap_or_default();
         let unrealized_pnl = Decimal::from_str(&resp.total_unrealized_profit).unwrap_or_default();
         let available = Decimal::from_str(&resp.available_balance).unwrap_or_default();
         let margin_used = Decimal::from_str(&resp.total_maint_margin).unwrap_or_default();
 
+        // 有效保证金 = 总保证金 + 未实现盈亏
+        let effective_margin = total_margin_balance + unrealized_pnl;
+
         Self {
             total_margin_balance,
             unrealized_pnl,
             available,
             margin_used,
+            effective_margin,
             update_time: resp.update_time,
         }
     }
@@ -105,6 +111,8 @@ mod tests {
         assert_eq!(data.unrealized_pnl, Decimal::from_str("500.00").unwrap());
         assert_eq!(data.available, Decimal::from_str("8000.00").unwrap());
         assert_eq!(data.margin_used, Decimal::from_str("100.00").unwrap());
+        // 有效保证金 = 总保证金 + 未实现盈亏 = 10000 + 500 = 10500
+        assert_eq!(data.effective_margin, Decimal::from_str("10500.00").unwrap());
         assert_eq!(data.update_time, 1234567890);
     }
 

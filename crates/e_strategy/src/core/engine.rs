@@ -4,7 +4,7 @@ use d_risk_monitor::persistence::disaster_recovery::{DisasterRecovery, LocalPosi
 use a_common::EngineError;
 use crate::order::gateway::ExchangeGateway;
 use d_risk_monitor::shared::market_status::{MarketStatus, MarketStatusDetector};
-use d_risk_monitor::persistence::memory_backup::MemoryBackup;
+use a_common::backup::MemoryBackup;
 use crate::order::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
 use crate::channel::mode::ModeSwitcher;
 use crate::order::OrderExecutor;

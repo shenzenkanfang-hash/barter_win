@@ -4,55 +4,9 @@
 //!
 //! 将实时交易数据保存到高速内存盘 (E:/shm/backup)，定期同步到磁盘。
 //! 用于快速读写高频交易数据，同时保证数据持久性。
-//!
-//! # 目录结构
-//!
-//! ```ignore
-//! E:/shm/backup/
-//! ├── account.json           # 账户信息
-//! ├── positions.json         # 持仓（统一管理）
-//! ├── trading_pairs.json     # 交易品种列表
-//! │
-//! ├── channel/              # 通道
-//! │   ├── minute.json
-//! │   └── daily.json
-//! │
-//! ├── depth/                # 订单簿（一级目录，按品种分）
-//! │   ├── btcusdt.json
-//! │   └── ethusdt.json
-//! │
-//! ├── trades/               # 成交（一级目录，按品种分 CSV）
-//! │   ├── btcusdt.csv
-//! │   └── ethusdt.csv
-//! │
-//! ├── rules/                # 规则（一级目录，按品种分）
-//! │   ├── btcusdt.json
-//! │   └── ethusdt.json
-//! │
-//! ├── kline-1m-实时/        # K线1分钟实时
-//! ├── kline-1m-历史/        # K线1分钟历史
-//! ├── kline-1d-实时/        # K线日线实时
-//! ├── kline-1d-历史/        # K线日线历史
-//! │
-//! ├── indicators-1m-实时/   # 指标1分钟实时
-//! ├── indicators-1m-历史/   # 指标1分钟历史
-//! ├── indicators-1d-实时/    # 指标日线实时
-//! ├── indicators-1d-历史/    # 指标日线历史
-//! │
-//! ├── tasks/                # 任务池
-//! │   ├── minute/
-//! │   └── daily/
-//! │
-//! └── mutex/                # 策略互斥判断中心
-//!     ├── minute/
-//!     │   ├── btcusdt.json
-//!     │   └── ethusdt.json
-//!     └── hour/
-//!         ├── btcusdt.json
-//!         └── ethusdt.json
-//! ```
 
-use a_common::EngineError;
+use crate::config::Paths;
+use crate::EngineError;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -66,7 +20,7 @@ use tokio::time::{interval, Duration};
 
 /// 内存备份根目录 (由 Platform::detect() 自动选择)
 pub fn memory_backup_dir() -> String {
-    a_common::Paths::new().memory_backup_dir
+    Paths::new().memory_backup_dir
 }
 
 /// K线最大条目数
@@ -851,7 +805,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_backup_creation() {
-        let paths = a_common::Paths::new();
+        let paths = Paths::new();
         let backup = MemoryBackup::new(&paths.memory_backup_dir, &paths.disk_sync_dir, 30);
         assert_eq!(backup.tmpfs_dir(), paths.memory_backup_dir);
         assert_eq!(backup.disk_dir(), paths.disk_sync_dir);
