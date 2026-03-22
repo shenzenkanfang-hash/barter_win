@@ -21,17 +21,20 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::sync::Arc;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 use tracing::{info, warn, error};
 
 /// API 限速器 - 区分 REQUEST_WEIGHT 和 ORDERS 两个体系
+///
+/// 限制值在初始化时从 exchangeInfo 获取一次，之后不再变化
+/// 已用权重从响应 Header 实时获取（只更新 > 0 的值）
 #[derive(Debug)]
 pub struct RateLimiter {
-    /// REQUEST_WEIGHT 每分钟限制 (可动态更新)
-    request_weight_limit: RwLock<u32>,
-    /// ORDERS 每分钟限制 (可动态更新)
-    orders_limit: RwLock<u32>,
+    /// REQUEST_WEIGHT 每分钟限制 (常量，来自 exchangeInfo)
+    request_weight_limit: u32,
+    /// ORDERS 每分钟限制 (常量，来自 exchangeInfo)
+    orders_limit: u32,
     /// 当前窗口起始时间
     window_start: Mutex<Instant>,
     /// 当前窗口内已用 REQUEST_WEIGHT
@@ -44,8 +47,8 @@ impl RateLimiter {
     /// 创建新的限速器（传入两个限制值）
     pub fn new(request_weight_limit: u32, orders_limit: u32) -> Self {
         Self {
-            request_weight_limit: RwLock::new(request_weight_limit),
-            orders_limit: RwLock::new(orders_limit),
+            request_weight_limit,
+            orders_limit,
             window_start: Mutex::new(Instant::now()),
             used_weight: Mutex::new(0),
             used_orders: Mutex::new(0),
@@ -62,32 +65,27 @@ impl RateLimiter {
         Self::new(1200, 600)
     }
 
-    /// 从 BinanceExchangeInfo 的 rateLimits 更新限制值
+    /// 从 BinanceExchangeInfo 的 rateLimits 获取限制值（仅用于打印日志，限制值已在构造函数中设置）
     pub fn update_limits_from_exchange_info(&self, info: &BinanceExchangeInfo) {
         for limit in &info.rate_limits {
             match (limit.rate_limit_type.as_str(), limit.interval.as_str()) {
                 ("REQUEST_WEIGHT", "MINUTE") => {
-                    *self.request_weight_limit.write() = limit.limit as u32;
-                    println!("[RateLimiter] 更新 REQUEST_WEIGHT 限制: {} (from exchangeInfo)", limit.limit);
+                    println!("[RateLimiter] exchangeInfo REQUEST_WEIGHT 限制: {}", limit.limit);
                 }
                 ("ORDERS", "MINUTE") => {
-                    *self.orders_limit.write() = limit.limit as u32;
-                    println!("[RateLimiter] 更新 ORDERS 限制: {} (from exchangeInfo)", limit.limit);
+                    println!("[RateLimiter] exchangeInfo ORDERS 限制: {}", limit.limit);
                 }
                 _ => {}
             }
         }
     }
 
-    /// 从响应 Header 更新权重（只更新 > 0 的值）
+    /// 从响应 Header 更新已用权重（只更新 > 0 的值）
     ///
     /// # Header Keys
     /// - `x-mbx-used-weight-1m`: 请求权重
     /// - `x-mbx-order-count-1m`: 订单计数
     pub fn update_from_headers(&self, headers: &reqwest::header::HeaderMap) {
-        let weight_limit = *self.request_weight_limit.read();
-        let orders_limit = *self.orders_limit.read();
-
         // 更新 REQUEST_WEIGHT（只接受 > 0 的值）
         if let Some(weight_str) = headers.get("x-mbx-used-weight-1m") {
             if let Ok(weight_str) = weight_str.to_str() {
@@ -95,7 +93,7 @@ impl RateLimiter {
                     if weight > 0.0 {
                         let mut used_weight = self.used_weight.lock();
                         *used_weight = weight as u32;
-                        println!("[RateLimiter] 更新 REQUEST_WEIGHT: {} / {}", *used_weight, weight_limit);
+                        println!("[RateLimiter] 已用 REQUEST_WEIGHT: {} / {}", *used_weight, self.request_weight_limit);
                     }
                 }
             }
@@ -108,7 +106,7 @@ impl RateLimiter {
                     if orders > 0.0 {
                         let mut used_orders = self.used_orders.lock();
                         *used_orders = orders as u32;
-                        println!("[RateLimiter] 更新 ORDERS: {} / {}", *used_orders, orders_limit);
+                        println!("[RateLimiter] 已用 ORDERS: {} / {}", *used_orders, self.orders_limit);
                     }
                 }
             }
@@ -119,23 +117,19 @@ impl RateLimiter {
     pub fn is_near_limit(&self) -> bool {
         let weight = *self.used_weight.lock();
         let orders = *self.used_orders.lock();
-        let weight_limit = *self.request_weight_limit.read();
-        let orders_limit = *self.orders_limit.read();
 
         // 权重达到 80% 阈值
-        weight as f64 > weight_limit as f64 * 0.8
-        || orders as f64 > orders_limit as f64 * 0.8
+        weight as f64 > self.request_weight_limit as f64 * 0.8
+        || orders as f64 > self.orders_limit as f64 * 0.8
     }
 
     /// 获取当前使用率
     pub fn usage_rate(&self) -> (f64, f64) {
         let weight = *self.used_weight.lock();
         let orders = *self.used_orders.lock();
-        let weight_limit = *self.request_weight_limit.read();
-        let orders_limit = *self.orders_limit.read();
 
-        let weight_rate = weight as f64 / weight_limit as f64;
-        let orders_rate = orders as f64 / orders_limit as f64;
+        let weight_rate = weight as f64 / self.request_weight_limit as f64;
+        let orders_rate = orders as f64 / self.orders_limit as f64;
 
         (weight_rate, orders_rate)
     }
@@ -147,8 +141,6 @@ impl RateLimiter {
                 let mut window_start = self.window_start.lock();
                 let mut used_weight = self.used_weight.lock();
                 let mut used_orders = self.used_orders.lock();
-                let weight_limit = *self.request_weight_limit.read();
-                let orders_limit = *self.orders_limit.read();
 
                 let elapsed = window_start.elapsed();
                 if elapsed > Duration::from_secs(60) {
@@ -158,7 +150,7 @@ impl RateLimiter {
                     *used_orders = 0;
                 }
 
-                if *used_weight >= weight_limit {
+                if *used_weight >= self.request_weight_limit {
                     // REQUEST_WEIGHT 超限，等待
                     let wait_time = Duration::from_secs(60) - elapsed;
                     println!("[RateLimiter] REQUEST_WEIGHT 超限，等待 {} 秒", wait_time.as_secs());
@@ -169,7 +161,7 @@ impl RateLimiter {
                     continue;
                 }
 
-                if *used_orders >= orders_limit {
+                if *used_orders >= self.orders_limit {
                     // ORDERS 超限，等待
                     let wait_time = Duration::from_secs(60) - elapsed;
                     println!("[RateLimiter] ORDERS 超限，等待 {} 秒", wait_time.as_secs());
