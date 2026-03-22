@@ -281,6 +281,11 @@ impl BinanceApiGateway {
         &self.account_api_base
     }
 
+    /// 获取限速器引用（用于测试）
+    pub fn rate_limiter(&self) -> &Arc<Mutex<RateLimiter>> {
+        &self.rate_limiter
+    }
+
     /// 从币安 API 获取单个交易对规则
     ///
     /// # 参数
