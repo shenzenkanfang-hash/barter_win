@@ -5,8 +5,9 @@
 //! 2. 订阅 1m K线 WS (分片: 50个/批, 500ms间隔)
 //! 3. 订阅 1d K线 WS (分片: 50个/批, 500ms间隔)
 //! 4. 订阅 Depth 订单簿 WS (仅 BTC 维护连接)
+//! 5. 定时打印账户余额
 
-use b_data_source::{BinanceApiGateway, Kline1mStream, Kline1dStream, DepthStream, Paths};
+use b_data_source::{BinanceApiGateway, Kline1mStream, Kline1dStream, DepthStream, Paths, FuturesDataSyncer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 
 #[tokio::main]
@@ -59,10 +60,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut depth_stream = DepthStream::new_btc_only().await?;
     tracing::info!("Depth WS subscription started");
 
+    // 5. 初始化账户数据同步器 (实盘行情 + 测试网账户)
+    let account_syncer = FuturesDataSyncer::new();
+    tracing::info!("Account syncer initialized (market: fapi.binance.com, account: testnet.binancefuture.com)");
+
     // 主循环：交替处理三个流
     let mut count_1m = 0;
     let mut count_1d = 0;
     let mut count_depth = 0;
+    let mut account_print_flag = false;
+
     loop {
         tokio::select! {
             msg_1m = kline_1m_stream.next_message() => {
@@ -96,6 +103,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     tracing::warn!("Depth Stream ended");
                     break;
+                }
+            }
+            _ = async {
+                if !account_print_flag {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                }
+            } => {
+                // 5秒后打印账户信息
+                if !account_print_flag {
+                    println!("========== 账户信息查询 ==========");
+                    match account_syncer.fetch_account().await {
+                        Ok(account) => {
+                            println!("总保证金: {} USDT", account.total_margin_balance);
+                            println!("可用余额: {} USDT", account.available);
+                            println!("未实现盈亏: {} USDT", account.unrealized_pnl);
+                            println!("有效保证金: {} USDT", account.effective_margin);
+                        }
+                        Err(e) => {
+                            println!("获取账户信息失败: {:?}", e);
+                        }
+                    }
+
+                    // 获取持仓
+                    match account_syncer.fetch_positions().await {
+                        Ok(positions) => {
+                            if positions.is_empty() {
+                                println!("当前无持仓");
+                            } else {
+                                for pos in &positions {
+                                    println!(
+                                        "{} {} 数量:{} 杠杆:{}x",
+                                        pos.symbol, pos.side, pos.qty, pos.leverage
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("获取持仓信息失败: {:?}", e);
+                        }
+                    }
+                    println!("==================================");
+                    account_print_flag = true;
                 }
             }
         }
