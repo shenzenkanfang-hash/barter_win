@@ -358,8 +358,9 @@ impl BinanceApiGateway {
             }
         }
 
-        // 保存有效交易品种列表
-        let symbols_list_path = format!("{}/symbols_list.json", base_dir);
+        // 保存有效交易品种列表到 memory_backup_dir（作为一级资源）
+        let paths = Paths::new();
+        let symbols_list_path = format!("{}/symbols_list.json", paths.memory_backup_dir);
         let symbols_list = serde_json::json!({
             "有效交易品种": trading_symbols.iter().map(|s| s.symbol.clone()).collect::<Vec<_>>(),
             "更新时间戳": chrono::Utc::now().timestamp()
