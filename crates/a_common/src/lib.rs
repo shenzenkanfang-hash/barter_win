@@ -42,7 +42,7 @@ pub use ws::{MarketConnector, MockMarketConnector};
 // Re-exports - Backup
 pub use backup::{
     AccountSnapshot, ChannelData, DepthData, DepthEntry, IndicatorsData, KlineData, KlineEntry,
-    MemoryBackup, PositionSnapshot, Positions, SymbolMutexStatus, SymbolRulesData, TaskInfo, TaskPool,
+    MemoryBackup, PositionSnapshot, Positions, SymbolMutexStatus, TaskInfo, TaskPool,
     TradingPairInfo, TradingPairs, ACCOUNT_FILE, DEPTH_DIR, INDICATORS_1D_HISTORY_DIR,
     INDICATORS_1D_REALTIME_DIR, INDICATORS_1M_HISTORY_DIR, INDICATORS_1M_REALTIME_DIR,
     KLINE_1D_HISTORY_DIR, KLINE_1D_REALTIME_DIR, KLINE_1M_HISTORY_DIR, KLINE_1M_REALTIME_DIR,

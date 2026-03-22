@@ -15,12 +15,11 @@
 
 use crate::claint::error::EngineError;
 use crate::config::Paths;
-use chrono::Utc;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use parking_lot::Mutex;
@@ -764,7 +763,7 @@ impl BinanceApiGateway {
             .client
             .get(&url)
             .query(&[
-                ("symbol", symbol.to_uppercase()),
+                ("symbol", symbol.to_uppercase().as_str()),
                 ("recvWindow", "5000"),
             ])
             .send()
