@@ -360,66 +360,40 @@ src/
 服务器部署流程（长期测试环境）
 ================================================================================
 
-**服务器**: quant@172.18.57.21 (Ubuntu 24.04, 1.6GB RAM + 2GB Swap)
-**编译服务器**: char@192.168.1.21 (Windows 本地，资源充足)  123456
+**编译运行服务器**: char@192.168.1.21 (Windows，资源充足)
 
 ### 铁律：禁止直接在服务器修改代码
 
-**所有代码改动必须在本地 Windows 完成，打包上传到服务器！**
+**所有代码改动必须在本地 Windows 完成，同步到服务器！**
 
 | 允许的操作 | 禁止的操作 |
 |-----------|-----------|
 | 本地修改代码 | 直接在服务器 vim/edits |
 | 本地编译测试 | 服务器上修改后编译 |
-| 打包上传 | 服务器 git pull/push |
+| 代码同步 | 服务器 git pull/push |
 | 服务器仅用于：运行、监控、查看日志 | 服务器代码变更后上传 |
 
-### 部署步骤
+### 编译运行步骤（都在 192.168.1.21）
 
-**1. 在 192.168.1.17 (编译服务器) 编译**
 ```bash
-# 本地编译 (资源充足，可以多线程)
+# 1. 编译
 cargo build --release
-```
 
-**2. 打包上传到服务器**
-```bash
-tar --exclude='.git' --exclude='*.pdb' -czvf barter-rs.tar.gz target/release/
-scp barter-rs.tar.gz quant@172.18.57.21:/home/quant/
-```
-
-**3. 服务器解压运行**
-```bash
-ssh quant@172.18.57.21
-tar -xzvf barter-rs.tar.gz
-./target/release/data-monitor  # 或其他程序
-```
-
-### 服务器内存优化（如需）
-```bash
-sudo systemctl stop cloudmonitor packagekit tuned unattended-upgrades docker
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+# 2. 运行
+./target/release/data-monitor
 ```
 
 ### 更新部署（代码修改后）
+
 ```bash
-# 1. 在 192.168.1.17 编译
+# 1. 本地编译
 cargo build --release
 
-# 2. 打包 release 目录
-tar --exclude='.git' --exclude='*.pdb' -czvf barter-rs.tar.gz target/release/
+# 2. 同步到服务器（如果需要）
+rsync -avz --exclude='.git' --exclude='target/debug' ./ char@192.168.1.21:/path/to/barter-rs/
 
-# 3. 上传到服务器
-scp barter-rs.tar.gz quant@172.18.57.21:/home/quant/
-
-# 4. 服务器解压覆盖
-ssh quant@172.18.57.21 "tar -xzvf barter-rs.tar.gz"
+# 3. 在服务器重新编译运行
+ssh char@192.168.1.21 "cd /path/to/barter-rs && cargo build --release && ./target/release/data-monitor"
 ```
-
-### 首次部署检查清单
-- [ ] 创建 swap (2GB)
-- [ ] 安装 Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- [ ] 安装依赖: `sudo apt install build-essential pkg-config libssl-dev git`
-- [ ] 打包上传 → 编译 → 验证运行
 
 ---
