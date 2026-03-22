@@ -81,7 +81,10 @@ impl RateLimiter {
 /// 币安 API 网关
 pub struct BinanceApiGateway {
     client: Client,
-    api_base: String,
+    /// 价格/市场数据 API（实盘）
+    market_api_base: String,
+    /// 账户 API（可配置为实盘或测试网）
+    account_api_base: String,
     rate_limiter: Arc<RateLimiter>,
 }
 
@@ -90,17 +93,31 @@ impl BinanceApiGateway {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_base: "https://api.binance.com".to_string(),
+            market_api_base: "https://api.binance.com".to_string(),
+            account_api_base: "https://api.binance.com".to_string(),
             rate_limiter: Arc::new(RateLimiter::new(1200)), // 币安现货 API 限制
         }
     }
 
-    /// 创建 USDT 合约 API 网关
+    /// 创建 USDT 合约 API 网关（实盘价格 + 实盘账户）
     pub fn new_futures() -> Self {
         Self {
             client: Client::new(),
-            api_base: "https://fapi.binance.com".to_string(),
+            market_api_base: "https://fapi.binance.com".to_string(),
+            account_api_base: "https://fapi.binance.com".to_string(),
             rate_limiter: Arc::new(RateLimiter::new(2400)), // 合约 API 限制更高
+        }
+    }
+
+    /// 创建 USDT 合约 API 网关（实盘价格 + 测试网账户）
+    ///
+    /// 用于：实盘行情 + 模拟交易
+    pub fn new_futures_with_testnet() -> Self {
+        Self {
+            client: Client::new(),
+            market_api_base: "https://fapi.binance.com".to_string(),      // 实盘行情
+            account_api_base: "https://testnet.binancefuture.com".to_string(), // 测试网账户
+            rate_limiter: Arc::new(RateLimiter::new(2400)),
         }
     }
 
@@ -108,9 +125,20 @@ impl BinanceApiGateway {
     pub fn with_api_base(api_base: &str) -> Self {
         Self {
             client: Client::new(),
-            api_base: api_base.to_string(),
+            market_api_base: api_base.to_string(),
+            account_api_base: api_base.to_string(),
             rate_limiter: Arc::new(RateLimiter::new(1200)),
         }
+    }
+
+    /// 获取市场数据 API 地址
+    pub fn market_api_base(&self) -> &str {
+        &self.market_api_base
+    }
+
+    /// 获取账户 API 地址
+    pub fn account_api_base(&self) -> &str {
+        &self.account_api_base
     }
 
     /// 从币安 API 获取单个交易对规则
@@ -123,7 +151,7 @@ impl BinanceApiGateway {
     pub async fn fetch_symbol_rules(&self, symbol: &str) -> Result<SymbolRulesData, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/api/v3/exchangeInfo", self.api_base);
+        let url = format!("{}/api/v3/exchangeInfo", self.market_api_base);
         let resp = self
             .client
             .get(&url)
@@ -219,7 +247,7 @@ impl BinanceApiGateway {
     pub async fn fetch_all_usdt_symbol_rules(&self) -> Result<Vec<SymbolRulesData>, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/api/v3/exchangeInfo", self.api_base);
+        let url = format!("{}/api/v3/exchangeInfo", self.market_api_base);
         let resp = self
             .client
             .get(&url)
@@ -305,7 +333,7 @@ impl BinanceApiGateway {
     pub async fn fetch_and_save_all_usdt_symbol_rules(&self) -> Result<Vec<SymbolRulesData>, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/api/v3/exchangeInfo", self.api_base);
+        let url = format!("{}/api/v3/exchangeInfo", self.market_api_base);
         let resp = self
             .client
             .get(&url)
@@ -439,7 +467,7 @@ impl BinanceApiGateway {
     pub async fn fetch_account_info(&self) -> Result<BinanceAccountInfo, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/api/v3/account", self.api_base);
+        let url = format!("{}/api/v3/account", self.market_api_base);
         let resp = self
             .client
             .get(&url)
@@ -478,7 +506,7 @@ impl BinanceApiGateway {
     pub async fn fetch_position_risk(&self, symbol: &str) -> Result<PositionRisk, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/api/v3/positionRisk", self.api_base);
+        let url = format!("{}/api/v3/positionRisk", self.market_api_base);
         let resp = self
             .client
             .get(&url)
@@ -528,7 +556,7 @@ impl BinanceApiGateway {
     pub async fn fetch_leverage_brackets(&self, symbol: Option<&str>) -> Result<Vec<LeverageBracket>, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/fapi/v1/leverageBracket", self.api_base);
+        let url = format!("{}/fapi/v1/leverageBracket", self.market_api_base);
         let resp = self
             .client
             .get(&url)
@@ -591,7 +619,7 @@ impl BinanceApiGateway {
     pub async fn fetch_futures_account(&self) -> Result<FuturesAccountResponse, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/fapi/v2/account", self.api_base);
+        let url = format!("{}/fapi/v2/account", self.account_api_base);
         let resp = self
             .client
             .get(&url)
@@ -621,7 +649,7 @@ impl BinanceApiGateway {
     pub async fn fetch_futures_positions(&self) -> Result<Vec<FuturesPositionResponse>, EngineError> {
         self.rate_limiter.acquire().await;
 
-        let url = format!("{}/fapi/v2/positionRisk", self.api_base);
+        let url = format!("{}/fapi/v2/positionRisk", self.account_api_base);
         let resp = self
             .client
             .get(&url)
@@ -940,10 +968,26 @@ mod tests {
     #[test]
     fn test_fetcher_creation() {
         let fetcher = BinanceApiGateway::new();
-        assert_eq!(fetcher.api_base, "https://api.binance.com");
+        assert_eq!(fetcher.market_api_base, "https://api.binance.com");
+        assert_eq!(fetcher.account_api_base, "https://api.binance.com");
 
         let test_fetcher = BinanceApiGateway::with_api_base("https://testnet.binance.vision");
-        assert_eq!(test_fetcher.api_base, "https://testnet.binance.vision");
+        assert_eq!(test_fetcher.market_api_base, "https://testnet.binance.vision");
+        assert_eq!(test_fetcher.account_api_base, "https://testnet.binance.vision");
+    }
+
+    #[test]
+    fn test_new_futures() {
+        let fetcher = BinanceApiGateway::new_futures();
+        assert_eq!(fetcher.market_api_base, "https://fapi.binance.com");
+        assert_eq!(fetcher.account_api_base, "https://fapi.binance.com");
+    }
+
+    #[test]
+    fn test_new_futures_with_testnet() {
+        let fetcher = BinanceApiGateway::new_futures_with_testnet();
+        assert_eq!(fetcher.market_api_base, "https://fapi.binance.com"); // 实盘行情
+        assert_eq!(fetcher.account_api_base, "https://testnet.binancefuture.com"); // 测试网账户
     }
 
     #[test]
@@ -1012,12 +1056,6 @@ mod tests {
 
         assert_eq!(pos.symbol, "BTCUSDT");
         assert_eq!(pos.leverage, 10);
-    }
-
-    #[test]
-    fn test_new_futures() {
-        let fetcher = BinanceApiGateway::new_futures();
-        assert_eq!(fetcher.api_base, "https://fapi.binance.com");
     }
 
     #[test]
