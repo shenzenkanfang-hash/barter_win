@@ -15,6 +15,7 @@
 
 use crate::claint::error::EngineError;
 use crate::config::Paths;
+use chrono::Utc;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -355,6 +356,21 @@ impl BinanceApiGateway {
             } else {
                 error!("JSON 序列化失败: {}", symbol.symbol);
             }
+        }
+
+        // 保存有效交易品种列表
+        let symbols_list_path = format!("{}/symbols_list.json", base_dir);
+        let symbols_list = serde_json::json!({
+            "有效交易品种": trading_symbols.iter().map(|s| s.symbol.clone()).collect::<Vec<_>>(),
+            "更新时间戳": chrono::Utc::now().timestamp()
+        });
+        if let Ok(json_str) = serde_json::to_string_pretty(&symbols_list) {
+            match std::fs::write(&symbols_list_path, json_str.as_bytes()) {
+                Ok(_) => info!("已保存有效交易品种列表到 {}", symbols_list_path),
+                Err(e) => error!("保存有效交易品种列表失败: {}", e),
+            }
+        } else {
+            error!("序列化有效交易品种列表失败");
         }
 
         // 构建返回数据

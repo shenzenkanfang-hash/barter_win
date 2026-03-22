@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -48,6 +49,10 @@ pub struct Kline1dStream {
         >,
     >,
     file_handles: HashMap<String, File>,
+    /// 记录每个 symbol 上次写入时间（用于超时强制写入）
+    last_write_times: HashMap<String, Instant>,
+    /// 超时写入间隔（秒）
+    write_timeout_secs: u64,
 }
 
 impl Kline1dStream {
@@ -123,6 +128,8 @@ impl Kline1dStream {
             symbols,
             ws_stream: Some(read),
             file_handles: HashMap::new(),
+            last_write_times: HashMap::new(),
+            write_timeout_secs: 5, // 5秒超时写入
         })
     }
 
@@ -148,12 +155,41 @@ impl Kline1dStream {
     fn write_overwrite(&mut self, symbol: &str, json_str: &str) -> std::io::Result<()> {
         let symbol_lower = symbol.to_lowercase();
         let path = format!("{}/{}.json", self.base_dir, symbol_lower);
-        // 先创建目录
-        Self::ensure_dir(std::path::Path::new(&path))?;
+        // 先创建目录，失败时记录错误
+        if let Err(e) = Self::ensure_dir(std::path::Path::new(&path)) {
+            tracing::error!("Failed to create directory for {}: {}", symbol_lower, e);
+            return Err(e);
+        }
         let mut file = File::create(&path)?;
         file.write_all(json_str.as_bytes())?;
         file.write_all(b"\n")?;
-        file.flush()  // 内存盘不需要 sync_all
+        file.flush()?;  // 内存盘不需要 sync_all
+        tracing::debug!("Write kline to {}: {} bytes", path, json_str.len());
+        Ok(())
+    }
+
+    /// 判断是否应该写入：收盘 或 超时
+    fn should_write(&self, symbol: &str, is_closed: bool) -> bool {
+        let symbol_lower = symbol.to_lowercase();
+        let now = Instant::now();
+        let timeout = Duration::from_secs(self.write_timeout_secs);
+
+        // 收盘时立即写入
+        if is_closed {
+            return true;
+        }
+
+        // 非收盘时，检查是否超时
+        if let Some(last_time) = self.last_write_times.get(&symbol_lower) {
+            if now.duration_since(*last_time) >= timeout {
+                return true;
+            }
+        } else {
+            // 首次写入，需要写入
+            return true;
+        }
+
+        false
     }
 
     /// 获取下一条消息并写入缓存
@@ -191,9 +227,13 @@ impl Kline1dStream {
                     serde_json::to_string(&kline).ok(),
                     kline.get("x").and_then(|v| v.as_bool()),
                 ) {
-                    // 只在 K线收盘时写入（减少 IO）
-                    if is_closed {
-                        let _ = self.write_overwrite(symbol, &json_str);
+                    // 写入条件：收盘 或 超时(5秒)
+                    if self.should_write(symbol, is_closed) {
+                        if self.write_overwrite(symbol, &json_str).is_ok() {
+                            // 写入成功，重置计时器
+                            let symbol_lower = symbol.to_lowercase();
+                            self.last_write_times.insert(symbol_lower, Instant::now());
+                        }
                     }
                 }
             }

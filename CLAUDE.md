@@ -357,45 +357,4 @@ src/
 | Phase 5: Engine | 完成 | RiskPreChecker, OrderExecutor, ModeSwitcher |
 | Phase 6: Integration | 进行中 | TradingEngine, main.rs, 类型转换 |
 
-================================================================================
-服务器部署流程（长期测试环境）
-================================================================================
-
-**编译运行服务器**: char@192.168.1.21 (Windows，资源充足)
-
-### 铁律：禁止直接在服务器修改代码
-## 遇到问题需要权限自己使用 1234 密码和sudo完成认证
-
-**所有代码改动必须在本地 Windows 完成，同步到服务器！**
-
-| 允许的操作 | 禁止的操作 |
-|-----------|-----------|
-| 本地修改代码 | 直接在服务器 vim/edits |
-| 本地编译测试 | 服务器上修改后编译 |
-| 代码同步 | 服务器 git pull/push |
-| 服务器仅用于：运行、监控、查看日志 | 服务器代码变更后上传 |
-
-### 编译运行步骤（都在 192.168.1.21）
-
-```bash
-# 1. 编译
-cargo build --release
-
-# 2. 运行
-./target/release/data-monitor
-```
-
-### 更新部署（代码修改后）
-
-```bash
-# 1. 本地编译
-cargo build --release
-
-# 2. 同步到服务器（如果需要）
-rsync -avz --exclude='.git' --exclude='target/debug' ./ char@192.168.1.21:/path/to/barter-rs/
-
-# 3. 在服务器重新编译运行
-ssh char@192.168.1.21 "cd /path/to/barter-rs && cargo build --release && ./target/release/data-monitor"
-```
-
----
+=============================================================================
