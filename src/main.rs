@@ -184,7 +184,8 @@ async fn run_rate_limit_test() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // 发送一次 exchangeInfo 请求来获取和设置限制值
-    let url = format!("{}/api/v3/exchangeInfo", gateway.market_api_base());
+    // USDT 合约正确路径是 /fapi/v1/exchangeInfo
+    let url = format!("{}/fapi/v1/exchangeInfo", gateway.market_api_base());
     let client = reqwest::Client::new();
 
     let resp = client
