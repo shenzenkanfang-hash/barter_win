@@ -671,6 +671,131 @@ impl BinanceApiGateway {
 
         Ok(positions)
     }
+
+    /// 设置持仓模式（双向持仓/单向持仓）
+    ///
+    /// # 参数
+    /// * `dual_side_position` - true: 双向持仓模式, false: 单向持仓模式
+    ///
+    /// # 返回
+    /// * `bool` - 设置是否成功
+    pub async fn change_position_mode(&self, dual_side_position: bool) -> Result<bool, EngineError> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}/fapi/v1/positionMode", self.account_api_base);
+        let params = serde_json::json!({
+            "dualSidePosition": dual_side_position.to_string(),
+            "recvWindow": 5000
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&params)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "设置持仓模式失败: {}",
+                resp.status()
+            )));
+        }
+
+        tracing::info!(dual_side = dual_side_position, "持仓模式设置成功");
+        Ok(true)
+    }
+
+    /// 设置交易对杠杆倍数
+    ///
+    /// # 参数
+    /// * `symbol` - 交易对名称，如 "BTCUSDT"
+    /// * `leverage` - 杠杆倍数 (1-125)
+    ///
+    /// # 返回
+    /// * `bool` - 设置是否成功
+    pub async fn change_leverage(&self, symbol: &str, leverage: i32) -> Result<bool, EngineError> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}/fapi/v1/leverage", self.account_api_base);
+        let params = serde_json::json!({
+            "symbol": symbol.to_uppercase(),
+            "leverage": leverage,
+            "recvWindow": 5000
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&params)
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "设置杠杆失败: {}",
+                resp.status()
+            )));
+        }
+
+        tracing::info!(symbol = symbol, leverage = leverage, "杠杆设置成功");
+        Ok(true)
+    }
+
+    /// 获取交易手续费率
+    ///
+    /// # 参数
+    /// * `symbol` - 交易对名称，如 "BTCUSDT"
+    ///
+    /// # 返回
+    /// * `(maker_fee, taker_fee)` - (maker费率, taker费率)
+    pub async fn get_commission_rate(&self, symbol: &str) -> Result<(Decimal, Decimal), EngineError> {
+        self.rate_limiter.acquire().await;
+
+        let url = format!("{}/fapi/v1/commissionRate", self.account_api_base);
+        let params = serde_json::json!({
+            "symbol": symbol.to_uppercase(),
+            "recvWindow": 5000
+        });
+
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("symbol", symbol.to_uppercase()),
+                ("recvWindow", "5000"),
+            ])
+            .send()
+            .await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "获取手续费率失败: {}",
+                resp.status()
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct CommissionRateResponse {
+            #[serde(rename = "makerCommissionRate")]
+            maker_commission_rate: String,
+            #[serde(rename = "takerCommissionRate")]
+            taker_commission_rate: String,
+        }
+
+        let rate: CommissionRateResponse = resp
+            .json()
+            .await
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+
+        let maker_fee = Decimal::from_str(&rate.maker_commission_rate).unwrap_or(dec!(0.0002));
+        let taker_fee = Decimal::from_str(&rate.taker_commission_rate).unwrap_or(dec!(0.0004));
+
+        Ok((maker_fee, taker_fee))
+    }
 }
 
 impl Default for BinanceApiGateway {

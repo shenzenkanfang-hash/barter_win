@@ -21,6 +21,7 @@ pub mod kline_1d;
 pub mod order_books;
 pub mod symbol_rules;
 pub mod recovery;
+pub mod misc;
 
 // Futures data modules
 pub mod futures;
@@ -42,6 +43,9 @@ pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 // Re-exports - Futures data
 pub use futures::{FuturesAccount, FuturesAccountData, FuturesPosition, FuturesPositionData};
 pub use futures::{FuturesDataSyncer, FuturesSyncResult};
+
+// Re-exports - Trade settings
+pub use misc::{TradeSettings, PositionMode};
 
 #[cfg(test)]
 pub mod tests;
