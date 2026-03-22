@@ -1447,8 +1447,11 @@ mod tests {
 
     #[test]
     fn test_rate_limiter() {
-        let limiter = RateLimiter::new(10);
-        assert_eq!(limiter.requests_per_minute, 10);
+        let limiter = RateLimiter::new();
+        // RateLimiter 默认值
+        let (weight_rate, orders_rate) = limiter.usage_rate();
+        assert_eq!(weight_rate, 0.0);
+        assert_eq!(orders_rate, 0.0);
     }
 
     #[test]
