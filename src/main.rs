@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_level(true)   // 显示日志级别
                 .with_thread_ids(false) // 不显示线程ID
         )
-        .with(LevelFilter::WARN)  // 只显示警告和错误
+        .with(LevelFilter::INFO)  // 显示 info/warn/error
         .init();
 
     tracing::info!("Trading system starting");
@@ -68,8 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 6. 初始化 Rate Limiter 测试客户端 (独立客户端用于监控)
     let rate_test_client = reqwest::Client::new();
-    // USDT 合约期货 API
-    let rate_test_url = "https://fapi.binance.com/fapi/v1/exchangeInfo".to_string();
+    // 使用轻量级 API 测试限流：/fapi/v1/ticker/price
+    let rate_test_url = "https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT".to_string();
     println!("Rate limiter test URL: {}", rate_test_url);
 
     // 用于打印的计数器
