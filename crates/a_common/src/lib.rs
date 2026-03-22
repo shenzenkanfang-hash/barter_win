@@ -15,7 +15,7 @@ pub mod util;
 pub mod backup;
 
 // Re-exports - API
-pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData};
+pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData, RateLimit};
 pub use api::{BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket};
 pub use api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
 pub use api::{FuturesAccountResponse, FuturesAsset, FuturesPositionResponse};

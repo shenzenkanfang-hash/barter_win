@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Memory backup: {}", paths.memory_backup_dir);
 
     // 1. 从交易所拉取交易规则（同时保存原始 JSON 到 symbols_rules/）
-    let gateway = BinanceApiGateway::new();
+    let mut gateway = BinanceApiGateway::new();
     let all_symbols = gateway.fetch_and_save_all_usdt_symbol_rules().await?;
 
     let trading_symbols: Vec<String> = all_symbols

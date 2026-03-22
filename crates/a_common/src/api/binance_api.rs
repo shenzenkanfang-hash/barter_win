@@ -85,6 +85,8 @@ pub struct BinanceApiGateway {
     /// 账户 API（可配置为实盘或测试网）
     account_api_base: String,
     rate_limiter: Arc<RateLimiter>,
+    /// 交易所信息（包含 rateLimits 速率限制规则）
+    exchange_info: Option<BinanceExchangeInfo>,
 }
 
 impl BinanceApiGateway {
@@ -95,6 +97,7 @@ impl BinanceApiGateway {
             market_api_base: "https://api.binance.com".to_string(),
             account_api_base: "https://api.binance.com".to_string(),
             rate_limiter: Arc::new(RateLimiter::new(1200)), // 币安现货 API 限制
+            exchange_info: None,
         }
     }
 
@@ -105,6 +108,7 @@ impl BinanceApiGateway {
             market_api_base: "https://fapi.binance.com".to_string(),
             account_api_base: "https://fapi.binance.com".to_string(),
             rate_limiter: Arc::new(RateLimiter::new(2400)), // 合约 API 限制更高
+            exchange_info: None,
         }
     }
 
@@ -117,6 +121,7 @@ impl BinanceApiGateway {
             market_api_base: "https://fapi.binance.com".to_string(),      // 实盘行情
             account_api_base: "https://testnet.binancefuture.com".to_string(), // 测试网账户
             rate_limiter: Arc::new(RateLimiter::new(2400)),
+            exchange_info: None,
         }
     }
 
@@ -127,6 +132,7 @@ impl BinanceApiGateway {
             market_api_base: api_base.to_string(),
             account_api_base: api_base.to_string(),
             rate_limiter: Arc::new(RateLimiter::new(1200)),
+            exchange_info: None,
         }
     }
 
@@ -329,7 +335,7 @@ impl BinanceApiGateway {
     }
 
     /// 从 API 获取并直接保存每个交易对的原始规则 JSON（不解析）
-    pub async fn fetch_and_save_all_usdt_symbol_rules(&self) -> Result<Vec<SymbolRulesData>, EngineError> {
+    pub async fn fetch_and_save_all_usdt_symbol_rules(&mut self) -> Result<Vec<SymbolRulesData>, EngineError> {
         self.rate_limiter.acquire().await;
 
         let url = format!("{}/api/v3/exchangeInfo", self.market_api_base);
@@ -401,6 +407,26 @@ impl BinanceApiGateway {
             error!("序列化有效交易品种列表失败");
         }
 
+        // 保存完整交易所信息（包含 rateLimits）到 memory_backup_dir
+        let exchange_info_path = format!("{}/exchange_info.json", paths.memory_backup_dir);
+        if let Ok(json_str) = serde_json::to_string_pretty(&info) {
+            match std::fs::write(&exchange_info_path, json_str.as_bytes()) {
+                Ok(_) => {
+                    info!("已保存交易所信息到 {}", exchange_info_path);
+                    // 打印 rateLimits 信息
+                    for limit in &info.rate_limits {
+                        info!(
+                            "API 速率限制: 类型={}, 间隔={}/{}s, 上限={}",
+                            limit.rate_limit_type, limit.interval, limit.interval_num, limit.limit
+                        );
+                    }
+                }
+                Err(e) => error!("保存交易所信息失败: {}", e),
+            }
+        } else {
+            error!("序列化交易所信息失败");
+        }
+
         // 构建返回数据
         let mut rules = Vec::new();
         for symbol in trading_symbols {
@@ -420,7 +446,15 @@ impl BinanceApiGateway {
             });
         }
 
+        // 保存交易所信息到网关实例
+        self.exchange_info = Some(info);
+
         Ok(rules)
+    }
+
+    /// 获取已缓存的交易所信息（包含 rateLimits）
+    pub fn get_exchange_info(&self) -> Option<&BinanceExchangeInfo> {
+        self.exchange_info.as_ref()
     }
 
     /// 保存交易规则到 symbols_rules/{symbol}.json
@@ -811,12 +845,30 @@ pub type SymbolRulesFetcher = BinanceApiGateway;
 // ============================================================================
 
 /// 币安交易所信息
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinanceExchangeInfo {
     pub timezone: String,
     #[serde(rename = "serverTime")]
     pub server_time: i64,
+    /// API 速率限制规则
+    #[serde(rename = "rateLimits")]
+    pub rate_limits: Vec<RateLimit>,
     pub symbols: Vec<BinanceSymbol>,
+}
+
+/// API 速率限制
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimit {
+    /// 限制类型: REQUEST_WEIGHT, ORDERS
+    #[serde(rename = "rateLimitType")]
+    pub rate_limit_type: String,
+    /// 时间间隔: SECOND, MINUTE, DAY
+    pub interval: String,
+    /// 间隔数量
+    #[serde(rename = "intervalNum")]
+    pub interval_num: i32,
+    /// 限制值
+    pub limit: i32,
 }
 
 /// 币安交易对信息
