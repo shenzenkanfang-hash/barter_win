@@ -23,7 +23,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use parking_lot::Mutex;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 
 /// API 限速器
 #[derive(Debug)]
@@ -331,7 +331,12 @@ impl BinanceApiGateway {
         // 保存原始 JSON
         let paths = Paths::new();
         let base_dir = &paths.symbols_rules_dir;
-        let _ = std::fs::create_dir_all(base_dir);
+        info!("创建目录: {}", base_dir);
+        if let Err(e) = std::fs::create_dir_all(base_dir) {
+            error!("创建目录失败: {}", e);
+            return Err(EngineError::Other(format!("创建目录失败: {}", e)));
+        }
+        info!("目录创建成功: {}", base_dir);
 
         let trading_symbols: Vec<_> = info
             .symbols
@@ -341,12 +346,14 @@ impl BinanceApiGateway {
 
         for symbol in &trading_symbols {
             let file_path = format!("{}/{}.json", base_dir, symbol.symbol.to_lowercase());
+            info!("写入文件: {}", file_path);
             if let Ok(json_str) = serde_json::to_string_pretty(symbol) {
-                if let Err(e) = std::fs::write(&file_path, json_str.as_bytes()) {
-                    warn!("保存失败 {}: {}", symbol.symbol, e);
-                } else {
-                    info!("已保存: {}", symbol.symbol);
+                match std::fs::write(&file_path, json_str.as_bytes()) {
+                    Ok(_) => info!("已保存: {}", symbol.symbol),
+                    Err(e) => error!("保存失败 {}: {}", symbol.symbol, e),
                 }
+            } else {
+                error!("JSON 序列化失败: {}", symbol.symbol);
             }
         }
 
