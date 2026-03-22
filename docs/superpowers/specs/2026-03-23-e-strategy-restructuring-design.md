@@ -1,5 +1,9 @@
 # e_strategy 目录重构设计
 
+> **注意**: 此设计文档描述的计划已变更。实际完成的结构：
+> - 策略蓝图层: `d_blueprint` (而非 `e_strategy`)
+> - 风控层: `e_risk_monitor` (而非 `d_risk_monitor`)
+
 ## 1. 背景
 
 e_strategy 当前模块职责混乱，部分代码（order/、symbol/）与业务层边界不清，需要按分层架构重组。

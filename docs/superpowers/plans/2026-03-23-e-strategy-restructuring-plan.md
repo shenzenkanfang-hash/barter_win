@@ -1,5 +1,9 @@
 # e_strategy 目录重构实施计划
 
+> **注意**: 此计划描述的重组已完成，但命名有所不同。实际结构：
+> - 策略蓝图层: `d_blueprint` (而非 `e_strategy`)
+> - 风控层: `e_risk_monitor`
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 e_strategy 按分层架构重组，创建 f_engine 和 h_sandbox，删除重复的 symbol/，更新所有依赖和导入路径。
