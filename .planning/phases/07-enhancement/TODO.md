@@ -244,39 +244,86 @@ CheckTable
 └── 不阻塞策略计算
 ```
 
-### 目录结构
+### 指标分层架构
 ```
 c_data_process/src/
 ├── min/
 │   ├── real_time/          # 实时价格指标 (Tick触发)
+│   │   └── 计算量小，必须实时
 │   ├── trend/              # 历史趋势指标 (K线闭合触发)
-│   ├── trigger.rs          # 分钟级触发器（波动率）
-│   └── engine.rs           # MinEngine 主循环
+│   │   └── EMA, RSI, MACD, PineColor
+│   └── position/           # 仓位相关指标
 │
-├── day/
-│   ├── real_time/          # 实时价格指标 (分钟级触发)
-│   ├── trend/              # 历史趋势指标 (小时级触发)
-│   ├── trigger.rs          # 日线级触发器（均线交叉）
-│   └── engine.rs           # DayEngine 主循环
-│
-├── types.rs               # 共享类型
-└── mod.rs
+└── day/
+    ├── real_time/          # 实时价格指标 (分钟级触发)
+    ├── trend/              # 历史趋势指标 (小时级触发)
+    └── position/           # 仓位相关指标
 ```
 
-### SignalCache 设计
-```rust
-struct SignalCache {
-    signal: TradingSignal,
-    timestamp: Instant,
-    is_fresh: bool,  // 是否在有效期内
-}
+### 指标分类
+| 类型 | 计算时机 | 示例 |
+|------|----------|------|
+| 实时指标 | Tick触发 | 价格位置 |
+| 趋势指标 | K线闭合触发 | EMA, RSI, MACD, PineColor |
+| 仓位指标 | 仓位变化时 | 盈亏、持仓比例 |
 
-impl SignalCache {
-    fn is_fresh(&self) -> bool {
-        // 分钟级: < 1min
-        // 日线级: < 5min
-    }
-}
+### 触发机制
+```
+Tick触发
+├── 实时指标（价格位置）→ 仅极端位置(0%/100%)时介入
+└── K线闭合 → 趋势指标计算
+```
+
+### 风控层架构 (d_risk_monitor)
+```
+risk/
+├── risk.rs              # RiskPreChecker (锁外预检)
+├── risk_rechecker.rs    # RiskReChecker (锁内复核)
+├── minute_risk.rs        # 分钟/小时级开仓限额计算
+├── order_check.rs        # 订单预占/冻结
+└── thresholds.rs         # 阈值常量
+
+position/
+├── position_manager.rs   # 本地持仓管理
+└── position_exclusion.rs # 仓位互斥检查
+
+persistence/
+├── sqlite_persistence.rs # SQLite持久化
+└── disaster_recovery.rs # 灾备恢复
+
+shared/
+├── account_pool.rs      # 账户池
+├── margin_config.rs     # 保证金配置
+├── market_status.rs     # 市场状态
+├── pnl_manager.rs       # 盈亏管理
+└── round_guard.rs       # 回合守卫
+```
+
+### 风控流程（两层检查）
+```
+订单请求
+    │
+    ▼
+RiskPreChecker (锁外预检)     ← 第一层
+├── 品种注册检查
+├── 波动率模式检查 (Normal/High/Extreme)
+├── 资金是否足够
+└── 持仓比例是否超限
+    │
+    ▼
+OrderCheck (订单预占)
+├── 冻结保证金
+└── 跟踪
+    │
+    ▼
+获取全局锁
+    │
+    ▼
+RiskReChecker (锁内复核)     ← 第二层
+├── 资金再次检查（防止并发修改）
+├── 价格偏离检查
+├── 极端波动模式检查
+└── 高波动模式额外检查
 ```
 
 ================================================================================
