@@ -163,7 +163,7 @@ impl Kline1mStream {
         let mut file = File::create(&path)?;
         file.write_all(json_str.as_bytes())?;
         file.write_all(b"\n")?;
-        file.flush()  // 内存盘不需要 sync_all
+        file.flush()?;  // 内存盘不需要 sync_all
         tracing::debug!("Write kline to {}: {} bytes", path, json_str.len());
         Ok(())
     }
