@@ -232,10 +232,10 @@ async fn run_rate_limit_test() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // 设置限速器
-    gateway.rate_limiter.lock().set_limits(&info);
+    gateway.rate_limiter().lock().set_limits(&info);
 
     // 获取当前限速状态
-    let limiter = gateway.rate_limiter.lock();
+    let limiter = gateway.rate_limiter().lock();
     let (weight_rate, orders_rate) = limiter.usage_rate();
     let near_limit = limiter.is_near_limit();
     drop(limiter);
@@ -274,9 +274,9 @@ async fn run_rate_limit_test() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // 更新限速器状态
-        gateway.rate_limiter.lock().update_from_headers(test_headers);
+        gateway.rate_limiter().lock().update_from_headers(test_headers);
 
-        let limiter = gateway.rate_limiter.lock();
+        let limiter = gateway.rate_limiter().lock();
         let (wr, or) = limiter.usage_rate();
         let nl = limiter.is_near_limit();
         println!("  当前使用率: WEIGHT={:.1}%, ORDERS={:.1}%, near_limit={}", wr * 100.0, or * 100.0, nl);
@@ -292,7 +292,7 @@ async fn run_rate_limit_test() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // 显示最终状态
-    let limiter = gateway.rate_limiter.lock();
+    let limiter = gateway.rate_limiter().lock();
     let (weight_rate, orders_rate) = limiter.usage_rate();
     let near_limit = limiter.is_near_limit();
 
