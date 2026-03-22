@@ -71,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 使用轻量级 API 测试限流：/fapi/v1/ticker/price
     let rate_test_url = "https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT".to_string();
     println!("Rate limiter test URL: {}", rate_test_url);
+    println!("每 100ms 发送一次请求监控限流\n");
 
     // 用于打印的计数器
     let mut rate_test_count = 0u64;
@@ -167,8 +168,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     account_print_flag = true;
                 }
             }
-            // Rate Limiter 监控 (每 500ms)
-            _ = tokio::time::sleep(tokio::time::Duration::from_millis(500)) => {
+            // Rate Limiter 监控 (每 100ms)
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
                 rate_test_count += 1;
                 let start = Instant::now();
 
@@ -203,12 +204,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let status_str = if blocked { "⚠️ SLOW" } else { "OK" };
 
                         println!(
-                            "[#{:06}] {:.3}s | {} | weight={} | orders={} | near_limit={} | {}",
+                            "[#{:06}] {:.3}s | {} | weight={} ({:.0}%) | near_limit={} | {}",
                             rate_test_count,
                             elapsed.as_secs_f64(),
                             status,
                             weight,
-                            orders,
+                            weight_rate * 100.0,
                             near_limit,
                             status_str
                         );
