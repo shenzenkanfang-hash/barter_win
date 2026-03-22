@@ -208,13 +208,14 @@ impl Kline1dStream {
             }
         }
 
-        // 时间戳校验：必须大于最后一条
+        // 时间戳校验：必须大于最后一条（但第一条K线允许 t=0）
         let last_time = data.last()
             .and_then(|k| k.as_array().and_then(|a| a.get(5)))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        if t <= last_time {
+        // 跳过条件：非首条K线 且 时间戳 <= 最后一条
+        if !data.is_empty() && t <= last_time {
             tracing::debug!("Skip duplicate/disordered kline: t={} <= last={}", t, last_time);
             return Ok(());
         }
@@ -223,7 +224,8 @@ impl Kline1dStream {
         data.push(ohlcvt);
 
         // 写入文件
-        let json_str = serde_json::to_string(&data).unwrap_or_default();
+        let json_str = serde_json::to_string(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut file = File::create(&path)?;
         file.write_all(json_str.as_bytes())?;
         file.write_all(b"\n")?;
