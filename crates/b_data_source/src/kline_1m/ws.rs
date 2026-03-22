@@ -176,7 +176,7 @@ impl Kline1mStream {
     }
 
     /// 写入历史K线文件（收盘时调用）
-    /// 格式: {"prices": [...], "latest_time": 123456789}
+    /// 格式: [[o,h,l,c,v,t], [o,h,l,c,v,t], ...]
     fn write_to_history(&mut self, symbol: &str, kline_obj: &serde_json::Value) -> std::io::Result<()> {
         let symbol_lower = symbol.to_lowercase();
         let path = format!("{}/{}.json", self.history_dir, symbol_lower);
@@ -187,29 +187,29 @@ impl Kline1mStream {
             return Err(e);
         }
 
-        // 提取价格和时间
-        let price = kline_obj.get("c").and_then(|v| v.as_str()).unwrap_or("0");
-        let kline_time = kline_obj.get("T").and_then(|v| v.as_i64()).unwrap_or(0);
+        // 提取 OHLCVT 数据: [open, high, low, close, volume, time]
+        let o = kline_obj.get("o").and_then(|v| v.as_str()).unwrap_or("0");
+        let h = kline_obj.get("h").and_then(|v| v.as_str()).unwrap_or("0");
+        let l = kline_obj.get("l").and_then(|v| v.as_str()).unwrap_or("0");
+        let c = kline_obj.get("c").and_then(|v| v.as_str()).unwrap_or("0");
+        let v = kline_obj.get("v").and_then(|v| v.as_str()).unwrap_or("0");
+        let t = kline_obj.get("T").and_then(|v| v.as_i64()).unwrap_or(0);
 
-        // 读取现有数据或创建新结构
-        let mut data = serde_json::json!({
-            "prices": Vec::<String>::new(),
-            "latest_time": 0i64
-        });
+        let ohlcvt = serde_json::json!([o, h, l, c, v, t]);
+
+        // 读取现有数据或创建新数组
+        let mut data: Vec<serde_json::Value> = Vec::new();
 
         if std::path::Path::new(&path).exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(existing) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Ok(existing) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
                     data = existing;
                 }
             }
         }
 
-        // 更新数据
-        if let Some(arr) = data.get_mut("prices").and_then(|v| v.as_array_mut()) {
-            arr.push(serde_json::Value::String(price.to_string()));
-        }
-        data["latest_time"] = serde_json::json!(kline_time);
+        // 追加新K线
+        data.push(ohlcvt);
 
         // 写入文件
         let json_str = serde_json::to_string(&data).unwrap_or_default();
@@ -217,9 +217,7 @@ impl Kline1mStream {
         file.write_all(json_str.as_bytes())?;
         file.write_all(b"\n")?;
         file.flush()?;
-        tracing::debug!("Write history kline to {}: {} prices, latest_time={}", path,
-            data.get("prices").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
-            kline_time);
+        tracing::debug!("Write history kline to {}: {} klines", path, data.len());
         Ok(())
     }
 
