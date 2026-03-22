@@ -358,6 +358,10 @@ impl BinanceApiGateway {
 
         let body_text = resp.text().await.map_err(|e| EngineError::Other(format!("读取响应体失败: {}", e)))?;
 
+        // 打印原始响应（调试用）
+        println!("[exchangeInfo] 原始响应长度: {} bytes", body_text.len());
+        println!("[exchangeInfo] 前500字符: {}", &body_text[..body_text.len().min(500)]);
+
         // 解析获取所有交易对列表
         let info: BinanceExchangeInfo = serde_json::from_str(&body_text)
             .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
@@ -660,17 +664,21 @@ impl BinanceApiGateway {
             .await
             .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
 
-        if !resp.status().is_success() {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+
+        if !status.is_success() {
             return Err(EngineError::Other(format!(
-                "API 返回错误状态: {}",
-                resp.status()
+                "API 返回错误状态: {} - Body: {}",
+                status,
+                &body_text[..body_text.len().min(500)]
             )));
         }
 
-        let account: FuturesAccountResponse = resp
-            .json()
-            .await
-            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+        println!("[account] 原始响应: {}", &body_text[..body_text.len().min(1000)]);
+
+        let account: FuturesAccountResponse = serde_json::from_str(&body_text)
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {} - Response: {}", e, &body_text[..body_text.len().min(500)])))?;
 
         Ok(account)
     }
@@ -690,17 +698,21 @@ impl BinanceApiGateway {
             .await
             .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
 
-        if !resp.status().is_success() {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+
+        if !status.is_success() {
             return Err(EngineError::Other(format!(
-                "API 返回错误状态: {}",
-                resp.status()
+                "API 返回错误状态: {} - Body: {}",
+                status,
+                &body_text[..body_text.len().min(500)]
             )));
         }
 
-        let positions: Vec<FuturesPositionResponse> = resp
-            .json()
-            .await
-            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {}", e)))?;
+        println!("[positionRisk] 原始响应: {}", &body_text[..body_text.len().min(1000)]);
+
+        let positions: Vec<FuturesPositionResponse> = serde_json::from_str(&body_text)
+            .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {} - Response: {}", e, &body_text[..body_text.len().min(500)])))?;
 
         Ok(positions)
     }
