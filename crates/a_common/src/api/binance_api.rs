@@ -13,6 +13,7 @@
 //! println!("BTCUSDT price precision: {}", rules.price_precision);
 //! ```
 
+use crate::backup::SystemConfig;
 use crate::claint::error::EngineError;
 use crate::config::Paths;
 use reqwest::Client;
@@ -78,6 +79,30 @@ impl RateLimiter {
             }
         }
         self.limits_set = true;
+    }
+
+    /// 转换为系统配置快照（用于保存到高速盘）
+    pub fn to_system_config(&self) -> SystemConfig {
+        let window_start = *self.window_start.lock();
+        SystemConfig {
+            request_weight_limit: self.request_weight_limit,
+            orders_limit: self.orders_limit,
+            used_weight: *self.used_weight.lock(),
+            used_orders: *self.used_orders.lock(),
+            window_start_ts: window_start.elapsed().as_secs(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// 从系统配置快照恢复（从高速盘加载）
+    pub fn restore_from(&mut self, config: &SystemConfig) {
+        self.request_weight_limit = config.request_weight_limit;
+        self.orders_limit = config.orders_limit;
+        self.limits_set = true;
+        // 注意：used_weight/used_orders 和 window_start 需要根据当前时间重新计算
+        // 如果距离上次保存已经超过 60 秒，窗口会重置
+        println!("[RateLimiter] 从快照恢复限制: REQUEST_WEIGHT={}, ORDERS={}",
+            self.request_weight_limit, self.orders_limit);
     }
 
     /// 从响应 Header 更新已用权重（只更新 > 0 的值）

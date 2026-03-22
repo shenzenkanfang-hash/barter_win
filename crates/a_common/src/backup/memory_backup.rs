@@ -41,6 +41,7 @@ pub const MAX_CSV_FILE_SIZE: u64 = 100 * 1024 * 1024;
 pub const ACCOUNT_FILE: &str = "account.json";
 pub const POSITIONS_FILE: &str = "positions.json";
 pub const TRADING_PAIRS_FILE: &str = "trading_pairs.json";
+pub const SYSTEM_CONFIG_FILE: &str = "system_config.json";
 
 // 通道目录
 pub const CHANNEL_DIR: &str = "channel/";
@@ -111,6 +112,23 @@ impl KlineData {
             klines: Vec::new(),
         }
     }
+}
+
+/// 系统配置快照（保存到高速盘）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemConfig {
+    /// API 请求权重限制（每分钟）
+    pub request_weight_limit: u32,
+    /// API 订单限制（每分钟）
+    pub orders_limit: u32,
+    /// 当前已用请求权重
+    pub used_weight: u32,
+    /// 当前已用订单数
+    pub used_orders: u32,
+    /// 窗口起始时间戳（秒）
+    pub window_start_ts: u64,
+    /// 更新时间戳
+    pub updated_at: String,
 }
 
 /// 账户快照
@@ -384,6 +402,24 @@ impl MemoryBackup {
     pub async fn load_account(&self) -> Result<Option<AccountSnapshot>, EngineError> {
         let path = format!("{}/{}", self.tmpfs_dir, ACCOUNT_FILE);
         match self.load_json::<AccountSnapshot>(&path).await {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => self.handle_load_error(e),
+        }
+    }
+
+    // =========================================================================
+    // 系统配置
+    // =========================================================================
+
+    pub async fn save_system_config(&self, config: &SystemConfig) -> Result<(), EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, SYSTEM_CONFIG_FILE);
+        self.ensure_dir(&path).await?;
+        self.write_json(&path, config).await
+    }
+
+    pub async fn load_system_config(&self) -> Result<Option<SystemConfig>, EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, SYSTEM_CONFIG_FILE);
+        match self.load_json::<SystemConfig>(&path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) => self.handle_load_error(e),
         }
