@@ -25,25 +25,95 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use tracing::{info, warn, error};
 
-/// API 限速器
+/// API 限速器 - 区分 REQUEST_WEIGHT 和 ORDERS 两个体系
 #[derive(Debug)]
 pub struct RateLimiter {
-    /// 每分钟请求数限制
-    requests_per_minute: u32,
+    /// REQUEST_WEIGHT 每分钟限制 (默认 2400)
+    request_weight_limit: u32,
+    /// ORDERS 每分钟限制 (默认 1200)
+    orders_limit: u32,
     /// 当前窗口起始时间
     window_start: Mutex<Instant>,
-    /// 当前窗口内请求数
-    request_count: Mutex<u32>,
+    /// 当前窗口内已用 REQUEST_WEIGHT
+    used_weight: Mutex<u32>,
+    /// 当前窗口内已用 ORDERS 计数
+    used_orders: Mutex<u32>,
 }
 
 impl RateLimiter {
-    /// 创建新的限速器
-    pub fn new(requests_per_minute: u32) -> Self {
+    /// 创建新的限速器（传入两个限制值）
+    pub fn new(request_weight_limit: u32, orders_limit: u32) -> Self {
         Self {
-            requests_per_minute,
+            request_weight_limit,
+            orders_limit,
             window_start: Mutex::new(Instant::now()),
-            request_count: Mutex::new(0),
+            used_weight: Mutex::new(0),
+            used_orders: Mutex::new(0),
         }
+    }
+
+    /// 创建标准 USDT 合约限速器 (REQUEST_WEIGHT: 2400, ORDERS: 1200)
+    pub fn new_futures() -> Self {
+        Self::new(2400, 1200)
+    }
+
+    /// 创建标准现货限速器 (REQUEST_WEIGHT: 1200, ORDERS: 600)
+    pub fn new_spot() -> Self {
+        Self::new(1200, 600)
+    }
+
+    /// 从响应 Header 更新权重（只更新 > 0 的值）
+    ///
+    /// # Header Keys
+    /// - `x-mbx-used-weight-1m`: 请求权重
+    /// - `x-mbx-order-count-1m`: 订单计数
+    pub fn update_from_headers(&self, headers: &reqwest::header::HeaderMap) {
+        // 更新 REQUEST_WEIGHT（只接受 > 0 的值）
+        if let Some(weight_str) = headers.get("x-mbx-used-weight-1m") {
+            if let Ok(weight_str) = weight_str.to_str() {
+                if let Ok(weight) = weight_str.parse::<f64>() {
+                    if weight > 0.0 {
+                        let mut used_weight = self.used_weight.lock();
+                        *used_weight = weight as u32;
+                        println!("[RateLimiter] 更新 REQUEST_WEIGHT: {} / {}", *used_weight, self.request_weight_limit);
+                    }
+                }
+            }
+        }
+
+        // 更新 ORDERS 计数（只接受 > 0 的值）
+        if let Some(orders_str) = headers.get("x-mbx-order-count-1m") {
+            if let Ok(orders_str) = orders_str.to_str() {
+                if let Ok(orders) = orders_str.parse::<f64>() {
+                    if orders > 0.0 {
+                        let mut used_orders = self.used_orders.lock();
+                        *used_orders = orders as u32;
+                        println!("[RateLimiter] 更新 ORDERS: {} / {}", *used_orders, self.orders_limit);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 获取当前是否接近限制（权重达到 80% 返回警告）
+    pub fn is_near_limit(&self) -> bool {
+        let weight = *self.used_weight.lock();
+        let orders = *self.used_orders.lock();
+
+        // 权重达到 80% 阈值
+        weight as f64 > self.request_weight_limit as f64 * 0.8
+        || orders as f64 > self.orders_limit as f64 * 0.8
+    }
+
+    /// 获取当前使用率
+    pub fn usage_rate(&self) -> (f64, f64) {
+        let weight = *self.used_weight.lock();
+        let orders = *self.used_orders.lock();
+
+        let weight_rate = weight as f64 / self.request_weight_limit as f64;
+        let orders_rate = orders as f64 / self.orders_limit as f64;
+
+        (weight_rate, orders_rate)
     }
 
     /// 获取请求许可（如果超过限制则等待）
@@ -51,25 +121,39 @@ impl RateLimiter {
         loop {
             let elapsed = {
                 let mut window_start = self.window_start.lock();
-                let mut request_count = self.request_count.lock();
+                let mut used_weight = self.used_weight.lock();
+                let mut used_orders = self.used_orders.lock();
 
                 let elapsed = window_start.elapsed();
                 if elapsed > Duration::from_secs(60) {
                     // 重置窗口
                     *window_start = Instant::now();
-                    *request_count = 0;
+                    *used_weight = 0;
+                    *used_orders = 0;
                 }
 
-                if *request_count >= self.requests_per_minute {
-                    // 等待直到窗口结束
+                if *used_weight >= self.request_weight_limit {
+                    // REQUEST_WEIGHT 超限，等待
                     let wait_time = Duration::from_secs(60) - elapsed;
+                    println!("[RateLimiter] REQUEST_WEIGHT 超限，等待 {} 秒", wait_time.as_secs());
                     drop(window_start);
-                    drop(request_count);
+                    drop(used_weight);
+                    drop(used_orders);
                     tokio::time::sleep(wait_time).await;
                     continue;
                 }
 
-                *request_count += 1;
+                if *used_orders >= self.orders_limit {
+                    // ORDERS 超限，等待
+                    let wait_time = Duration::from_secs(60) - elapsed;
+                    println!("[RateLimiter] ORDERS 超限，等待 {} 秒", wait_time.as_secs());
+                    drop(window_start);
+                    drop(used_weight);
+                    drop(used_orders);
+                    tokio::time::sleep(wait_time).await;
+                    continue;
+                }
+
                 elapsed
             };
             break;
@@ -96,7 +180,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: "https://api.binance.com".to_string(),
             account_api_base: "https://api.binance.com".to_string(),
-            rate_limiter: Arc::new(RateLimiter::new(1200)), // 币安现货 API 限制
+            rate_limiter: Arc::new(RateLimiter::new_spot()), // 现货: REQUEST_WEIGHT 1200, ORDERS 600
             exchange_info: None,
         }
     }
@@ -107,7 +191,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: "https://fapi.binance.com".to_string(),
             account_api_base: "https://fapi.binance.com".to_string(),
-            rate_limiter: Arc::new(RateLimiter::new(2400)), // 合约 API 限制更高
+            rate_limiter: Arc::new(RateLimiter::new_futures()), // 合约: REQUEST_WEIGHT 2400, ORDERS 1200
             exchange_info: None,
         }
     }
@@ -120,7 +204,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: "https://fapi.binance.com".to_string(),      // 实盘行情
             account_api_base: "https://testnet.binancefuture.com".to_string(), // 测试网账户
-            rate_limiter: Arc::new(RateLimiter::new(2400)),
+            rate_limiter: Arc::new(RateLimiter::new_futures()), // 合约: REQUEST_WEIGHT 2400, ORDERS 1200
             exchange_info: None,
         }
     }
@@ -131,7 +215,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: api_base.to_string(),
             account_api_base: api_base.to_string(),
-            rate_limiter: Arc::new(RateLimiter::new(1200)),
+            rate_limiter: Arc::new(RateLimiter::new_spot()),
             exchange_info: None,
         }
     }
@@ -674,6 +758,9 @@ impl BinanceApiGateway {
             println!("  {}: {:?}", key, value);
         }
 
+        // 更新限速器（只更新 > 0 的权重值）
+        self.rate_limiter.update_from_headers(&headers);
+
         if !status.is_success() {
             return Err(EngineError::Other(format!(
                 "API 返回错误状态: {} - Body: {}",
@@ -714,6 +801,9 @@ impl BinanceApiGateway {
         for (key, value) in headers.iter() {
             println!("  {}: {:?}", key, value);
         }
+
+        // 更新限速器（只更新 > 0 的权重值）
+        self.rate_limiter.update_from_headers(&headers);
 
         if !status.is_success() {
             return Err(EngineError::Other(format!(
