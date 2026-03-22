@@ -1,5 +1,4 @@
-use a_common::EngineError;
-use crate::order::mock_binance_gateway::{MockAccount, MockPosition, OrderResult};
+use a_common::{EngineError, ExchangeAccount, ExchangePosition, OrderResult};
 use crate::strategy::types::OrderRequest;
 
 /// 交易所网关 trait
@@ -15,8 +14,8 @@ pub trait ExchangeGateway: Send + Sync {
     fn place_order(&self, req: OrderRequest) -> Result<OrderResult, EngineError>;
 
     /// 获取账户信息
-    fn get_account(&self) -> Result<MockAccount, EngineError>;
+    fn get_account(&self) -> Result<ExchangeAccount, EngineError>;
 
     /// 获取持仓
-    fn get_position(&self, symbol: &str) -> Result<Option<MockPosition>, EngineError>;
+    fn get_position(&self, symbol: &str) -> Result<Option<ExchangePosition>, EngineError>;
 }

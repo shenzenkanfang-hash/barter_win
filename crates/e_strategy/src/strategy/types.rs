@@ -1,23 +1,14 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+// Re-export Signal from c_data_process (指标层的预判标准)
+pub use c_data_process::Signal;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TradingMode {
     Low,
     Medium,
     High,
-}
-
-/// 策略信号 (简单枚举，用于内部传递)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Signal {
-    LongEntry,
-    ShortEntry,
-    LongHedge,
-    ShortHedge,
-    LongExit,
-    ShortExit,
-    ExitHighVol,
 }
 
 /// 交易动作 (用于 TradingDecision)

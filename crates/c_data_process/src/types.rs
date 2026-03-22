@@ -40,6 +40,18 @@ pub enum StrategyLevel {
     DAY,  // 日线级策略
 }
 
+/// 策略信号 - 指标层预判标准（可做/不可做）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Signal {
+    LongEntry,    // 可做多
+    ShortEntry,  // 可做空
+    LongHedge,   // 多头对冲
+    ShortHedge,  // 空头对冲
+    LongExit,    // 可平多
+    ShortExit,   // 可平空
+    ExitHighVol, // 高波动退出
+}
+
 /// Pine 颜色枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PineColor {

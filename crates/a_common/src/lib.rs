@@ -13,6 +13,7 @@ pub mod models;
 pub mod claint;
 pub mod util;
 pub mod backup;
+pub mod exchange;
 
 // Re-exports - API
 pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData, RateLimit};
@@ -50,4 +51,9 @@ pub use backup::{
     MAX_TASKS_ENTRIES, MAX_TRADES_ENTRIES, memory_backup_dir, MUTEX_DIR, MUTEX_HOUR_DIR,
     MUTEX_MINUTE_DIR, POSITIONS_FILE, RULES_DIR, SYSTEM_CONFIG_FILE, TASKS_DAILY_DIR, TASKS_DIR,
     TASKS_MINUTE_DIR, TRADES_DIR,
+};
+
+// Re-exports - Exchange Gateway Types
+pub use exchange::{
+    ExchangeAccount, ExchangePosition, OrderResult, OrderStatus, PositionDirection, RejectReason,
 };

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use e_strategy::strategy::types::Signal;
+use crate::Signal;
 
 /// PipelineForm - 全流程表单贯穿设计
 ///
@@ -45,7 +45,7 @@ pub struct PipelineForm {
     /// RSI值
     pub rsi_value: Decimal,
     /// Pine颜色
-    pub pine_color: c_data_process::PineColor,
+    pub pine_color: crate::types::PineColor,
     /// 价格位置 0-100
     pub price_position: Decimal,
 
@@ -95,7 +95,7 @@ impl PipelineForm {
             ema_slow: Decimal::ZERO,
             ema_signal: Signal::LongEntry,
             rsi_value: Decimal::ZERO,
-            pine_color: c_data_process::PineColor::Purple,
+            pine_color: crate::types::PineColor::Purple,
             price_position: Decimal::ZERO,
             final_signal: Signal::LongEntry,
             confidence: 0,
@@ -141,7 +141,7 @@ impl PipelineForm {
         ema_slow: Decimal,
         ema_signal: Signal,
         rsi_value: Decimal,
-        pine_color: c_data_process::PineColor,
+        pine_color: crate::types::PineColor,
         price_position: Decimal,
     ) -> Self {
         self.ema_fast = ema_fast;

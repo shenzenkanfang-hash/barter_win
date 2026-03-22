@@ -5,9 +5,7 @@ use a_common::EngineError;
 use crate::order::gateway::ExchangeGateway;
 use d_risk_monitor::shared::market_status::{MarketStatus, MarketStatusDetector};
 use a_common::backup::MemoryBackup;
-use h_sandbox::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
 use e_strategy::channel::mode::ModeSwitcher;
-use e_strategy::order::OrderExecutor;
 use d_risk_monitor::risk::order_check::OrderCheck;
 use d_risk_monitor::persistence::PersistenceService;
 use d_risk_monitor::position::position_exclusion::PositionExclusionChecker;
@@ -105,8 +103,8 @@ pub struct TradingEngine {
     // 阈值常量
     thresholds: ThresholdConstants,
 
-    // 交易所网关
-    gateway: Arc<MockBinanceGateway>,
+    // 交易所网关 (trait object, 实际类型由调用者注入)
+    gateway: Arc<dyn ExchangeGateway>,
 
     // 订单执行
     order_executor: OrderExecutor,
@@ -135,17 +133,14 @@ impl TradingEngine {
     /// * `market_stream` - 市场数据流
     /// * `symbol` - 交易品种
     /// * `initial_balance` - 初始资金
+    /// * `gateway` - 交易所网关 (由调用者注入)
     pub fn new(
         market_stream: Box<dyn MarketStream>,
         symbol: String,
         initial_balance: Decimal,
+        gateway: Arc<dyn ExchangeGateway>,
     ) -> Self {
-        // 创建 MockBinanceGateway
-        let gateway = Arc::new(MockBinanceGateway::new(
-            initial_balance,
-            RiskConfig::production(),
-            CsvWriter::default(),
-        ));
+        // 网关由调用者注入 (支持真实交易所或模拟)
 
         // 创建风控预检器
         let risk_checker = Arc::new(RiskPreChecker::new(

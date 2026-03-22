@@ -1,5 +1,5 @@
 use crate::shared::check_table::CheckTable;
-use f_engine::core::pipeline_form::PipelineForm;
+use c_data_process::PipelineForm;
 use d_risk_monitor::shared::round_guard::RoundGuard;
 use c_data_process::{BigCycleCalculator, EMA, PineColor, PricePosition, RSI};
 use b_data_source::{KLine, KLineSynthesizer, Period, Tick};
