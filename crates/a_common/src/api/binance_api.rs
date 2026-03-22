@@ -665,7 +665,14 @@ impl BinanceApiGateway {
             .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
 
         let status = resp.status();
+        let headers = resp.headers().clone();
         let body_text = resp.text().await.unwrap_or_default();
+
+        // 打印响应 Headers
+        println!("[account] Response Headers:");
+        for (key, value) in headers.iter() {
+            println!("  {}: {:?}", key, value);
+        }
 
         if !status.is_success() {
             return Err(EngineError::Other(format!(
@@ -699,7 +706,14 @@ impl BinanceApiGateway {
             .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
 
         let status = resp.status();
+        let headers = resp.headers().clone();
         let body_text = resp.text().await.unwrap_or_default();
+
+        // 打印响应 Headers
+        println!("[positionRisk] Response Headers:");
+        for (key, value) in headers.iter() {
+            println!("  {}: {:?}", key, value);
+        }
 
         if !status.is_success() {
             return Err(EngineError::Other(format!(
