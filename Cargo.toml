@@ -5,6 +5,8 @@ members = [
     "crates/c_data_process",
     "crates/d_risk_monitor",
     "crates/e_strategy",
+    "crates/f_engine",
+    "crates/h_sandbox",
     "crates/g_test",
 ]
 resolver = "3"
@@ -37,6 +39,8 @@ b_data_source = { path = "crates/b_data_source" }
 c_data_process = { path = "crates/c_data_process" }
 d_risk_monitor = { path = "crates/d_risk_monitor" }
 e_strategy = { path = "crates/e_strategy" }
+f_engine = { path = "crates/f_engine" }
+h_sandbox = { path = "crates/h_sandbox" }
 tokio = { workspace = true }
 rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }
