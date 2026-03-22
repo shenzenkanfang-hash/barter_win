@@ -19,7 +19,6 @@ pub use a_common::logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleChe
 pub mod kline_1m;
 pub mod kline_1d;
 pub mod order_books;
-pub mod order;
 pub mod symbol_rules;
 pub mod recovery;
 pub mod misc;
@@ -39,7 +38,6 @@ pub use kline_1m::{KLineSynthesizer, KlinePersistence, Kline1mStream};
 pub use kline_1d::Kline1dStream;
 pub use symbol_rules::SymbolRegistry;
 pub use order_books::{OrderBook, DepthStream};
-pub use order::OrderExecutor;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 
 // Re-exports - Futures data

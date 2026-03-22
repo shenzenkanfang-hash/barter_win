@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use crate::strategy::types::Signal;
+use e_strategy::strategy::types::Signal;
 
 /// PipelineForm - 全流程表单贯穿设计
 ///

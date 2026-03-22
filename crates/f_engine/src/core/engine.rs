@@ -1,13 +1,13 @@
 use d_risk_monitor::shared::account_pool::{AccountPool, CircuitBreakerState};
-use crate::shared::check_table::CheckTable;
+use e_strategy::shared::check_table::CheckTable;
 use d_risk_monitor::persistence::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
 use a_common::EngineError;
 use crate::order::gateway::ExchangeGateway;
 use d_risk_monitor::shared::market_status::{MarketStatus, MarketStatusDetector};
 use a_common::backup::MemoryBackup;
-use crate::order::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
-use crate::channel::mode::ModeSwitcher;
-use crate::order::OrderExecutor;
+use h_sandbox::mock_binance_gateway::{CsvWriter, MockBinanceGateway, RiskConfig};
+use e_strategy::channel::mode::ModeSwitcher;
+use e_strategy::order::OrderExecutor;
 use d_risk_monitor::risk::order_check::OrderCheck;
 use d_risk_monitor::persistence::PersistenceService;
 use d_risk_monitor::position::position_exclusion::PositionExclusionChecker;
@@ -17,7 +17,7 @@ use d_risk_monitor::risk::RiskPreChecker;
 use d_risk_monitor::risk::VolatilityMode;
 use d_risk_monitor::risk::risk_rechecker::RiskReChecker;
 use d_risk_monitor::shared::round_guard::{RoundGuard, RoundGuardScope};
-use crate::core::strategy_pool::StrategyPool;
+use crate::strategy_pool::StrategyPool;
 use d_risk_monitor::risk::thresholds::ThresholdConstants;
 use c_data_process::{EMA, RSI};
 use b_data_source::{KLineSynthesizer, MarketStream, Period, Tick};
@@ -27,8 +27,8 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use crate::strategy::types::{OrderRequest, Side};
-use crate::strategy::StrategyId;
+use e_strategy::strategy::types::{OrderRequest, Side};
+use e_strategy::strategy::StrategyId;
 use tracing::{info, warn};
 
 /// 交易引擎 - 串联所有层

@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 
 use a_common::logs::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
-use crate::shared::check_table::{CheckEntry, CheckTable};
+use e_strategy::shared::check_table::{CheckEntry, CheckTable};
 use c_data_process::PineColor;
 use b_data_source::Tick;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use crate::strategy::types::{OrderRequest, Side, Signal};
+use e_strategy::strategy::types::{OrderRequest, Side, Signal};
 
 /// Pipeline Processor trait - 所有阶段处理器都实现这个接口
 pub trait Processor: Send + Sync {
