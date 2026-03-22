@@ -1,5 +1,5 @@
 [package]
-name = "e_strategy"
+name = "d_checktable"
 version = "0.1.0"
 edition = "2024"
 
@@ -16,5 +16,5 @@ chrono = { workspace = true }
 parking_lot = { workspace = true }
 b_data_source = { path = "../b_data_source" }
 c_data_process = { path = "../c_data_process" }
-d_risk_monitor = { path = "../d_risk_monitor" }
+e_risk_monitor = { path = "../e_risk_monitor" }
 a_common = { path = "../a_common" }

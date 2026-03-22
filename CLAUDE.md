@@ -37,8 +37,8 @@
 a_common     — 工具层（API/WS通用组件）
 b_data_source — 数据/网关层（纯粹调用，无业务逻辑）
 c_data_process — 信号生成层（指标计算、信号生成）
-d_blueprint — 策略蓝图层（通道、策略类型、CheckTable）
-e_risk_monitor — 合规约束层（交易所硬性规则）
+d_checktable — 检查层（CheckTable，异步并发）
+e_risk_monitor — 风控层（被检查，串行同步）
 f_engine    — 引擎运行时层
 
     ┌─────────────────────────────────────────────────────────┐
@@ -59,8 +59,8 @@ f_engine    — 引擎运行时层
     └─────────────────────────────────────────────────────────┘
                               │
     ┌─────────────────────────────────────────────────────────┐
-    │                   d_blueprint                           │
-    │           策略蓝图层: 通道、策略类型、CheckTable       │
+    │                   d_checktable                           │
+    │           检查层: CheckTable汇总（异步并发）            │
     └─────────────────────────────────────────────────────────┘
                               │
     ┌─────────────────────────────────────────────────────────┐
@@ -83,21 +83,13 @@ f_engine    — 引擎运行时层
 指标计算 (c_data_process) → 产生交易信号
     │
     ▼
-CheckTable 汇总判断 (d_blueprint)
+d_checktable 检查层（异步并发）
     │
     ▼
-风控预检 (e_risk_monitor) ← 锁外执行
+e_risk_monitor 风控层（串行同步）
     │
     ▼
-风控复核 (e_risk_monitor) ← 获锁后执行
-    │
-    ▼
-引擎最终下单调用 (f_engine)
-    │
-    ▼
-网关纯粹执行 (b_data_source)
-    │
-    ▼
+f_engine 引擎执行闭环
 状态更新 + 数据存储 (f_engine + e_risk_monitor)
 
 ================================================================================
@@ -127,10 +119,8 @@ crates/
 │   │   └── types.rs      # Signal, TradingDecision 等
 │   └── pipeline_form.rs  # 流水线表单
 │
-├── d_blueprint/       # 策略蓝图层: 通道、策略类型、CheckTable
-│   ├── channel/      # 通道管理
-│   ├── strategy/     # 策略定义
-│   └── shared/        # CheckTable
+├── d_checktable/       # 检查层: CheckTable汇总（异步并发）
+│   └── check_table.rs  # CheckTable
 │
 ├── e_risk_monitor/    # 合规约束层
 │   ├── risk/          # RiskPreChecker、RiskReChecker
