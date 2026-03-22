@@ -33,11 +33,11 @@ use tracing::{info, warn, error};
 #[derive(Debug)]
 pub struct RateLimiter {
     /// REQUEST_WEIGHT 每分钟限制
-    request_weight_limit: u32,
+    request_weight_limit: Mutex<u32>,
     /// ORDERS 每分钟限制
-    orders_limit: u32,
+    orders_limit: Mutex<u32>,
     /// 限制值是否已设置
-    limits_set: bool,
+    limits_set: Mutex<bool>,
     /// 当前窗口起始时间
     window_start: Mutex<Instant>,
     /// 当前窗口内已用 REQUEST_WEIGHT
@@ -50,9 +50,9 @@ impl RateLimiter {
     /// 创建默认限速器（临时值，等待 set_limits）
     pub fn new() -> Self {
         Self {
-            request_weight_limit: 2400, // 默认合约值
-            orders_limit: 1200,
-            limits_set: false,
+            request_weight_limit: Mutex::new(2400), // 默认合约值
+            orders_limit: Mutex::new(1200),
+            limits_set: Mutex::new(false),
             window_start: Mutex::new(Instant::now()),
             used_weight: Mutex::new(0),
             used_orders: Mutex::new(0),
@@ -60,33 +60,44 @@ impl RateLimiter {
     }
 
     /// 从 BinanceExchangeInfo 的 rateLimits 设置限制值（只设置一次）
-    pub fn set_limits(&mut self, info: &BinanceExchangeInfo) {
-        if self.limits_set {
-            // 已设置过，跳过
-            return;
+    pub fn set_limits(&self, info: &BinanceExchangeInfo) {
+        // 检查是否已设置
+        {
+            let mut limits_set = self.limits_set.lock();
+            if *limits_set {
+                // 已设置过，跳过
+                return;
+            }
         }
+
+        // 设置限制值
         for limit in &info.rate_limits {
             match (limit.rate_limit_type.as_str(), limit.interval.as_str()) {
                 ("REQUEST_WEIGHT", "MINUTE") => {
-                    self.request_weight_limit = limit.limit as u32;
-                    println!("[RateLimiter] 设置 REQUEST_WEIGHT 限制: {}", self.request_weight_limit);
+                    *self.request_weight_limit.lock() = limit.limit as u32;
+                    println!("[RateLimiter] 设置 REQUEST_WEIGHT 限制: {}", limit.limit);
                 }
                 ("ORDERS", "MINUTE") => {
-                    self.orders_limit = limit.limit as u32;
-                    println!("[RateLimiter] 设置 ORDERS 限制: {}", self.orders_limit);
+                    *self.orders_limit.lock() = limit.limit as u32;
+                    println!("[RateLimiter] 设置 ORDERS 限制: {}", limit.limit);
                 }
                 _ => {}
             }
         }
-        self.limits_set = true;
+
+        // 标记已设置
+        {
+            let mut limits_set = self.limits_set.lock();
+            *limits_set = true;
+        }
     }
 
     /// 转换为系统配置快照（用于保存到高速盘）
     pub fn to_system_config(&self) -> SystemConfig {
         let window_start = *self.window_start.lock();
         SystemConfig {
-            request_weight_limit: self.request_weight_limit,
-            orders_limit: self.orders_limit,
+            request_weight_limit: *self.request_weight_limit.lock(),
+            orders_limit: *self.orders_limit.lock(),
             used_weight: *self.used_weight.lock(),
             used_orders: *self.used_orders.lock(),
             window_start_ts: window_start.elapsed().as_secs(),
@@ -96,13 +107,13 @@ impl RateLimiter {
 
     /// 从系统配置快照恢复（从高速盘加载）
     pub fn restore_from(&mut self, config: &SystemConfig) {
-        self.request_weight_limit = config.request_weight_limit;
-        self.orders_limit = config.orders_limit;
-        self.limits_set = true;
+        *self.request_weight_limit.lock() = config.request_weight_limit;
+        *self.orders_limit.lock() = config.orders_limit;
+        *self.limits_set.lock() = true;
         // 注意：used_weight/used_orders 和 window_start 需要根据当前时间重新计算
         // 如果距离上次保存已经超过 60 秒，窗口会重置
         println!("[RateLimiter] 从快照恢复限制: REQUEST_WEIGHT={}, ORDERS={}",
-            self.request_weight_limit, self.orders_limit);
+            config.request_weight_limit, config.orders_limit);
     }
 
     /// 从响应 Header 更新已用权重（只更新 > 0 的值）
@@ -118,7 +129,7 @@ impl RateLimiter {
                     if weight > 0.0 {
                         let mut used_weight = self.used_weight.lock();
                         *used_weight = weight as u32;
-                        println!("[RateLimiter] 已用 REQUEST_WEIGHT: {} / {}", *used_weight, self.request_weight_limit);
+                        println!("[RateLimiter] 已用 REQUEST_WEIGHT: {} / {}", *used_weight, *self.request_weight_limit.lock());
                     }
                 }
             }
@@ -131,7 +142,7 @@ impl RateLimiter {
                     if orders > 0.0 {
                         let mut used_orders = self.used_orders.lock();
                         *used_orders = orders as u32;
-                        println!("[RateLimiter] 已用 ORDERS: {} / {}", *used_orders, self.orders_limit);
+                        println!("[RateLimiter] 已用 ORDERS: {} / {}", *used_orders, *self.orders_limit.lock());
                     }
                 }
             }
@@ -144,8 +155,8 @@ impl RateLimiter {
         let orders = *self.used_orders.lock();
 
         // 权重达到 80% 阈值
-        weight as f64 > self.request_weight_limit as f64 * 0.8
-        || orders as f64 > self.orders_limit as f64 * 0.8
+        weight as f64 > *self.request_weight_limit.lock() as f64 * 0.8
+        || orders as f64 > *self.orders_limit.lock() as f64 * 0.8
     }
 
     /// 获取当前使用率
@@ -153,8 +164,8 @@ impl RateLimiter {
         let weight = *self.used_weight.lock();
         let orders = *self.used_orders.lock();
 
-        let weight_rate = weight as f64 / self.request_weight_limit as f64;
-        let orders_rate = orders as f64 / self.orders_limit as f64;
+        let weight_rate = weight as f64 / *self.request_weight_limit.lock() as f64;
+        let orders_rate = orders as f64 / *self.orders_limit.lock() as f64;
 
         (weight_rate, orders_rate)
     }
@@ -181,8 +192,8 @@ impl RateLimiter {
                 }
 
                 // 保守策略：如果已用权重超过 80% 阈值，等待
-                let weight_threshold = (self.request_weight_limit as f64 * 0.8) as u32;
-                let orders_threshold = (self.orders_limit as f64 * 0.8) as u32;
+                let weight_threshold = (*self.request_weight_limit.lock() as f64 * 0.8) as u32;
+                let orders_threshold = (*self.orders_limit.lock() as f64 * 0.8) as u32;
 
                 if used_weight > weight_threshold {
                     let wait_time = Duration::from_secs(60) - elapsed;
