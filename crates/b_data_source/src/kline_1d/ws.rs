@@ -40,6 +40,8 @@ pub struct KlineData {
 /// 1d K线 WebSocket 流管理器
 pub struct Kline1dStream {
     base_dir: String,
+    /// 历史K线目录（收盘时追加写入）
+    history_dir: String,
     symbols: Vec<String>,
     ws_stream: Option<
         futures_util::stream::SplitStream<
@@ -66,6 +68,10 @@ impl Kline1dStream {
         let paths = Paths::new();
         let base_dir = format!(
             "{}/kline_1d_realtime",
+            paths.memory_backup_dir
+        );
+        let history_dir = format!(
+            "{}/kline_1d_history",
             paths.memory_backup_dir
         );
 
@@ -125,6 +131,7 @@ impl Kline1dStream {
 
         Ok(Self {
             base_dir,
+            history_dir,
             symbols,
             ws_stream: Some(read),
             file_handles: HashMap::new(),
@@ -165,6 +172,54 @@ impl Kline1dStream {
         file.write_all(b"\n")?;
         file.flush()?;  // 内存盘不需要 sync_all
         tracing::debug!("Write kline to {}: {} bytes", path, json_str.len());
+        Ok(())
+    }
+
+    /// 写入历史K线文件（收盘时调用）
+    /// 格式: {"prices": [...], "latest_time": 123456789}
+    fn write_to_history(&mut self, symbol: &str, kline_obj: &serde_json::Value) -> std::io::Result<()> {
+        let symbol_lower = symbol.to_lowercase();
+        let path = format!("{}/{}.json", self.history_dir, symbol_lower);
+
+        // 确保目录存在
+        if let Err(e) = Self::ensure_dir(std::path::Path::new(&path)) {
+            tracing::error!("Failed to create history directory for {}: {}", symbol_lower, e);
+            return Err(e);
+        }
+
+        // 提取价格和时间
+        let price = kline_obj.get("c").and_then(|v| v.as_str()).unwrap_or("0");
+        let kline_time = kline_obj.get("T").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        // 读取现有数据或创建新结构
+        let mut data = serde_json::json!({
+            "prices": Vec::<String>::new(),
+            "latest_time": 0i64
+        });
+
+        if std::path::Path::new(&path).exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(existing) = serde_json::from_str::<serde_json::Value>(&content) {
+                    data = existing;
+                }
+            }
+        }
+
+        // 更新数据
+        if let Some(arr) = data.get_mut("prices").and_then(|v| v.as_array_mut()) {
+            arr.push(serde_json::Value::String(price.to_string()));
+        }
+        data["latest_time"] = serde_json::json!(kline_time);
+
+        // 写入文件
+        let json_str = serde_json::to_string(&data).unwrap_or_default();
+        let mut file = File::create(&path)?;
+        file.write_all(json_str.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.flush()?;
+        tracing::debug!("Write history kline to {}: {} prices, latest_time={}", path,
+            data.get("prices").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+            kline_time);
         Ok(())
     }
 
@@ -227,6 +282,10 @@ impl Kline1dStream {
                     serde_json::to_string(&kline).ok(),
                     kline.get("x").and_then(|v| v.as_bool()),
                 ) {
+                    // K线闭合时，写入历史目录（结构化格式）
+                    if is_closed {
+                        let _ = self.write_to_history(symbol, kline);
+                    }
                     // 写入条件：收盘 或 超时(5秒)
                     if self.should_write(symbol, is_closed) {
                         if self.write_overwrite(symbol, &json_str).is_ok() {
