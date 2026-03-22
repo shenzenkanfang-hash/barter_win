@@ -27,14 +27,16 @@ use tracing::{info, warn, error};
 
 /// API 限速器 - 区分 REQUEST_WEIGHT 和 ORDERS 两个体系
 ///
-/// 限制值在初始化时从 exchangeInfo 获取一次，之后不再变化
+/// 限制值通过 set_limits() 设置一次（从 exchangeInfo 解析）
 /// 已用权重从响应 Header 实时获取（只更新 > 0 的值）
 #[derive(Debug)]
 pub struct RateLimiter {
-    /// REQUEST_WEIGHT 每分钟限制 (常量，来自 exchangeInfo)
+    /// REQUEST_WEIGHT 每分钟限制
     request_weight_limit: u32,
-    /// ORDERS 每分钟限制 (常量，来自 exchangeInfo)
+    /// ORDERS 每分钟限制
     orders_limit: u32,
+    /// 限制值是否已设置
+    limits_set: bool,
     /// 当前窗口起始时间
     window_start: Mutex<Instant>,
     /// 当前窗口内已用 REQUEST_WEIGHT
@@ -44,40 +46,38 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    /// 创建新的限速器（传入两个限制值）
-    pub fn new(request_weight_limit: u32, orders_limit: u32) -> Self {
+    /// 创建默认限速器（临时值，等待 set_limits）
+    pub fn new() -> Self {
         Self {
-            request_weight_limit,
-            orders_limit,
+            request_weight_limit: 2400, // 默认合约值
+            orders_limit: 1200,
+            limits_set: false,
             window_start: Mutex::new(Instant::now()),
             used_weight: Mutex::new(0),
             used_orders: Mutex::new(0),
         }
     }
 
-    /// 创建标准 USDT 合约限速器 (REQUEST_WEIGHT: 2400, ORDERS: 1200)
-    pub fn new_futures() -> Self {
-        Self::new(2400, 1200)
-    }
-
-    /// 创建标准现货限速器 (REQUEST_WEIGHT: 1200, ORDERS: 600)
-    pub fn new_spot() -> Self {
-        Self::new(1200, 600)
-    }
-
-    /// 从 BinanceExchangeInfo 的 rateLimits 获取限制值（仅用于打印日志，限制值已在构造函数中设置）
-    pub fn update_limits_from_exchange_info(&self, info: &BinanceExchangeInfo) {
+    /// 从 BinanceExchangeInfo 的 rateLimits 设置限制值（只设置一次）
+    pub fn set_limits(&mut self, info: &BinanceExchangeInfo) {
+        if self.limits_set {
+            // 已设置过，跳过
+            return;
+        }
         for limit in &info.rate_limits {
             match (limit.rate_limit_type.as_str(), limit.interval.as_str()) {
                 ("REQUEST_WEIGHT", "MINUTE") => {
-                    println!("[RateLimiter] exchangeInfo REQUEST_WEIGHT 限制: {}", limit.limit);
+                    self.request_weight_limit = limit.limit as u32;
+                    println!("[RateLimiter] 设置 REQUEST_WEIGHT 限制: {}", self.request_weight_limit);
                 }
                 ("ORDERS", "MINUTE") => {
-                    println!("[RateLimiter] exchangeInfo ORDERS 限制: {}", limit.limit);
+                    self.orders_limit = limit.limit as u32;
+                    println!("[RateLimiter] 设置 ORDERS 限制: {}", self.orders_limit);
                 }
                 _ => {}
             }
         }
+        self.limits_set = true;
     }
 
     /// 从响应 Header 更新已用权重（只更新 > 0 的值）
@@ -186,7 +186,8 @@ pub struct BinanceApiGateway {
     market_api_base: String,
     /// 账户 API（可配置为实盘或测试网）
     account_api_base: String,
-    rate_limiter: Arc<RateLimiter>,
+    /// 限速器（Mutex 用于调用 set_limits 设置限制值）
+    rate_limiter: Arc<Mutex<RateLimiter>>,
     /// 交易所信息（包含 rateLimits 速率限制规则）
     exchange_info: Option<BinanceExchangeInfo>,
 }
@@ -198,7 +199,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: "https://api.binance.com".to_string(),
             account_api_base: "https://api.binance.com".to_string(),
-            rate_limiter: Arc::new(RateLimiter::new_spot()), // 现货: REQUEST_WEIGHT 1200, ORDERS 600
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
             exchange_info: None,
         }
     }
@@ -209,7 +210,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: "https://fapi.binance.com".to_string(),
             account_api_base: "https://fapi.binance.com".to_string(),
-            rate_limiter: Arc::new(RateLimiter::new_futures()), // 合约: REQUEST_WEIGHT 2400, ORDERS 1200
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
             exchange_info: None,
         }
     }
@@ -222,7 +223,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: "https://fapi.binance.com".to_string(),      // 实盘行情
             account_api_base: "https://testnet.binancefuture.com".to_string(), // 测试网账户
-            rate_limiter: Arc::new(RateLimiter::new_futures()), // 合约: REQUEST_WEIGHT 2400, ORDERS 1200
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
             exchange_info: None,
         }
     }
@@ -233,7 +234,7 @@ impl BinanceApiGateway {
             client: Client::new(),
             market_api_base: api_base.to_string(),
             account_api_base: api_base.to_string(),
-            rate_limiter: Arc::new(RateLimiter::new_spot()),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new())),
             exchange_info: None,
         }
     }
@@ -256,7 +257,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `SymbolRulesData` - 交易规则数据
     pub async fn fetch_symbol_rules(&self, symbol: &str) -> Result<SymbolRulesData, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/api/v3/exchangeInfo", self.market_api_base);
         let resp = self
@@ -352,7 +353,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `Vec<SymbolRulesData>` - 所有 USDT 交易对规则列表
     pub async fn fetch_all_usdt_symbol_rules(&self) -> Result<Vec<SymbolRulesData>, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/api/v3/exchangeInfo", self.market_api_base);
         let resp = self
@@ -438,7 +439,7 @@ impl BinanceApiGateway {
 
     /// 从 API 获取并直接保存每个交易对的原始规则 JSON（不解析）
     pub async fn fetch_and_save_all_usdt_symbol_rules(&mut self) -> Result<Vec<SymbolRulesData>, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/api/v3/exchangeInfo", self.market_api_base);
         let resp = self
@@ -553,7 +554,7 @@ impl BinanceApiGateway {
         }
 
         // 用交易所信息中的 rateLimits 更新限速器
-        self.rate_limiter.update_limits_from_exchange_info(&info);
+        self.rate_limiter.lock().set_limits(&info);
 
         // 保存交易所信息到网关实例
         self.exchange_info = Some(info);
@@ -607,7 +608,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `BinanceAccountInfo` - 账户信息
     pub async fn fetch_account_info(&self) -> Result<BinanceAccountInfo, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/api/v3/account", self.market_api_base);
         let resp = self
@@ -646,7 +647,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `PositionRisk` - 持仓风险信息
     pub async fn fetch_position_risk(&self, symbol: &str) -> Result<PositionRisk, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/api/v3/positionRisk", self.market_api_base);
         let resp = self
@@ -696,7 +697,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `Vec<LeverageBracket>` - 杠杆档位列表
     pub async fn fetch_leverage_brackets(&self, symbol: Option<&str>) -> Result<Vec<LeverageBracket>, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/fapi/v1/leverageBracket", self.market_api_base);
         let resp = self
@@ -759,7 +760,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `FuturesAccountResponse` - USDT 合约账户信息
     pub async fn fetch_futures_account(&self) -> Result<FuturesAccountResponse, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/fapi/v2/account", self.account_api_base);
         let resp = self
@@ -780,7 +781,7 @@ impl BinanceApiGateway {
         }
 
         // 更新限速器（只更新 > 0 的权重值）
-        self.rate_limiter.update_from_headers(&headers);
+        self.rate_limiter.lock().update_from_headers(&headers);
 
         if !status.is_success() {
             return Err(EngineError::Other(format!(
@@ -803,7 +804,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `Vec<FuturesPositionResponse>` - USDT 合约持仓列表
     pub async fn fetch_futures_positions(&self) -> Result<Vec<FuturesPositionResponse>, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/fapi/v2/positionRisk", self.account_api_base);
         let resp = self
@@ -824,7 +825,7 @@ impl BinanceApiGateway {
         }
 
         // 更新限速器（只更新 > 0 的权重值）
-        self.rate_limiter.update_from_headers(&headers);
+        self.rate_limiter.lock().update_from_headers(&headers);
 
         if !status.is_success() {
             return Err(EngineError::Other(format!(
@@ -850,7 +851,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `bool` - 设置是否成功
     pub async fn change_position_mode(&self, dual_side_position: bool) -> Result<bool, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/fapi/v1/positionMode", self.account_api_base);
         let params = serde_json::json!({
@@ -886,7 +887,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `bool` - 设置是否成功
     pub async fn change_leverage(&self, symbol: &str, leverage: i32) -> Result<bool, EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/fapi/v1/leverage", self.account_api_base);
         let params = serde_json::json!({
@@ -922,7 +923,7 @@ impl BinanceApiGateway {
     /// # 返回
     /// * `(maker_fee, taker_fee)` - (maker费率, taker费率)
     pub async fn get_commission_rate(&self, symbol: &str) -> Result<(Decimal, Decimal), EngineError> {
-        self.rate_limiter.acquire().await;
+        self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/fapi/v1/commissionRate", self.account_api_base);
         let params = serde_json::json!({
