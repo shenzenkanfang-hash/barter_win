@@ -6,7 +6,7 @@ use crate::types::{
     TradingTriggerInput, TradingDecision, TradingAction, StrategyLevel, VolatilityLevel,
     MinSignalOutput, DaySignalOutput, PriceControlOutput, PriceControlInput,
 };
-use crate::min::{
+use super::{
     MinMarketStatusGenerator, MinSignalGenerator, MinPriceControlGenerator,
 };
 use crate::day::{

@@ -10,6 +10,11 @@ pub mod market_status_generator;
 pub mod price_control_generator;
 pub mod signal_generator;
 
+// 最终信号状态机
+pub mod trading_trigger;
+
 pub use market_status_generator::MinMarketStatusGenerator;
 pub use price_control_generator::MinPriceControlGenerator;
 pub use signal_generator::MinSignalGenerator;
+
+pub use trading_trigger::TradingTrigger;
