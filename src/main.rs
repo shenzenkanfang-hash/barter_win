@@ -16,9 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing_subscriber::fmt::layer()
                 .with_target(true)   // 显示 target
                 .with_level(true)   // 显示日志级别
-                .with_thread_ids(true) // 显示线程ID
+                .with_thread_ids(false) // 不显示线程ID
         )
-        .with(LevelFilter::TRACE)  // 显示所有日志
+        .with(LevelFilter::WARN)  // 只显示警告和错误
         .init();
 
     tracing::info!("Trading system starting");
