@@ -70,8 +70,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rate_test_client = reqwest::Client::new();
     // 使用轻量级 API 测试限流：/fapi/v1/ticker/price
     let rate_test_url = "https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT".to_string();
+    // 并发请求数量
+    let concurrent_requests = 20;
     println!("Rate limiter test URL: {}", rate_test_url);
-    println!("每 100ms 发送一次请求监控限流\n");
+    println!("每 100ms 发送 {} 个并发请求\n", concurrent_requests);
 
     // 用于打印的计数器
     let mut rate_test_count = 0u64;
@@ -173,56 +175,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rate_test_count += 1;
                 let start = Instant::now();
 
-                // 发送 exchangeInfo 请求
-                let resp = rate_test_client
-                    .get(&rate_test_url)
-                    .send()
-                    .await;
+                // 并发发送多个请求
+                let client = rate_test_client.clone();
+                let url = rate_test_url.clone();
+                let requests: Vec<_> = (0..concurrent_requests)
+                    .map(|_| {
+                        let client = client.clone();
+                        let url = url.clone();
+                        async move {
+                            client.get(&url).send().await
+                        }
+                    })
+                    .collect();
+
+                let results = futures::future::join_all(requests).await;
 
                 let elapsed = start.elapsed();
 
-                match resp {
-                    Ok(test_resp) => {
-                        let status = test_resp.status();
-                        let headers = test_resp.headers();
+                // 获取任意一个响应的 header（它们应该相同）
+                let mut all_success = true;
+                let mut binance_weight = "-";
+                let mut binance_orders = "-";
 
-                        // Binance 返回的累计已用权重
-                        let binance_weight = headers.get("x-mbx-used-weight-1m")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("-");
-                        let binance_orders = headers.get("x-mbx-order-count-1m")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("-");
-
-                        // 从网关获取限速器状态
-                        let limiter = gateway.rate_limiter().lock();
-                        let (weight_rate, _orders_rate) = limiter.usage_rate();
-                        let near_limit = limiter.is_near_limit();
-                        drop(limiter);
-
-                        // 判断是否被拦住 (响应慢 > 1s)
-                        let blocked = elapsed > std::time::Duration::from_secs(1);
-                        let status_str = if blocked { "⚠️ SLOW" } else { "OK" };
-
-                        // 打印：序号 | 耗时 | 状态 | Binance累计权重 | 使用率% | 是否接近限流 | 状态
-                        println!(
-                            "#{:06} | {:.3}s | {} | binance累计={} | {:.0}% | {}",
-                            rate_test_count,
-                            elapsed.as_secs_f64(),
-                            status,
-                            binance_weight,
-                            weight_rate * 100.0,
-                            status_str
-                        );
-
-                        // 如果超过 80% 阈值，显示警告
-                        if near_limit {
-                            println!("       >>> 警告: 接近限流阈值! <<<");
+                for resp in &results {
+                    match resp {
+                        Ok(test_resp) => {
+                            if binance_weight == "-" {
+                                binance_weight = test_resp.headers()
+                                    .get("x-mbx-used-weight-1m")
+                                    .and_then(|v| v.to_str().ok())
+                                    .unwrap_or("-");
+                                binance_orders = test_resp.headers()
+                                    .get("x-mbx-order-count-1m")
+                                    .and_then(|v| v.to_str().ok())
+                                    .unwrap_or("-");
+                            }
+                        }
+                        Err(_) => {
+                            all_success = false;
                         }
                     }
-                    Err(e) => {
-                        println!("#{:06} | ERROR: {:?}", rate_test_count, e);
-                    }
+                }
+
+                // 从网关获取限速器状态
+                let limiter = gateway.rate_limiter().lock();
+                let (weight_rate, _orders_rate) = limiter.usage_rate();
+                let near_limit = limiter.is_near_limit();
+                drop(limiter);
+
+                // 判断是否被拦住 (响应慢 > 1s)
+                let blocked = elapsed > std::time::Duration::from_secs(1);
+                let status_str = if blocked { "⚠️ SLOW" } else { "OK" };
+                let req_status = if all_success { "200" } else { "有失败" };
+
+                // 打印：序号 | 耗时 | 请求数 | Binance累计权重 | 使用率% | 状态
+                println!(
+                    "#{:06} | {:.3}s | {}/{}成功 | binance累计={} | {:.0}% | {}",
+                    rate_test_count,
+                    elapsed.as_secs_f64(),
+                    results.iter().filter(|r| r.is_ok()).count(),
+                    concurrent_requests,
+                    binance_weight,
+                    weight_rate * 100.0,
+                    status_str
+                );
+
+                // 如果超过 80% 阈值，显示警告
+                if near_limit {
+                    println!("       >>> 警告: 接近限流阈值! <<<");
                 }
             }
         }
