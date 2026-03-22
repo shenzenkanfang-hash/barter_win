@@ -1,9 +1,15 @@
-//! d_blueprint - 策略蓝图层
+//! d_checktable - 检查层
 //!
-//! 统一记录各流水线判断结果，供引擎层执行闭环
+//! 按周期组织的策略检查：高频15分钟、高频1分钟、低频1天
+//! 检查层异步并发执行，由引擎层统一调度
 
 #![forbid(unsafe_code)]
 
 pub mod check_table;
+
+// 周期策略模块
+pub mod h_15min;  // 高频15分钟策略检查
+pub mod h_1m;     // 高频1分钟策略检查
+pub mod l_1d;     // 低频1天策略检查
 
 pub use check_table::{CheckTable, CheckEntry};
