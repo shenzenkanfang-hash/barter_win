@@ -15,7 +15,7 @@ Status: reviewed
 2. **品种限制**：趋势策略单品种最大持仓限额，防止过度集中
 3. **交易频率**：防止过度交易，保护账户
 4. **性能优化**：HashMap/Vec 查询优化，提升高频性能
-5. **动态杠杆**：马丁策略高波动时自动降杠杆，降低风险
+5. **动态杠杆**：插针高波动策略高波动时自动降杠杆，降低风险
 
 ### 1.2 风控类型划分
 
@@ -32,15 +32,15 @@ Status: reviewed
               ┌─────────────┴─────────────┐
               ▼                           ▼
 ┌─────────────────────────┐   ┌─────────────────────────┐
-│   Trend 策略风控         │   │   Martin 策略风控       │
+│   Trend 策略风控         │   │   Pin 策略风控       │
 ├─────────────────────────┤   ├─────────────────────────┤
 │  SymbolLimitGuard       │   │  DynamicLeverage        │
 │  (品种限额)            │   │  (动态杠杆)            │
-│  ⚠️马丁禁用            │   │  ⚠️趋势禁用            │
+│  ⚠️Pin禁用            │   │  ⚠️趋势禁用            │
 └─────────────────────────┘   └─────────────────────────┘
 ```
 
-| 风控组件 | 公共 | Trend专用 | Martin专用 | 说明 |
+| 风控组件 | 公共 | Trend专用 | Pin专用 | 说明 |
 |---------|------|---------|---------|------|
 | RiskPreChecker | ✅ | - | - | 品种注册、波动率模式、资金检查 |
 | RiskReChecker | ✅ | - | - | 锁内复核、价格偏离 |
@@ -50,7 +50,7 @@ Status: reviewed
 | MarginPoolConfig | ✅ | - | - | 保证金配置 |
 | SymbolLimitGuard | - | ✅ | ❌ | 趋势策略专用 |
 | RateLimiter | ✅ | ✅ | ✅ | 所有策略通用 |
-| DynamicLeverageCalculator | - | ❌ | ✅ | 马丁专用 |
+| DynamicLeverageCalculator | - | ❌ | ✅ | 插针高波动专用 |
 | MarketStatusDetector | ✅ | - | - | 市场状态检测 |
 | OrderCheck | ✅ | - | - | 订单预占 |
 
@@ -63,7 +63,7 @@ Status: reviewed
 | 缺少品种限额 | P1 | 趋势策略无法限制单品种最大持仓 |
 | 缺少频率限制 | P1 | 无法防止过度交易 |
 | Vec/HashMap 性能 | P1 | 交易记录查询效率低 |
-| 缺少动态杠杆 | P2 | 马丁策略高波动时无法自动降杠杆 |
+| 缺少动态杠杆 | P2 | 插针高波动策略高波动时无法自动降杠杆 |
 
 ---
 
@@ -102,14 +102,14 @@ guard/ 是策略类型相关的风控守护层：
 │  ┌─────────────────┐  ┌─────────────────┐             │
 │  │  SymbolLimit    │  │  RateLimiter    │             │
 │  │  趋势策略限额    │  │  所有策略通用    │             │
-│  │  ⚠️马丁禁用    │  │                 │             │
+│  │  ⚠️Pin禁用     │  │                 │             │
 │  └────────┬────────┘  └────────┬────────┘             │
 │           │                    │                        │
 │           └─────────┬──────────┘                        │
 │                     ▼                                  │
 │            ┌─────────────────┐                         │
 │            │ DynamicLeverage │                         │
-│            │ 马丁专用        │                         │
+│            │ 插针高波动专用   │                         │
 │            │ ⚠️趋势禁用     │                         │
 │            └─────────────────┘                         │
 └─────────────────────────────────────────────────────────┘
@@ -120,10 +120,10 @@ guard/ 是策略类型相关的风控守护层：
 | 策略类型 | SymbolLimitGuard | RateLimiter | DynamicLeverage |
 |----------|-----------------|-------------|----------------|
 | Trend    | ✅ 启用          | ✅ 启用      | ❌ 禁用        |
-| Martin   | ❌ 禁用          | ✅ 启用      | ✅ 启用        |
+| Pin      | ❌ 禁用          | ✅ 启用      | ✅ 启用        |
 
 ⚠️ 注意：
-   - 马丁策略禁用 SymbolLimitGuard：高波动时会快速加仓，不能限制仓位
+   - 插针高波动策略(Pin)禁用 SymbolLimitGuard：高波动时会快速加仓，不能限制仓位
    - 趋势策略禁用 DynamicLeverage：趋势策略不应动态降杠杆
 ```
 
@@ -134,7 +134,7 @@ guard/ 是策略类型相关的风控守护层：
 ### 3.1 guard/symbol_limit.rs — 品种限额
 
 > **注意**: 本模块仅适用于**趋势策略**。
-> **马丁/高波动策略** 不应使用本限额，应使用单独的频率限制。
+> **插针高波动策略** 不应使用本限额，应使用单独的频率限制。
 
 ```rust
 /// 策略类型
@@ -142,8 +142,8 @@ guard/ 是策略类型相关的风控守护层：
 pub enum StrategyType {
     /// 趋势策略 - 需要限额保护
     Trend,
-    /// 马丁/高波动策略 - 不应限制持仓
-    Martin,
+    /// 插针高波动策略 - 不应限制持仓，应动态降杠杆
+    Pin,
 }
 
 impl Default for StrategyType {
@@ -196,10 +196,10 @@ impl Default for GlobalPositionLimit {
 
 /// 品种限额检查器 (仅适用于趋势策略)
 ///
-/// 马丁/高波动策略不应使用此限额，因为：
-/// 1. 马丁策略本身就是高杠杆
-/// 2. 高波动时马丁会快速加仓，不能有持仓上限
-/// 3. 马丁只做频率限制，不做仓位限制
+/// 插针高波动策略不应使用此限额，因为：
+/// 1. 插针高波动策略本身就是高杠杆
+/// 2. 高波动时会快速加仓，不能有持仓上限
+/// 3. 只做频率限制，不做仓位限制
 #[derive(Debug, Clone)]
 pub struct SymbolLimitGuard {
     /// 单品种限制
@@ -238,8 +238,8 @@ impl SymbolLimitGuard {
         order_qty: Decimal,
         strategy_type: StrategyType,
     ) -> Result<(), EngineError> {
-        // 马丁/高波动策略跳过限额检查
-        if strategy_type == StrategyType::Martin {
+        // 插针高波动策略跳过限额检查
+        if strategy_type == StrategyType::Pin {
             return Ok(());
         }
 
@@ -862,7 +862,7 @@ pub use guard::{
     StrategyType, SymbolPositionLimit, GlobalPositionLimit, SymbolLimitGuard,
     // 频率限制 (所有策略)
     RateLimiter,
-    // 动态杠杆 (马丁/高波动策略)
+    // 动态杠杆 (插针高波动策略)
     DynamicLeverageConfig, DynamicLeverageCalculator, VolatilityLevel,
     // 资金守护
     FundGuard,
@@ -933,11 +933,11 @@ mod tests {
             GlobalPositionLimit::default(),
         );
 
-        // 马丁策略不受限额限制
+        // 插针高波动策略不受限额限制
         // 即使 10000 > 5000，也应该通过
-        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Martin).is_ok());
-        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Martin).is_ok());
-        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Martin).is_ok());
+        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Pin).is_ok());
+        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Pin).is_ok());
+        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Pin).is_ok());
     }
 
     #[test]
@@ -1057,7 +1057,7 @@ mod tests {
 | 2 | 实现 StrategyType 枚举 | P0 | 全部 |
 | 3 | 实现 SymbolLimitGuard | P1 | 仅 Trend |
 | 4 | 实现 RateLimiter | P1 | 全部 |
-| 5 | 实现 DynamicLeverageCalculator | P2 | 仅 Martin |
+| 5 | 实现 DynamicLeverageCalculator | P2 | 仅 Pin |
 | 6 | 实现 FundGuard (统一预占系统) | P0 | 全部 |
 | 7 | 修复 total_used_margin 更新问题 | P0 | 全部 |
 | 8 | OrderCheck 改用 FnvHashMap | P1 | 全部 |
@@ -1081,17 +1081,17 @@ fn init_trend_risk() {
     // DynamicLeverage 不适用于趋势策略
 }
 
-// 马丁策略风控初始化
+// 插针高波动策略风控初始化
 fn init_martin_risk() {
-    // SymbolLimitGuard 不适用于马丁策略！
-    let rate_limiter = RateLimiter::new(60, 1000); // 马丁可以更频繁
+    // SymbolLimitGuard 不适用于插针高波动策略！
+    let rate_limiter = RateLimiter::new(60, 1000); // 插针策略可以更频繁
     let leverage_calc = DynamicLeverageCalculator::new(DynamicLeverageConfig::default());
 }
 
 // 订单预检时必须指定策略类型
 fn pre_check_order(guard: &SymbolLimitGuard, order_notional: Decimal, strategy_type: StrategyType) {
     // 趋势策略会检查限额
-    // 马丁策略会跳过限额
+    // 插针高波动策略会跳过限额
     guard.pre_check("BTC", order_notional, dec!(0), strategy_type);
 }
 ```
