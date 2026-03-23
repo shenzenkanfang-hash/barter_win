@@ -197,9 +197,34 @@ impl VolatilityManager {
         self.rank.rank_by_1m()
     }
 
-    /// 获取高波动品种列表
-    pub fn high_volatility_list(&self) -> Vec<&VolatilityEntry> {
-        self.rank.high_volatility_list()
+    /// 获取波动率排名（15m降序）
+    pub fn rank_by_15m(&self) -> Vec<&VolatilityEntry> {
+        self.rank.rank_by_15m()
+    }
+
+    /// 查询单个品种波动率
+    pub fn get(&self, symbol: &str) -> Option<&VolatilityEntry> {
+        self.rank.get(symbol)
+    }
+
+    /// 获取1m波动率超过阈值的品种
+    pub fn above_1m_threshold(&self, threshold: rust_decimal::Decimal) -> Vec<&VolatilityEntry> {
+        self.rank.above_1m_threshold(threshold)
+    }
+
+    /// 获取15m波动率超过阈值的品种
+    pub fn above_15m_threshold(&self, threshold: rust_decimal::Decimal) -> Vec<&VolatilityEntry> {
+        self.rank.above_15m_threshold(threshold)
+    }
+
+    /// 获取1m高波动品种（>= 3%）
+    pub fn high_vol_1m(&self) -> Vec<&VolatilityEntry> {
+        self.rank.high_vol_1m()
+    }
+
+    /// 获取15m高波动品种（>= 13%）
+    pub fn high_vol_15m(&self) -> Vec<&VolatilityEntry> {
+        self.rank.high_vol_15m()
     }
 
     /// K线闭合时保存窗口（由调用者触发）
@@ -217,28 +242,46 @@ impl VolatilityManager {
         }
     }
 
-    /// 输出每分钟汇总日志（使用排名器）
+    /// 输出每分钟汇总日志（区分1m和15m）
     fn log_summary(&self) {
-        let high_vol_list = self.high_volatility_list();
+        let high_1m = self.high_vol_1m();
+        let high_15m = self.high_vol_15m();
 
-        if high_vol_list.is_empty() {
+        if high_1m.is_empty() && high_15m.is_empty() {
             tracing::info!(
-                "[HIGH_VOL] ⏳ 每分钟汇总 | 无高波动品种 | {}",
+                "[HIGH_VOL] ⏳ 每分钟汇总 | 无高波动 | {}",
                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
             );
         } else {
-            let summary: String = high_vol_list
-                .iter()
-                .map(|e| format!("{}: 1m={:.2}% 15m={:.2}%", e.symbol, e.vol_1m * dec!(100), e.vol_15m * dec!(100)))
-                .collect::<Vec<_>>()
-                .join(" | ");
+            // 1m高波动汇总
+            if !high_1m.is_empty() {
+                let summary: String = high_1m
+                    .iter()
+                    .map(|e| format!("{}:{:.2}%", e.symbol, e.vol_1m * dec!(100)))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                tracing::warn!(
+                    "[HIGH_VOL] 🔴 1m高波动({}个) | {} | {}",
+                    high_1m.len(),
+                    summary,
+                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
+                );
+            }
 
-            tracing::warn!(
-                "[HIGH_VOL] 📊 每分钟汇总 | {}个高波动 | {} | {}",
-                high_vol_list.len(),
-                summary,
-                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
-            );
+            // 15m高波动汇总
+            if !high_15m.is_empty() {
+                let summary: String = high_15m
+                    .iter()
+                    .map(|e| format!("{}:{:.2}%", e.symbol, e.vol_15m * dec!(100)))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                tracing::warn!(
+                    "[HIGH_VOL] 🟠 15m高波动({}个) | {} | {}",
+                    high_15m.len(),
+                    summary,
+                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
+                );
+            }
         }
     }
 }

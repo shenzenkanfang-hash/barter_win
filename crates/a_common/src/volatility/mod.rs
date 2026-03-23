@@ -211,6 +211,11 @@ impl VolatilityRank {
         }
     }
 
+    /// 查询单个品种波动率
+    pub fn get(&self, symbol: &str) -> Option<&VolatilityEntry> {
+        self.entries.iter().find(|e| e.symbol == symbol)
+    }
+
     /// 按1m波动率排名（降序）
     pub fn rank_by_1m(&self) -> Vec<&VolatilityEntry> {
         let mut sorted = self.entries.iter().collect::<Vec<_>>();
@@ -225,12 +230,30 @@ impl VolatilityRank {
         sorted
     }
 
-    /// 获取高波动品种列表（按1m波动率降序）
-    pub fn high_volatility_list(&self) -> Vec<&VolatilityEntry> {
+    /// 获取1m波动率超过阈值的品种（按1m降序）
+    pub fn above_1m_threshold(&self, threshold: Decimal) -> Vec<&VolatilityEntry> {
         self.rank_by_1m()
             .into_iter()
-            .filter(|e| e.is_high_volatility)
+            .filter(|e| e.vol_1m >= threshold)
             .collect()
+    }
+
+    /// 获取15m波动率超过阈值的品种（按15m降序）
+    pub fn above_15m_threshold(&self, threshold: Decimal) -> Vec<&VolatilityEntry> {
+        self.rank_by_15m()
+            .into_iter()
+            .filter(|e| e.vol_15m >= threshold)
+            .collect()
+    }
+
+    /// 获取1m高波动品种（>= 3%）
+    pub fn high_vol_1m(&self) -> Vec<&VolatilityEntry> {
+        self.above_1m_threshold(dec!(0.03))
+    }
+
+    /// 获取15m高波动品种（>= 13%）
+    pub fn high_vol_15m(&self) -> Vec<&VolatilityEntry> {
+        self.above_15m_threshold(dec!(0.13))
     }
 }
 
