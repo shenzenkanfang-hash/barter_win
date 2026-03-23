@@ -13,7 +13,6 @@ use e_risk_monitor::position::position_exclusion::PositionExclusionChecker;
 use e_risk_monitor::position::position_manager::{Direction, LocalPositionManager};
 use e_risk_monitor::shared::pnl_manager::PnlManager;
 use e_risk_monitor::risk::RiskPreChecker;
-use e_risk_monitor::risk::VolatilityMode;
 use e_risk_monitor::risk::risk_rechecker::RiskReChecker;
 use e_risk_monitor::shared::round_guard::{RoundGuard, RoundGuardScope};
 use crate::strategy_pool::StrategyPool;
@@ -31,20 +30,25 @@ use tracing::{info, warn};
 
 /// 交易引擎 - 串联所有层
 ///
-/// # 职责范围 (当前)
+/// # 架构 (简化后)
+/// - `on_tick`: K线更新 + 价格位置 + 完成检测
+/// - `on_minute_bar`: 分钟级策略 (市场状态 + 指标 + 策略 + 风控 + 执行)
+/// - `on_daily_bar`: 日线级策略 (批量，1h内完成)
+/// - Pipeline: 已废弃，不再作为主流程
+///
+/// # 职责范围
 /// - Tick 接收与分发
-/// - Pipeline 流程编排
+/// - K线增量更新
+/// - 实时价格位置判断
+/// - 分钟/日线级别策略触发
 /// - 订单执行与持仓更新
 /// - 风控协调
 ///
-/// # TODO: 待迁移到 c_data_process
-/// - K线合成 (kline_1m, kline_1d) → b_data_source
-/// - 指标计算 (ema_fast, ema_slow, rsi) → c_data_process
-/// - 市场状态检测逻辑 → c_data_process
-///
 /// # 设计决策
-/// 暂不迁移原因：保持代码稳定，避免引入新问题
-/// 迁移条件：c_data_process 层完善 Pipeline 支持后
+/// - 指标只在分钟切换时计算 (非 tick 级别)
+/// - 价格位置实时判断 (tick 级别，简单逻辑)
+/// - 日线级策略批量执行 (1h 内完成所有品种)
+/// - Pipeline 降级为可选工具
 ///
 /// 集成所有 Phase 7 Enhancement 模块:
 /// - AccountPool: 账户保证金池 (熔断保护)
@@ -63,7 +67,7 @@ pub struct TradingEngine {
 
     // K线合成器
     kline_1m: KLineSynthesizer,
-    kline_1d: KLineSynthesizer,
+    kline_xd: KLineSynthesizer,  // Xd K线 (可配置周期，如 4h/1d)
 
     // 指标
     ema_fast: EMA,
@@ -182,7 +186,7 @@ impl TradingEngine {
         Self {
             market_stream: Arc::new(Mutex::new(market_stream)),
             kline_1m: KLineSynthesizer::new(symbol.clone(), Period::Minute(1)),
-            kline_1d: KLineSynthesizer::new(symbol.clone(), Period::Day),
+            kline_xd: KLineSynthesizer::new(symbol.clone(), Period::Day),  // TODO: 支持配置周期
             ema_fast: EMA::new(12),
             ema_slow: EMA::new(26),
             rsi: RSI::new(14),
@@ -212,91 +216,101 @@ impl TradingEngine {
         }
     }
 
-    /// 处理单个 tick
+    /// 处理单个 tick - 主入口
+    ///
+    /// 架构：
+    /// - K线增量更新 (无锁)
+    /// - 实时价格位置 (tick级别，简单判断)
+    /// - K线完成检测 → 触发对应级别策略
     pub async fn on_tick(&mut self, tick: &Tick) {
         self.current_ts = tick.timestamp.timestamp();
         self.current_price = tick.price;
 
-        // 1. 更新 K线
+        // 1. K线增量更新
         let completed_1m = self.kline_1m.update(tick);
-        let completed_1d = self.kline_1d.update(tick);
+        let completed_xd = self.kline_xd.update(tick);
 
-        // 2. 更新指标
-        self.update_indicators(tick.price);
+        // 2. 实时价格位置 (tick级别，简单判断)
+        self.update_price_position(tick);
 
-        // 3. 风控预检 (锁外)
-        self.pre_trade_check(tick);
-
-        // 4. 如果有完成的 K线，生成信号
-        if let Some(kline) = completed_1m {
-            self.on_kline_completed(&kline);
+        // 3. 分钟K线完成 → 分钟级策略
+        if completed_1m.is_some() {
+            self.on_minute_bar().await;
         }
 
-        // 5. 日线 K线完成处理
-        if let Some(kline) = completed_1d {
-            self.on_daily_kline_completed(&kline);
+        // 4. Xd K线完成 → 日线级策略 (批量模式，1h内完成)
+        if completed_xd.is_some() {
+            self.schedule_daily_strategy();
         }
-
-        // 6. 打印状态
-        self.print_status(tick);
     }
 
-    fn update_indicators(&mut self, price: Decimal) {
-        // 更新 EMA
-        let ema_f = self.ema_fast.update(price);
-        let ema_s = self.ema_slow.update(price);
+    /// 实时价格位置更新 (tick级别)
+    ///
+    /// 简单判断：当前价格在近期周期内的位置
+    fn update_price_position(&mut self, tick: &Tick) {
+        // TODO: 实现价格位置判断
+        // 简单逻辑：价格在 recent_high 和 recent_low 之间的百分比位置
+    }
 
-        // 更新 RSI
+    /// 分钟级策略入口 (1m K线完成时触发)
+    async fn on_minute_bar(&mut self) {
+        // 1. 市场状态检测
+        let market_status = self.market_detector.detect(
+            dec!(1.0), // tr_ratio
+            dec!(0.0), // zscore
+            dec!(0.01), // volatility
+            dec!(50.0), // price_position
+            true,       // is_data_valid
+            self.current_ts,
+            self.current_ts,
+        );
+
+        // 2. 分钟级指标计算 (EMA, RSI, PineColor)
+        let ema_f = self.ema_fast.update(self.current_price);
+        let ema_s = self.ema_slow.update(self.current_price);
         let _rsi_value = self.rsi.update(ema_f - ema_s);
 
-        // 更新市场状态检测
-        let _market_status = self.market_detector.detect(
-            dec!(1.0), // tr_ratio - 默认值
-            dec!(0.0), // zscore - 默认值
-            dec!(0.01), // volatility - 默认低波动
-            dec!(50.0), // price_position - 默认中间值
-            true, // is_data_valid
-            self.current_ts, // last_update_ts
-            self.current_ts, // current_ts
-        );
+        // 3. 策略决策 (来自 c_data_process)
+        // TODO: 调用 c_data_process 的分钟级策略
+
+        // 4. 风控复核 (串行)
+        // 5. 订单执行
     }
 
-    fn pre_trade_check(&self, tick: &Tick) {
-        let order_value = tick.price * tick.qty;
+    /// 日线级策略入口 (Xd K线完成时触发)
+    ///
+    /// 注意：这是批量模式，1h内完成所有品种计算
+    fn on_daily_bar(&mut self) {
+        // 1. 日线级指标计算
+        // TODO: 调用 c_data_process 的日线级策略
 
+        // 2. 风控复核
+        // 3. 订单执行 (批量)
+    }
+
+    /// 标记日线级策略待执行 (批量模式)
+    fn schedule_daily_strategy(&mut self) {
+        // TODO: 标记品种，待批量执行
+        // 批量执行逻辑在单独的任务中进行，1h内完成
+    }
+
+    /// 风控预检 (在策略决策后、风控复核前调用)
+    fn pre_trade_check(&self, order_value: Decimal) -> bool {
         // 检查账户是否可以交易
         if !self.account_pool.can_trade(order_value) {
-            return;
+            return false;
         }
 
         // 检查策略是否可以开仓
         if !self.strategy_pool.can_open_position("main", order_value) {
-            return;
-        }
-    }
-
-    fn on_kline_completed(&mut self, kline: &b_data_source::KLine) {
-        info!(
-            "1分钟K线完成: {} close={} high={} low={}",
-            kline.symbol, kline.close, kline.high, kline.low
-        );
-    }
-
-    fn on_daily_kline_completed(&mut self, kline: &b_data_source::KLine) {
-        info!(
-            "日线K线完成: {} close={}",
-            kline.symbol, kline.close
-        );
-
-        // 日线 K线完成，可能需要重新平衡策略
-        if self.strategy_pool.needs_rebalance(self.current_ts) {
-            self.strategy_pool.rebalance(self.account_pool.total_equity(), self.current_ts);
+            return false;
         }
 
-        // 持久化交易记录
-        self.persistence.record_daily_kline(kline);
+        true
     }
 
+    /// 打印状态 (调试用)
+    #[allow(dead_code)]
     fn print_status(&self, tick: &Tick) {
         let unrealized = self.position_manager.unrealized_pnl(tick.price);
         info!(

@@ -1,20 +1,25 @@
-//! Pipeline - 交易流程编排器
+//! Pipeline - 交易流程编排器 (Legacy)
 //!
 //! # 架构说明
-//! Pipeline 是跨层协调者，串联：
-//! - `c_data_process` (指标计算、信号生成)
-//! - `d_checktable` (CheckTable 并行检查)
-//! - `e_risk_monitor` (风控串行复核)
-//! - `f_engine` (订单执行)
+//! ⚠️ 注意：Pipeline 已不再是主流程！
 //!
-//! # 设计决策
-//! 放在 `f_engine::core` 下因：
-//! - 最终执行入口在 f_engine
-//! - 避免创建新 crate 增加复杂度
-//! - 长期看可迁移到独立 crate
+//! 当前主流程在 `TradingEngine::on_tick()` 中：
+//! - K线增量更新 (无锁)
+//! - 实时价格位置 (tick级别)
+//! - 分钟/日线 K线完成检测 → 触发对应级别策略
 //!
-//! # 流程
+//! Pipeline 保留作为可选工具，用于：
+//! - 复杂的多阶段策略组合
+//! - 需要 trait object 灵活性的场景
+//! - 未来可能的独立策略引擎
+//!
+//! # 原流程 (已废弃)
 //! Tick → Indicator → Strategy → RiskPre → OrderRequest
+//!
+//! # 新流程
+//! Tick → K线更新 → 价格位置 → (1m完成 → on_minute_bar) / (Xd完成 → on_daily_bar)
+//!         └──→ 分钟级: 市场状态 + 指标 + 策略 + 风控 + 执行
+//!         └──→ 日线级: 指标 + 策略 + 风控 + 执行 (批量)
 
 #![forbid(unsafe_code)]
 
