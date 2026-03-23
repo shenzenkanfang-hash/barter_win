@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use crate::shared::account_pool::AccountPool;
-use crate::shared::margin_config::{MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN, MAX_SINGLE_NOTIONAL};
+use crate::shared::margin_config::{MarginPoolConfig, StrategyLevel, MAX_SINGLE_NOTIONAL};
 
 /// 分钟级开仓结果
 #[derive(Debug, Clone)]
@@ -82,10 +82,6 @@ pub fn calculate_minute_open_notional(
             // 当前品种数为0，使用最低开仓名义价值
             actual_notional_per_symbol = min_notional;
         } else {
-            // 计算最小总名义价值和所需保证金
-            let min_total_notional = current_symbol_count * min_notional;
-            let min_total_margin = min_total_notional / leverage;
-
             if total_new_open_margin <= threshold {
                 // 保证金不足阈值，使用最低名义价值
                 actual_notional_per_symbol = min_notional;

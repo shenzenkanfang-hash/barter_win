@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use crate::types::{MarketStatus, VolatilityLevel, DayMarketStatusInput, DayMarketStatusOutput, DaySignalInput};
 
@@ -31,6 +30,7 @@ use crate::types::{MarketStatus, VolatilityLevel, DayMarketStatusInput, DayMarke
 /// 因为日线级波动范围更大，需要更大的阈值才能判断为极端。
 /// ```
 pub struct DayMarketStatusGenerator {
+    #[allow(dead_code)]
     data_timeout_seconds: i64,
 }
 

@@ -13,7 +13,7 @@
 
 use crate::min::trend::{Indicator1m, Indicator1mOutput};
 use crate::day::trend::{BigCycleCalculator, BigCycleIndicators, PineColorBig as DayPineColorBig};
-use crate::types::{PineColor, TradingDecision, StrategyLevel};
+use crate::types::{PineColor, TradingDecision};
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;

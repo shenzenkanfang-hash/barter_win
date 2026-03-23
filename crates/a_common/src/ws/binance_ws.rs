@@ -4,7 +4,6 @@
 //! 本模块只处理 WebSocket 协议，返回原始消息，业务类型转换由 DataFeeder 完成。
 
 use crate::claint::error::MarketError;
-use chrono::{TimeZone, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -229,6 +228,7 @@ pub struct BinanceTradeStream {
     ws_stream: futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     >,
+    #[allow(dead_code)]
     symbol: String,
 }
 

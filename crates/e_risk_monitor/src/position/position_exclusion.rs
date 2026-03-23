@@ -141,7 +141,7 @@ impl PositionExclusionChecker {
         &self,
         symbol: &str,
         direction: PositionDirection,
-        target_symbol: &str,
+        _target_symbol: &str,
     ) -> bool {
         // 如果没有配置跨品种互斥，默认不互斥
         if let Some(muted_symbols) = self.cross_symbol_mutex.get(symbol) {

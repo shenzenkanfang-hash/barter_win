@@ -278,6 +278,7 @@ impl PositionStats {
         self.total_realized_pnl += pnl;
     }
 
+    #[allow(dead_code)]
     fn update_max_qty(&mut self, qty: Decimal) {
         if qty > self.max_qty {
             self.max_qty = qty;

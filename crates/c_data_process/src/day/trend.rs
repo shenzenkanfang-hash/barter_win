@@ -1,13 +1,7 @@
 use rust_decimal::Decimal;
-use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::error::Error;
-use std::io;
-use std::pin::Pin;
-use std::result::Result;
-use std::task::{Context, Poll};
 
 /// 大周期指标计算器
 ///
@@ -455,7 +449,7 @@ impl BigCycleCalculator {
     }
 
     /// 更新 RSI (简化)
-    fn update_rsi(&mut self, close: Decimal) {
+    fn update_rsi(&mut self, _close: Decimal) {
         // 简化 RSI 计算，使用固定平滑
         let rsi_period = 14;
         let n = self.close_history.len();

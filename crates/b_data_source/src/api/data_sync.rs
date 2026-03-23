@@ -13,12 +13,11 @@
 //! 本模块仅做数据获取和整理，不涉及任何风控逻辑。
 
 use super::{FuturesAccountData, FuturesPositionData};
-use a_common::api::{BinanceApiGateway, FuturesAccountResponse, FuturesPositionResponse};
+use a_common::api::BinanceApiGateway;
 use a_common::backup::{AccountSnapshot, MemoryBackup, PositionSnapshot, Positions};
 use a_common::MarketError;
 use chrono::Utc;
 use rust_decimal::Decimal;
-use std::str::FromStr;
 
 /// 合约数据同步器
 pub struct FuturesDataSyncer {

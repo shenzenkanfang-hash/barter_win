@@ -34,6 +34,7 @@ fn safe_div(n: Decimal, d: Decimal, epsilon: Decimal) -> Decimal {
 // ==================== EMA（严格对齐 Python ewm(span=window, adjust=False)）====================
 /// EMA 指标：alpha = 2 / (period + 1)，完全对齐 Python pandas ewm
 pub struct EMA {
+    #[allow(dead_code)]
     period: usize,
     alpha: Decimal,
     value: Decimal,
@@ -80,6 +81,7 @@ impl EMA {
 // ==================== RMA（RSI 平滑，对齐 Python _rma_vectorized）====================
 /// RMA 指标：alpha = 1 / period，完全对齐 Python ewm(alpha=1/window, adjust=False)
 pub struct RMA {
+    #[allow(dead_code)]
     period: usize,
     alpha: Decimal,
     value: Decimal,
@@ -115,6 +117,7 @@ impl RMA {
 // ==================== RSI ====================
 /// RSI 指标：基于 U/D 变化的相对强度指数
 pub struct RSI {
+    #[allow(dead_code)]
     period: usize,
     rma_up: RMA,
     rma_down: RMA,
@@ -161,6 +164,7 @@ impl RSI {
 // ==================== Dominant Cycle RSI（完全对齐 Python _vectorized_crsi）====================
 /// Dominant Cycle RSI：严格对齐 Python 相位滞后、torque 计算、迭代逻辑
 struct DominantCycleRSI {
+    #[allow(dead_code)]
     cyclelen: usize,
     torque: Decimal,
     phasinglag: usize,
@@ -271,6 +275,7 @@ pub struct PineColorDetector {
     // 常量参数（对齐Python PineConfig）
     rsi_overbought: Decimal,
     rsi_oversold: Decimal,
+    #[allow(dead_code)]
     epsilon: Decimal,
     // 历史数据（用于振幅指标计算）
     price_history: VecDeque<(Decimal, Decimal, Decimal)>, // (high, low, close)
@@ -381,14 +386,14 @@ impl PineColorDetector {
         // 严格对齐 Python 条件公式
         let selltime = macd >= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
         let buytime = macd <= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
-        let selltimeT = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
-        let buytimeT = macd >= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
-        let selltimeS = selltime && is_up;
-        let buytimeS = buytime && is_down;
+        let selltime_t = macd <= Decimal::ZERO && ema20_below_ema10 && hist_prev > hist && hist >= Decimal::ZERO;
+        let buytime_t = macd >= Decimal::ZERO && ema20_above_ema10 && hist_prev < hist && hist <= Decimal::ZERO;
+        let _selltime_s = selltime && is_up;
+        let _buytime_s = buytime && is_down;
 
         // 2. 严格遵循 Python 优先级顺序：st/bt → sl/by → up/dn → s/b
         // 优先级1: st/bt → 纯红 (weak_signal)
-        if selltimeT || buytimeT {
+        if selltime_t || buytime_t {
             return colors::WEAK_SIGNAL.to_string();
         }
         // 优先级2: sl → 浅黄 (top_warning)
@@ -408,11 +413,11 @@ impl PineColorDetector {
             return colors::BEAR_TREND.to_string();
         }
         // 优先级6: s → 浅蓝 (strong_top)
-        if selltimeS {
+        if _selltime_s {
             return colors::STRONG_TOP.to_string();
         }
         // 优先级7: b → 橙色 (strong_bot)
-        if buytimeS {
+        if _buytime_s {
             return colors::STRONG_BOT.to_string();
         }
 

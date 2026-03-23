@@ -22,10 +22,12 @@ const EPSILON: Decimal = dec!(1e-8);
 const ZSCORE_MAX_LIMIT: Decimal = dec!(100);
 
 const WINDOW_10MIN: usize = 10;
+#[allow(dead_code)]
 const WINDOW_15MIN: usize = 15;
 const WINDOW_1H: usize = 60;
 const WINDOW_5H: usize = 300;
 const WINDOW_14: usize = 14;
+#[allow(dead_code)]
 const WINDOW_2H: usize = 120;
 const NORM_WIN: usize = 20;
 
@@ -44,7 +46,7 @@ fn sign(v: Decimal) -> Decimal {
 #[inline(always)]
 fn safe_div(n: Decimal, d: Decimal) -> Decimal {
     if d.abs() < EPSILON {
-        if n.is_positive() {
+        if n.is_sign_positive() {
             dec!(1e10)
         } else {
             -dec!(1e10)
@@ -400,7 +402,7 @@ impl Indicator1m {
             tr_ratio - self.tr_ratio_z1.get(),
             self.tr_ratio_z1.update(tr_ratio),
         );
-        let tr_ratio_zscore_60min_5h = safe_div(
+        let _tr_ratio_zscore_60min_5h = safe_div(
             tr_ratio - self.tr_ratio_z2.get(),
             self.tr_ratio_z2.update(tr_ratio),
         );

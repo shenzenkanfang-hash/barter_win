@@ -2,9 +2,8 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use chrono::Utc;
 
-use crate::shared::margin_config::{GlobalMarginConfig, MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN};
+use crate::shared::margin_config::{MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN};
 
 /// 熔断状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +103,7 @@ pub struct AccountPool {
     /// 总已用保证金 (RwLock 保护) - 用于全局上限计算
     total_used_margin: RwLock<Decimal>,
     /// Redis连续失败计数器 (用于熔断)
+    #[allow(dead_code)]
     redis_failure_count: RwLock<u32>,
 }
 

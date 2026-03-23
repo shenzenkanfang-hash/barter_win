@@ -18,6 +18,7 @@ use std::sync::Arc;
 /// 统一数据提供者 - 所有数据查询的单一入口
 pub struct DataFeeder {
     /// K线合成器（1m）
+    #[allow(dead_code)]
     kline_1m: Arc<RwLock<Option<crate::ws::kline_1m::Kline1mStream>>>,
     /// 订单簿
     depth_stream: Arc<RwLock<Option<DepthStream>>>,
@@ -107,6 +108,7 @@ impl DataFeeder {
     // ==================== 内部方法（供 WS 回调使用） ====================
 
     /// 更新 Tick（由 K线合成器调用）
+    #[allow(dead_code)]
     pub(crate) fn update_tick(&self, tick: Tick) {
         let symbol = tick.symbol.clone();
         let mut ticks = self.latest_ticks.write();
@@ -114,6 +116,7 @@ impl DataFeeder {
     }
 
     /// 获取波动率管理器（内部使用）
+    #[allow(dead_code)]
     pub(crate) fn get_volatility_manager(&self) -> Arc<VolatilityManager> {
         self.volatility_manager.clone()
     }

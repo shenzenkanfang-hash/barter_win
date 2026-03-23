@@ -240,13 +240,6 @@ impl SymbolRuleService {
             dec!(1)
         };
 
-        // 有效最小数量
-        let effective_min_qty = if tick_size > dec!(0) {
-            std::cmp::max(raw.min_notional / tick_size, min_qty)
-        } else {
-            min_qty
-        };
-
         // 平仓最小盈亏比阈值
         let taker_fee = raw.taker_fee;
         let close_min_ratio = ((dec!(1) + taker_fee) / (dec!(1) - taker_fee) - dec!(1)).abs() * dec!(1.5);

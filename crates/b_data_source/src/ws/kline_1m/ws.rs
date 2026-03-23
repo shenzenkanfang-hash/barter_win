@@ -5,7 +5,7 @@
 use crate::ws::volatility::VolatilityManager;
 use a_common::Paths;
 use a_common::volatility::KLineInput;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -45,6 +45,7 @@ pub struct Kline1mStream {
     base_dir: String,
     /// 历史K线目录（收盘时追加写入）
     history_dir: String,
+    #[allow(dead_code)]
     symbols: Vec<String>,
     ws_stream: Option<
         futures_util::stream::SplitStream<
@@ -53,6 +54,7 @@ pub struct Kline1mStream {
             >,
         >,
     >,
+    #[allow(dead_code)]
     file_handles: HashMap<String, File>,
     /// 记录每个 symbol 上次写入时间（用于超时强制写入）
     last_write_times: HashMap<String, Instant>,
@@ -153,6 +155,7 @@ impl Kline1mStream {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn get_file(&mut self, symbol: &str) -> std::io::Result<&mut File> {
         let symbol_lower = symbol.to_lowercase();
         if !self.file_handles.contains_key(&symbol_lower) {

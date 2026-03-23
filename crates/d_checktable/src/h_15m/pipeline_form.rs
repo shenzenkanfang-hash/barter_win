@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use c_data_process::types::Signal;
 use c_data_process::PineColor;
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 /// PipelineForm - 全流程表单贯穿设计

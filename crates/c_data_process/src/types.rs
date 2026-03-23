@@ -79,6 +79,7 @@ impl PineColor {
 /// 价格位置指标
 #[derive(Debug, Clone)]
 pub struct PricePosition {
+    #[allow(dead_code)]
     period: usize,
 }
 

@@ -24,7 +24,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::{Duration, Instant};
-use tracing::{info, warn, error};
+use tracing::{info, error};
 
 /// API 限速器 - 区分 REQUEST_WEIGHT 和 ORDERS 两个体系
 ///
@@ -63,7 +63,7 @@ impl RateLimiter {
     pub fn set_limits(&self, info: &BinanceExchangeInfo) {
         // 检查是否已设置
         {
-            let mut limits_set = self.limits_set.lock();
+            let limits_set = self.limits_set.lock();
             if *limits_set {
                 // 已设置过，跳过
                 return;
@@ -177,7 +177,7 @@ impl RateLimiter {
     /// - 如果累计值达到 80% 阈值，在下次请求前等待
     pub async fn acquire(&self) {
         loop {
-            let (elapsed, weight, orders) = {
+            let (_elapsed, _weight, _orders) = {
                 let mut window_start = self.window_start.lock();
                 let used_weight = *self.used_weight.lock();
                 let used_orders = *self.used_orders.lock();
@@ -969,10 +969,6 @@ impl BinanceApiGateway {
         self.rate_limiter.lock().acquire().await;
 
         let url = format!("{}/fapi/v1/commissionRate", self.account_api_base);
-        let params = serde_json::json!({
-            "symbol": symbol.to_uppercase(),
-            "recvWindow": 5000
-        });
 
         let resp = self
             .client
@@ -1054,6 +1050,7 @@ pub struct RateLimit {
 
 /// 币安交易对信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(non_snake_case)]
 pub struct BinanceSymbol {
     pub symbol: String,
     pub status: String,
@@ -1106,6 +1103,7 @@ pub struct BinanceAccountInfo {
 
 /// 币安持仓风险信息
 #[derive(Debug, Clone, Deserialize)]
+#[allow(non_snake_case)]
 pub struct BinancePositionRisk {
     pub symbol: String,
     #[serde(rename = "positionSide")]

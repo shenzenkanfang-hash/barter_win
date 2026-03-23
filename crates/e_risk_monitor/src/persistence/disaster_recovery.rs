@@ -14,7 +14,7 @@
 //! 3. 如果 API 数据更新，覆盖本地数据
 
 use a_common::EngineError;
-use a_common::backup::{MemoryBackup, PositionSnapshot as MemoryPositionSnapshot};
+use a_common::backup::MemoryBackup;
 use crate::persistence::sqlite_persistence::SqliteRecordService;
 use b_data_source::api::SymbolRulesFetcher;
 use rust_decimal::Decimal;
@@ -130,8 +130,10 @@ pub struct DisasterRecovery {
     /// SQLite 持久化服务
     sqlite: Arc<SqliteRecordService>,
     /// 内存备份管理器
+    #[allow(dead_code)]
     memory_backup: Option<Arc<MemoryBackup>>,
     /// SymbolRules 获取器
+    #[allow(dead_code)]
     symbol_fetcher: Option<Arc<SymbolRulesFetcher>>,
     /// 数据库路径
     db_path: PathBuf,
@@ -229,7 +231,7 @@ impl DisasterRecovery {
                 let direction: String = row.get(3)?;
                 let qty: String = row.get(4)?;
                 let avg_price: String = row.get(5)?;
-                let entry_ts: i64 = row.get(6)?;
+                let _entry_ts: i64 = row.get(6)?;
                 let _remark: String = row.get(7)?;
 
                 // 解析 direction 判断多空

@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use tokio::time::{sleep, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// Depth 数据
@@ -27,6 +26,7 @@ pub struct DepthData {
 /// Depth WebSocket 流管理器
 pub struct DepthStream {
     base_dir: String,
+    #[allow(dead_code)]
     symbols: Vec<String>,
     ws_stream: Option<
         futures_util::stream::SplitStream<
@@ -35,6 +35,7 @@ pub struct DepthStream {
             >,
         >,
     >,
+    #[allow(dead_code)]
     file_handles: HashMap<String, File>,
     /// 最新订单簿缓存（按symbol索引）
     latest_orderbooks: HashMap<String, OrderBook>,
@@ -106,6 +107,7 @@ impl DepthStream {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn get_file(&mut self, symbol: &str) -> std::io::Result<&mut File> {
         let symbol_lower = symbol.to_lowercase();
         if !self.file_handles.contains_key(&symbol_lower) {

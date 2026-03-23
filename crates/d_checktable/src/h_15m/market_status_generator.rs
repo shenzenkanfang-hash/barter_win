@@ -32,6 +32,7 @@ use crate::types::{MarketStatus, VolatilityLevel, MinMarketStatusInput, MinMarke
 ///   4. tr_base_60min > 20%
 /// ```
 pub struct MinMarketStatusGenerator {
+    #[allow(dead_code)]
     data_timeout_seconds: i64,
 }
 

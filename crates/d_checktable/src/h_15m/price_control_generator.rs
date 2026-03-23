@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use crate::types::{PriceControlInput, PriceControlOutput, PositionSide};
 
 /// 分钟级价格控制器
