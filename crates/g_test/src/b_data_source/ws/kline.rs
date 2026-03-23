@@ -8,6 +8,7 @@ use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+#[allow(dead_code)]
 fn create_tick(symbol: &str, price: Decimal, qty: Decimal, timestamp: chrono::DateTime<chrono::Utc>) -> Tick {
     Tick {
         symbol: symbol.to_string(),

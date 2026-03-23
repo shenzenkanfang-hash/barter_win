@@ -4,7 +4,6 @@
 
 use b_data_source::models::types::{KLine, Period, Tick};
 use chrono::{TimeZone, Utc};
-use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 #[test]
