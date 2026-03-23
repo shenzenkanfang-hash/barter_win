@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(_msg) = msg_1m {
                     count_1m += 1;
                     if count_1m % 1000 == 0 {
-                        tracing::info!("1m: Processed {} messages", count_1m);
+                        tracing::debug!("1m: Processed {} messages", count_1m);
                     }
                 } else {
                     tracing::warn!("1m Stream ended");
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(_msg) = msg_1d {
                     count_1d += 1;
                     if count_1d % 1000 == 0 {
-                        tracing::info!("1d: Processed {} messages", count_1d);
+                        tracing::debug!("1d: Processed {} messages", count_1d);
                     }
                 } else {
                     tracing::warn!("1d Stream ended");
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(_msg) = msg_depth {
                     count_depth += 1;
                     if count_depth % 1000 == 0 {
-                        tracing::info!("Depth: Processed {} messages", count_depth);
+                        tracing::debug!("Depth: Processed {} messages", count_depth);
                     }
                 } else {
                     tracing::warn!("Depth Stream ended");
