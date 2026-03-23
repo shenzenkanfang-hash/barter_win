@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 
 use a_common::logs::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
-use e_strategy::shared::check_table::{CheckEntry, CheckTable};
+use d_checktable::check_table::{CheckEntry, CheckTable};
 use c_data_process::PineColor;
+use c_data_process::types::{OrderRequest, Side, Signal};
 use b_data_source::Tick;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use e_strategy::strategy::types::{OrderRequest, Side, Signal};
 
 /// Pipeline Processor trait - 所有阶段处理器都实现这个接口
 pub trait Processor: Send + Sync {
@@ -125,7 +125,7 @@ impl Pipeline {
                 Signal::ShortEntry | Signal::ShortHedge => Side::Short,
                 _ => return None,
             },
-            order_type: crate::strategy::types::OrderType::Market,
+            order_type: OrderType::Market,
             price: Some(entry.target_price),
             qty: entry.quantity,
         })
