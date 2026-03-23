@@ -10,3 +10,6 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 b_data_source = { path = "../b_data_source" }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }

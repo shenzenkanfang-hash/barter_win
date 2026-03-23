@@ -2,7 +2,7 @@
 //!
 //! 提供统一的检查链执行入口
 
-use crate::h_1m::检查::{a_exit, b_close, c_risk, d_add, e_open};
+use crate::h_1m::check::{a_exit, b_close, c_risk, d_add, e_open};
 
 /// 检查信号枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

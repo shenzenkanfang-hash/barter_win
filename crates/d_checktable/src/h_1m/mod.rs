@@ -7,4 +7,4 @@
 
 pub mod 信号;           // 信号: 市场状态、信号、价格控制生成器
 pub mod trigger;      // trigger: 最终触发器状态机
-pub mod 检查;          // 检查: a_exit, b_close, c_risk, d_add, e_open, check_chain
+pub mod check;        // 检查: a_exit, b_close, c_risk, d_add, e_open, check_chain
