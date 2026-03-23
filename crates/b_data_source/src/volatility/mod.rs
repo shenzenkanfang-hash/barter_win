@@ -7,7 +7,7 @@
 //! - 窗口灾备：内存盘 → 同步盘 → 自行累计
 
 use a_common::config::Paths;
-use a_common::volatility::{KLineInput, VolatilityCalc, VolatilityStats, VolatilityState};
+use a_common::volatility::{KLineInput, VolatilityCalc, VolatilityStats, VolatilityState, VolatilityRank, VolatilityEntry};
 use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -154,6 +154,8 @@ impl SymbolVolatility {
 /// 全局波动率管理器
 pub struct VolatilityManager {
     detectors: HashMap<String, SymbolVolatility>,
+    /// 波动率排名器
+    rank: VolatilityRank,
     /// 上次汇总时间
     last_summary_time: Instant,
     /// 汇总间隔（1分钟）
@@ -164,6 +166,7 @@ impl VolatilityManager {
     pub fn new() -> Self {
         Self {
             detectors: HashMap::new(),
+            rank: VolatilityRank::new(),
             last_summary_time: Instant::now(),
             summary_interval: Duration::from_secs(60),
         }
@@ -183,7 +186,20 @@ impl VolatilityManager {
     /// 更新品种波动率（纯内存计算，不写文件）
     pub fn update(&mut self, symbol: &str, kline: KLineInput) -> VolatilityStats {
         let detector = self.get_or_create(symbol);
-        detector.update(kline)
+        let stats = detector.update(kline);
+        // 更新排名器
+        self.rank.update(symbol, stats);
+        stats
+    }
+
+    /// 获取波动率排名（1m降序）
+    pub fn rank_by_1m(&self) -> Vec<&VolatilityEntry> {
+        self.rank.rank_by_1m()
+    }
+
+    /// 获取高波动品种列表
+    pub fn high_volatility_list(&self) -> Vec<&VolatilityEntry> {
+        self.rank.high_volatility_list()
     }
 
     /// K线闭合时保存窗口（由调用者触发）
@@ -201,32 +217,25 @@ impl VolatilityManager {
         }
     }
 
-    /// 输出每分钟汇总日志
+    /// 输出每分钟汇总日志（使用排名器）
     fn log_summary(&self) {
-        let high_vol_symbols: Vec<&SymbolVolatility> = self
-            .detectors
-            .values()
-            .filter(|v| v.is_high_volatility())
-            .collect();
+        let high_vol_list = self.high_volatility_list();
 
-        if high_vol_symbols.is_empty() {
+        if high_vol_list.is_empty() {
             tracing::info!(
                 "[HIGH_VOL] ⏳ 每分钟汇总 | 无高波动品种 | {}",
                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
             );
         } else {
-            let summary: String = high_vol_symbols
+            let summary: String = high_vol_list
                 .iter()
-                .map(|v| {
-                    let stats = v.get_stats();
-                    format!("{}: 1m={:.2}% 15m={:.2}%", v.symbol(), stats.vol_1m * dec!(100), stats.vol_15m * dec!(100))
-                })
+                .map(|e| format!("{}: 1m={:.2}% 15m={:.2}%", e.symbol, e.vol_1m * dec!(100), e.vol_15m * dec!(100)))
                 .collect::<Vec<_>>()
                 .join(" | ");
 
             tracing::warn!(
                 "[HIGH_VOL] 📊 每分钟汇总 | {}个高波动 | {} | {}",
-                high_vol_symbols.len(),
+                high_vol_list.len(),
                 summary,
                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
             );

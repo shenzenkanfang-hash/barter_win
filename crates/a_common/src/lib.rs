@@ -17,7 +17,7 @@ pub mod exchange;
 pub mod volatility;
 
 // Re-exports - Volatility
-pub use volatility::{VolatilityCalc, VolatilityStats, VolatilityState, KLineInput};
+pub use volatility::{VolatilityCalc, VolatilityStats, VolatilityState, VolatilityRank, VolatilityEntry, KLineInput};
 
 // Re-exports - API
 pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData, RateLimit};

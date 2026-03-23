@@ -168,6 +168,78 @@ pub struct VolatilityState {
     pub kline_1m_count: u32,
 }
 
+/// 波动率排名条目
+#[derive(Debug, Clone)]
+pub struct VolatilityEntry {
+    pub symbol: String,
+    pub vol_1m: Decimal,
+    pub vol_15m: Decimal,
+    pub is_high_volatility: bool,
+}
+
+impl VolatilityEntry {
+    pub fn new(symbol: String, stats: VolatilityStats) -> Self {
+        Self {
+            symbol,
+            vol_1m: stats.vol_1m,
+            vol_15m: stats.vol_15m,
+            is_high_volatility: stats.is_high_volatility,
+        }
+    }
+}
+
+/// 波动率排名器（用于全市场高波动品种排名）
+pub struct VolatilityRank {
+    entries: Vec<VolatilityEntry>,
+}
+
+impl VolatilityRank {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// 更新单个品种波动率
+    pub fn update(&mut self, symbol: &str, stats: VolatilityStats) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.symbol == symbol) {
+            entry.vol_1m = stats.vol_1m;
+            entry.vol_15m = stats.vol_15m;
+            entry.is_high_volatility = stats.is_high_volatility;
+        } else {
+            self.entries.push(VolatilityEntry::new(symbol.to_string(), stats));
+        }
+    }
+
+    /// 按1m波动率排名（降序）
+    pub fn rank_by_1m(&self) -> Vec<&VolatilityEntry> {
+        let mut sorted = self.entries.iter().collect::<Vec<_>>();
+        sorted.sort_by(|a, b| b.vol_1m.cmp(&a.vol_1m));
+        sorted
+    }
+
+    /// 按15m波动率排名（降序）
+    pub fn rank_by_15m(&self) -> Vec<&VolatilityEntry> {
+        let mut sorted = self.entries.iter().collect::<Vec<_>>();
+        sorted.sort_by(|a, b| b.vol_15m.cmp(&a.vol_15m));
+        sorted
+    }
+
+    /// 获取高波动品种列表（按1m波动率降序）
+    pub fn high_volatility_list(&self) -> Vec<&VolatilityEntry> {
+        self.rank_by_1m()
+            .into_iter()
+            .filter(|e| e.is_high_volatility)
+            .collect()
+    }
+}
+
+impl Default for VolatilityRank {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
