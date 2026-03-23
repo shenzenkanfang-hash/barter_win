@@ -244,6 +244,8 @@ impl AccountPool {
         }
         account.frozen -= amount;
         account.margin_used += amount;
+        drop(account);
+        *self.total_used_margin.write() += amount;
         Ok(())
     }
 
@@ -253,6 +255,8 @@ impl AccountPool {
         let to_release = amount.min(account.margin_used);
         account.margin_used -= to_release;
         account.available += to_release;
+        drop(account);
+        *self.total_used_margin.write() -= to_release;
     }
 
     /// 更新权益 (成交回报后) (写锁)
@@ -612,5 +616,22 @@ mod tests {
         pool.release_margin(dec!(10000));
         assert_eq!(pool.margin_used(), dec!(0));
         assert_eq!(pool.available(), dec!(100000));
+    }
+
+    #[test]
+    fn test_total_used_margin_sync() {
+        let pool = AccountPool::new();
+
+        // 冻结 1000
+        pool.freeze(dec!(1000)).unwrap();
+        assert_eq!(pool.margin_used(), dec!(0));
+
+        // 扣除保证金
+        pool.deduct_margin(dec!(1000)).unwrap();
+        assert_eq!(pool.margin_used(), dec!(1000));
+
+        // 释放保证金
+        pool.release_margin(dec!(1000)).unwrap();
+        assert_eq!(pool.margin_used(), dec!(0));
     }
 }
