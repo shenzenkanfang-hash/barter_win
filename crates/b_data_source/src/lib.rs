@@ -37,6 +37,3 @@ pub use misc::{TradeSettings, PositionMode};
 
 // Re-exports - Volatility
 pub use volatility::{VolatilityManager, SymbolVolatility};
-
-#[cfg(test)]
-pub mod tests;

@@ -1,6 +1,8 @@
+#![forbid(unsafe_code)]
+
 //! 品种注册中心功能测试
 
-use crate::symbol_rules::SymbolRegistry;
+use b_data_source::api::symbol_registry::SymbolRegistry;
 use fnv::FnvHashSet;
 
 #[test]
@@ -28,7 +30,7 @@ async fn test_symbol_registry_get_trading_symbols_empty() {
 async fn test_symbol_registry_update_mock_skips() {
     let mut registry = SymbolRegistry::new_mock();
     // In mock mode, update should skip API call
-    let result: Result<(), crate::MarketError> = registry.update_symbols().await;
+    let result: Result<(), b_data_source::MarketError> = registry.update_symbols().await;
     assert!(result.is_ok());
 }
 

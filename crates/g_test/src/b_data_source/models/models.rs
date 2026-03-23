@@ -1,6 +1,8 @@
+#![forbid(unsafe_code)]
+
 //! 数据模型功能测试
 
-use crate::models::types::{KLine, Period, Tick};
+use b_data_source::models::types::{KLine, Period, Tick};
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;

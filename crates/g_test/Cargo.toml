@@ -1,6 +1,17 @@
 [package]
 name = "g_test"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+# b_data_source
+b_data_source = { path = "../b_data_source" }
+a_common = { path = "../a_common" }
+
+# Test dependencies
+tokio = { version = "1", features = ["full"] }
+rust_decimal = "1"
+rust_decimal_macros = "1"
+serde_json = "1"
+fnv = "1"
+chrono = "0.4"

@@ -1,6 +1,8 @@
+#![forbid(unsafe_code)]
+
 //! 订单簿功能测试
 
-use crate::order_books::OrderBook;
+use b_data_source::ws::order_books::OrderBook;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 

@@ -1,7 +1,9 @@
+#![forbid(unsafe_code)]
+
 //! K线合成器功能测试
 
-use crate::kline_1m::KLineSynthesizer;
-use crate::models::types::{KLine, Period, Tick};
+use b_data_source::ws::kline_1m::KLineSynthesizer;
+use b_data_source::models::types::{KLine, Period, Tick};
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;

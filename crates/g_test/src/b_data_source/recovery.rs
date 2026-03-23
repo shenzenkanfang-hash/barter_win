@@ -1,6 +1,8 @@
+#![forbid(unsafe_code)]
+
 //! 数据恢复功能测试
 
-use crate::recovery::CheckpointData;
+use b_data_source::recovery::CheckpointData;
 
 #[test]
 fn test_checkpoint_data_creation() {
