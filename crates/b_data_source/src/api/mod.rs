@@ -6,9 +6,12 @@
 pub mod account;
 pub mod position;
 pub mod data_sync;
+pub mod symbol_registry;
+pub mod trade_settings;
 
 pub use account::{FuturesAccount, FuturesAccountData};
 pub use position::{FuturesPosition, FuturesPositionData};
 pub use data_sync::{FuturesDataSyncer, FuturesSyncResult};
+pub use symbol_registry::SymbolRegistry;
 
 pub use a_common::api::SymbolRulesFetcher;

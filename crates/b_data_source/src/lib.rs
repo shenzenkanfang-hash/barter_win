@@ -15,7 +15,6 @@ pub use a_common::config::{Platform, Paths};
 pub use a_common::logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
 
 // Sub-modules
-pub mod symbol_rules;
 pub mod recovery;
 pub mod misc;
 pub mod volatility;
@@ -30,7 +29,7 @@ pub use models::{MarketStream, MockMarketStream};
 pub use models::{KLine, Period, Tick};
 
 // Re-exports - Data processing
-pub use symbol_rules::SymbolRegistry;
+pub use api::symbol_registry::SymbolRegistry;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 
 // Re-exports - Trade settings
