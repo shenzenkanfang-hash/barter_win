@@ -1,8 +1,8 @@
+use fnv::FnvHashMap;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// 订单检查结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +52,7 @@ pub struct OrderCheck {
     /// 最低订单名义价值 (RwLock 保护)
     min_order_notional: RwLock<Decimal>,
     /// 预占记录 (使用 RwLock 保护)
-    reservations: RwLock<HashMap<String, OrderReservation>>,
+    reservations: RwLock<FnvHashMap<String, OrderReservation>>,
     /// 总冻结金额 (RwLock 保护)
     total_frozen: RwLock<Decimal>,
 }
@@ -69,7 +69,7 @@ impl OrderCheck {
         Self {
             max_position_ratio: RwLock::new(dec!(0.95)),
             min_order_notional: RwLock::new(dec!(10.0)),
-            reservations: RwLock::new(HashMap::new()),
+            reservations: RwLock::new(FnvHashMap::default()),
             total_frozen: RwLock::new(dec!(0)),
         }
     }
