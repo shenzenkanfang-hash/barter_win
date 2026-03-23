@@ -20,13 +20,17 @@ use e_risk_monitor::risk::thresholds::ThresholdConstants;
 use c_data_process::{EMA, RSI};
 use c_data_process::types::{OrderRequest, Side, OrderType};
 use b_data_source::{KLineSynthesizer, MarketStream, Period, Tick};
+use fnv::FnvHashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
+
+pub mod state;
+use state::{SymbolState, TradeLock, CheckConfig, StartupState};
 
 /// 交易引擎 - 串联所有层
 ///
@@ -143,6 +147,20 @@ pub struct TradingEngine {
 
     // 是否正在运行 (使用 AtomicBool 支持跨任务检查)
     is_running: Arc<AtomicBool>,
+
+    // ========== 新增：并发控制 ==========
+
+    // 品种状态映射 (使用 RwLock 支持并发读)
+    symbol_states: RwLock<FnvHashMap<String, SymbolState>>,
+
+    // 检查配置
+    check_config: CheckConfig,
+
+    // 上次分钟级检查时间戳
+    last_minute_ts: i64,
+
+    // 上次日线级检查时间戳
+    last_daily_ts: i64,
 }
 
 impl TradingEngine {
@@ -209,10 +227,20 @@ impl TradingEngine {
             gateway,
             order_executor,
             strategy_id: StrategyId("main".to_string()),
-            symbol,
+            symbol: symbol.clone(),
             current_ts: 0,
             current_price: Decimal::ZERO,
             is_running: Arc::new(AtomicBool::new(false)),
+
+            // 新增字段
+            symbol_states: RwLock::new({
+                let mut map = FnvHashMap::default();
+                map.insert(symbol.clone(), SymbolState::new(symbol));
+                map
+            }),
+            check_config: CheckConfig::production(),
+            last_minute_ts: 0,
+            last_daily_ts: 0,
         }
     }
 
@@ -221,7 +249,7 @@ impl TradingEngine {
     /// 架构：
     /// - K线增量更新 (无锁)
     /// - 实时价格位置 (tick级别，简单判断)
-    /// - K线完成检测 → 触发对应级别策略
+    /// - 时间窗口检查 → 触发对应级别策略
     pub async fn on_tick(&mut self, tick: &Tick) {
         self.current_ts = tick.timestamp.timestamp();
         self.current_price = tick.price;
@@ -233,14 +261,16 @@ impl TradingEngine {
         // 2. 实时价格位置 (tick级别，简单判断)
         self.update_price_position(tick);
 
-        // 3. 分钟K线完成 → 分钟级策略
+        // 3. 分钟级检查 (K线完成触发 + 时间窗口)
         if completed_1m.is_some() {
-            self.on_minute_bar().await;
+            self.check_minute_strategies_concurrent().await;
         }
 
-        // 4. Xd K线完成 → 日线级策略 (批量模式，1h内完成)
-        if completed_xd.is_some() {
-            self.schedule_daily_strategy();
+        // 4. 日线级检查 (定时批量，每1s一次)
+        let now_ms = tick.timestamp.timestamp_millis();
+        if now_ms - self.last_daily_ts >= self.check_config.daily_check_interval_ms as i64 {
+            self.check_daily_strategies_batch();
+            self.last_daily_ts = now_ms;
         }
     }
 
@@ -252,46 +282,254 @@ impl TradingEngine {
         // 简单逻辑：价格在 recent_high 和 recent_low 之间的百分比位置
     }
 
-    /// 分钟级策略入口 (1m K线完成时触发)
-    async fn on_minute_bar(&mut self) {
-        // 1. 市场状态检测
-        let market_status = self.market_detector.detect(
-            dec!(1.0), // tr_ratio
-            dec!(0.0), // zscore
-            dec!(0.01), // volatility
-            dec!(50.0), // price_position
-            true,       // is_data_valid
-            self.current_ts,
-            self.current_ts,
-        );
-
-        // 2. 分钟级指标计算 (EMA, RSI, PineColor)
-        let ema_f = self.ema_fast.update(self.current_price);
-        let ema_s = self.ema_slow.update(self.current_price);
-        let _rsi_value = self.rsi.update(ema_f - ema_s);
-
-        // 3. 策略决策 (来自 c_data_process)
-        // TODO: 调用 c_data_process 的分钟级策略
-
-        // 4. 风控复核 (串行)
-        // 5. 订单执行
-    }
-
-    /// 日线级策略入口 (Xd K线完成时触发)
+    /// 检查并执行分钟级策略 (并发版本)
     ///
-    /// 注意：这是批量模式，1h内完成所有品种计算
-    fn on_daily_bar(&mut self) {
-        // 1. 日线级指标计算
-        // TODO: 调用 c_data_process 的日线级策略
+    /// 触发条件：1m K线完成
+    /// 方式：并发检查多品种，有一个成功就执行
+    async fn check_minute_strategies_concurrent(&mut self) {
+        let symbols: Vec<String> = self.symbol_states.read().keys().cloned().collect();
 
-        // 2. 风控复核
-        // 3. 订单执行 (批量)
+        // 并发检查所有品种
+        let results: Vec<_> = futures::future::join_all(
+            symbols.iter().map(|symbol| {
+                let symbol = symbol.clone();
+                async move {
+                    self.check_minute_strategy(&symbol).await
+                }
+            })
+        ).await;
+
+        // 统计结果
+        let success_count = results.iter().filter(|r| *r).count();
+        if success_count > 0 {
+            info!("Minute strategies: {}/{} succeeded", success_count, results.len());
+        }
     }
 
-    /// 标记日线级策略待执行 (批量模式)
-    fn schedule_daily_strategy(&mut self) {
-        // TODO: 标记品种，待批量执行
-        // 批量执行逻辑在单独的任务中进行，1h内完成
+    /// 检查并执行单品种分钟级策略
+    ///
+    /// 流程：
+    /// 1. 尝试获取交易锁
+    /// 2. 核对时间戳
+    /// 3. 获取信号 + age检查
+    /// 4. 正常 → 执行
+    /// 5. 异常 → 停止机制
+    async fn check_minute_strategy(&mut self, symbol: &str) -> bool {
+        let now_ts = chrono::Utc::now().timestamp();
+
+        // 1. 获取品种状态
+        let mut states = self.symbol_states.write();
+        let state = match states.get_mut(symbol) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // === 灾备重启检查 ===
+        if matches!(state.startup_state, StartupState::Recovery) {
+            // 重启后第一个周期，强制等待新指标
+            // TODO: 从 c_data_process 获取信号检查 age
+            info!("Recovery mode, waiting for fresh signal");
+            return false;
+        }
+
+        // === 超时检查 ===
+        if state.is_1m_timeout(now_ts) {
+            warn!("1m signal timeout for {}, entering maintenance", symbol);
+            self.mode_switcher.set_mode(Mode::Maintenance);
+            self.trigger_stop_mechanism();
+            return false;
+        }
+
+        // === 尝试获取信号 ===
+        // TODO: 从 c_data_process 缓存获取
+        // let decision = self.c_data_process.get_1m_signal(symbol);
+
+        // === 检查并执行 ===
+        // if let Some(decision) = decision {
+        //     let signal_age = now_ts - decision.timestamp;
+        //     if signal_age > state.timeout_secs {
+        //         warn!("1m signal stale: age={}s", signal_age);
+        //         self.mode_switcher.set_mode(Mode::Maintenance);
+        //         self.trigger_stop_mechanism();
+        //         return false;
+        //     }
+        //
+        //     // 正常：记录成功获取
+        //     state.record_1m_ok(now_ts, decision.timestamp, decision.clone());
+        //
+        //     // 交易锁核对
+        //     return self.check_and_execute(symbol, &decision).await;
+        // }
+
+        false
+    }
+
+    /// 检查并执行日线级策略 (批量版本)
+    ///
+    /// 触发条件：定时批量（每1s一次）
+    /// 方式：顺序批量检查所有品种
+    fn check_daily_strategies_batch(&mut self) {
+        let symbols: Vec<String> = self.symbol_states.read().keys().cloned().collect();
+
+        for symbol in symbols {
+            self.check_daily_strategy(&symbol);
+        }
+    }
+
+    /// 检查并执行单品种日线级策略
+    fn check_daily_strategy(&mut self, symbol: &str) {
+        let now_ts = chrono::Utc::now().timestamp();
+
+        let mut states = self.symbol_states.write();
+        let state = match states.get_mut(symbol) {
+            Some(s) => s,
+            None => return,
+        };
+
+        // === 超时检查 ===
+        if state.is_daily_timeout(now_ts) {
+            warn!("Daily signal timeout for {}, entering maintenance", symbol);
+            self.mode_switcher.set_mode(Mode::Maintenance);
+            self.trigger_stop_mechanism();
+            return;
+        }
+
+        // === 获取信号 ===
+        // TODO: 从 c_data_process 缓存获取
+    }
+
+    /// 交易锁核对 + 执行
+    ///
+    /// 机制：
+    /// 1. 尝试获取锁（乐观锁）
+    /// 2. 检查 tick 时间戳 vs 锁时间戳
+    /// 3. 执行交易
+    /// 4. 更新锁状态
+    async fn check_and_execute(&mut self, symbol: &str, decision: &TradingDecision) -> bool {
+        let tick_ts = decision.timestamp;
+
+        // 1. 尝试获取锁
+        let lock_acquired = {
+            let mut states = self.symbol_states.write();
+            let state = match states.get_mut(symbol) {
+                Some(s) => s,
+                None => return false,
+            };
+
+            // 检查是否过期
+            if state.trade_lock.is_stale(tick_ts) {
+                info!("Tick {} is stale, lock_ts={}", tick_ts, state.trade_lock.timestamp);
+                return false;
+            }
+
+            // 更新锁状态
+            state.trade_lock.update(
+                tick_ts,
+                decision.qty,
+                decision.price,
+            );
+
+            true
+        };
+
+        if !lock_acquired {
+            return false;
+        }
+
+        // 2. 风控预检
+        let order_value = decision.qty * decision.price;
+        if !self.pre_trade_check(order_value) {
+            return false;
+        }
+
+        // 3. 构建订单请求
+        let order = OrderRequest {
+            symbol: symbol.to_string(),
+            side: match decision.action {
+                TradingAction::Long => Side::Buy,
+                TradingAction::Short => Side::Sell,
+                _ => return false,
+            },
+            order_type: OrderType::Market,
+            qty: decision.qty,
+            price: Some(decision.price),
+        };
+
+        // 4. 执行订单
+        match self.execute_order_internal(order).await {
+            Ok(_) => {
+                info!("Order executed for {}", symbol);
+                true
+            }
+            Err(e) => {
+                warn!("Order failed for {}: {}", symbol, e);
+                false
+            }
+        }
+    }
+
+    /// 触发停止机制
+    fn trigger_stop_mechanism(&mut self) {
+        warn!("Stop mechanism triggered");
+
+        // 1. 切换到维护模式（已在上面的调用中设置）
+
+        // 2. 取消所有未完成订单
+        // TODO: 实现取消逻辑
+
+        // 3. 保存当前状态到灾备
+        // TODO: 调用 disaster_recovery
+
+        // 4. 通知
+        warn!("System entering maintenance mode, all trading suspended");
+    }
+
+    /// 内部订单执行 (不更新锁状态)
+    async fn execute_order_internal(&mut self, order: OrderRequest) -> Result<OrderResult, EngineError> {
+        let order_value = order.qty * order.price.unwrap_or(order.qty);
+
+        // 1. 预占保证金
+        self.strategy_pool.reserve_margin("main", order_value)
+            .map_err(|e| EngineError::RiskCheckFailed(e))?;
+
+        // 2. 一轮编码作用域
+        let _round_scope = RoundGuardScope::new(&self.round_guard);
+
+        // 3. 执行订单
+        let result = match order.order_type {
+            OrderType::Market => {
+                self.order_executor.execute_market_order(
+                    &order.symbol,
+                    order.side,
+                    order.qty,
+                    order.price.unwrap_or(self.current_price),
+                )?
+            }
+            OrderType::Limit => {
+                self.order_executor.execute_limit_order(
+                    &order.symbol,
+                    order.side,
+                    order.qty,
+                    order.price.unwrap_or(self.current_price),
+                )?
+            }
+        };
+
+        // 4. 如果订单成功，更新持仓
+        if result.status == OrderStatus::Filled {
+            let direction = match order.side {
+                Side::Buy => Direction::Long,
+                Side::Sell => Direction::Short,
+            };
+            self.position_manager.open_position(
+                direction,
+                result.filled_qty,
+                result.filled_price,
+                self.current_ts,
+            );
+        }
+
+        Ok(result)
     }
 
     /// 风控预检 (在策略决策后、风控复核前调用)
