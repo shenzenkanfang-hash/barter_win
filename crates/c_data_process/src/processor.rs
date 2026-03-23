@@ -10,7 +10,7 @@
 //! - TTL 机制自动清理过时的 1m 品种（默认10分钟无更新则移除）
 
 use crate::min::trend::{Indicator1m, Indicator1mOutput};
-use crate::day::trend::{BigCycleCalculator, PineColorBig as DayPineColorBig};
+use crate::day::trend::{BigCycleCalculator, BigCycleIndicators, PineColorBig as DayPineColorBig};
 use crate::types::PineColor;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
@@ -228,6 +228,24 @@ impl SignalProcessor {
         let indicators = self.day_indicators.read();
         indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
             ind.calculate_tr_ratio()
+        })
+    }
+
+    /// 获取日级完整 Pine 颜色（包含 12-26、20-50、100-200 三个周期）
+    pub fn day_get_pine(&self, symbol: &str) -> Option<BigCycleIndicators> {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
+            let (tr_5d_20d, tr_20d_60d) = ind.calculate_tr_ratio();
+            BigCycleIndicators {
+                tr_ratio_5d_20d: tr_5d_20d,
+                tr_ratio_20d_60d: tr_20d_60d,
+                pos_norm_20: ind.calculate_pos_norm_20(),
+                ma5_in_20d_ma5_pos: ind.calculate_ma5_in_20d_ma5_pos(),
+                ma20_in_60d_ma20_pos: ind.calculate_ma20_in_60d_ma20_pos(),
+                pine_color_100_200: ind.detect_pine_color_100_200(),
+                pine_color_20_50: ind.detect_pine_color_20_50(),
+                pine_color_12_26: ind.detect_pine_color_12_26(),
+            }
         })
     }
 
