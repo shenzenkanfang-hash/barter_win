@@ -579,6 +579,183 @@ pub fn calculate_initial_notional(
 
 ---
 
+## 3.7 浮亏拯救机制 (高波动品种互救)
+
+### 3.7.1 核心概念
+
+```
+高波动品种 (Pin) = 拯救者
+  - 高杠杆插针策略
+  - 翻倍加仓 1-1-2-4-8 快速拉满杠杆
+  - 盈利用于覆盖别人，但自己的盈亏不计入总盈亏
+
+低波动品种 = 被拯救者
+  - 入场后发现波动不够高
+  - 浮亏需要被高波动盈利覆盖
+  - 覆盖后出清，释放保证金
+```
+
+### 3.7.2 两种命运
+
+**高波动品种 (Pin) 两种结局**：
+
+```
+选对 → 快速翻倍加仓 1-1-2-4-8 → 快速盈利
+
+选错 → 浮亏 → 转日线趋势跟随(不加仓)
+     → 等趋势走完 → 覆盖亏损 → 出清走人
+```
+
+**低波动品种**：
+```
+入场后发现是低波动 → 浮亏 → 被高波动盈利覆盖 → 出清 → 释放保证金
+```
+
+### 3.7.3 资金循环
+
+```
+高波动选对 → 盈利 → 部分cover低波动浮亏
+                    ↓
+            剩余盈利累加到累计盈利
+                    ↓
+            继续寻找下一个高波动机会
+```
+
+### 3.7.4 拯救条件
+
+```
+已实现盈利 + 累计盈利 ≥ 低波动品种总浮亏
+```
+
+**举例**：
+```
+低波动品种: ETH浮亏-120, SOL浮亏-85, ADA浮亏+75
+低波动总亏损 = -120 - 85 + 75 = -130 USDT
+
+高波动BTC盈利: +200 USDT (已实现)
+累计盈利: +50 USDT
+
+检查: 200 + 50 = 250 > 130 → 可以覆盖！
+覆盖后剩余: 250 - 130 = 120 USDT (累加到累计盈利)
+```
+
+### 3.7.5 拯救流程
+
+```
+1. 高波动品种盈利时（必须已实现）
+2. 检查 盈利 + 累计盈利 是否 ≥ 低波动品种总浮亏
+3. 能覆盖 → 删除低波动品种记录
+         → 清除低波动标记
+         → 从策略池移除
+         → 剩余盈利累加到累计盈利
+```
+
+### 3.7.6 三层策略关系
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    趋势跟随 (Trend)                      │
+│         高波动选错 → 纯跟随趋势 → 出清走人              │
+└─────────────────────────────────────────────────────────┘
+                          ↑
+                    趋势覆盖亏损
+                          ↑
+┌─────────────────────────────────────────────────────────┐
+│                   插针高波动 (Pin)                       │
+│         选对 → 1-1-2-4-8 翻倍加仓 → 快速盈利          │
+│         选错 → 转趋势跟随                               │
+└─────────────────────────────────────────────────────────┘
+                          ↑
+                    盈利cover
+                          ↑
+┌─────────────────────────────────────────────────────────┐
+│                    低波动 (浮亏)                         │
+│         被cover后出清 → 释放保证金 → 寻找下一个机会     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 3.7.7 代码设计
+
+```rust
+/// 盈亏覆盖检查结果
+#[derive(Debug, Clone)]
+pub struct PnlCoverageResult {
+    /// 是否可以覆盖
+    pub can_cover: bool,
+    /// 低波动总浮亏
+    pub total_loss: Decimal,
+    /// 高波动当前盈利
+    pub current_profit: Decimal,
+    /// 历史累计盈利
+    pub accumulated_profit: Decimal,
+    /// 覆盖后净盈利
+    pub net_profit: Decimal,
+    /// 低波动品种数
+    pub symbol_count: u32,
+}
+
+/// 解救结果
+#[derive(Debug, Clone)]
+pub struct RescueResult {
+    pub success: bool,
+    pub can_rescue: bool,
+    pub total_loss: Decimal,
+    pub total_available_profit: Decimal,
+    pub rescued_symbols: Vec<String>,
+    pub remaining_profit: Decimal,
+}
+
+impl PnlManager {
+    /// 检查盈亏覆盖
+    pub fn check_pnl_coverage(
+        &self,
+        high_vol_profit: Decimal,
+        is_realized: bool,
+    ) -> PnlCoverageResult {
+        // 已实现盈利才能参与覆盖
+        let accumulated = self.get_accumulated_profit();
+        let total_available = if is_realized {
+            high_vol_profit + accumulated
+        } else {
+            accumulated // 浮盈不计入
+        };
+
+        let total_loss = self.calculate_low_volatility_total_loss();
+        let can_cover = total_available >= total_loss;
+        let net_profit = if can_cover { total_available - total_loss } else { dec!(0) };
+
+        PnlCoverageResult { can_cover, total_loss, current_profit: high_vol_profit, accumulated_profit: accumulated, net_profit, symbol_count: self.get_low_vol_count() }
+    }
+
+    /// 解救低波动品种
+    pub fn rescue_low_volatility(&mut self, high_vol_profit: Decimal) -> RescueResult {
+        let coverage = self.check_pnl_coverage(high_vol_profit, true);
+
+        if !coverage.can_cover {
+            return RescueResult { success: false, can_rescue: false, total_loss: dec!(0), total_available_profit: dec!(0), rescued_symbols: vec![], remaining_profit: dec!(0) };
+        }
+
+        // 删除低波动品种记录
+        let rescued = self.clear_low_volatility_symbols();
+
+        // 剩余盈利累加
+        let remaining = coverage.net_profit;
+        self.set_accumulated_profit(remaining);
+
+        RescueResult {
+            success: true,
+            can_rescue: true,
+            total_loss: coverage.total_loss,
+            total_available_profit: coverage.current_profit + coverage.accumulated_profit,
+            rescued_symbols: rescued,
+            remaining_profit: remaining,
+        }
+    }
+}
+```
+
+---
+
 ## 4. 性能优化设计
 
 ### 4.1 OrderCheck 使用 FnvHashMap
