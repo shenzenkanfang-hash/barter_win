@@ -2,6 +2,7 @@
 
 pub mod common;
 pub mod minute_risk;
+pub mod pin;
 pub mod trend;
 
 // Re-exports from common
@@ -18,3 +19,6 @@ pub use minute_risk::{
 
 // Re-exports from trend
 pub use trend::{TrendRiskLimitGuard, TrendSymbolLimit, TrendGlobalLimit};
+
+// Re-exports from pin
+pub use pin::{PinRiskLeverageGuard, PinLeverageConfig, PinVolatilityLevel};
