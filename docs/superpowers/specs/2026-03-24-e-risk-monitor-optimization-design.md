@@ -62,7 +62,8 @@ e_risk_monitor/src/
 │                                                         │
 │  ┌─────────────────┐  ┌─────────────────┐             │
 │  │  SymbolLimit    │  │  RateLimiter    │             │
-│  │  品种限额        │  │  频率限制        │             │
+│  │  趋势策略限额    │  │  频率限制        │             │
+│  │  ⚠️马丁策略禁用 │  │  ⚠️马丁策略禁用  │             │
 │  └────────┬────────┘  └────────┬────────┘             │
 │           │                    │                        │
 │           └─────────┬──────────┘                        │
@@ -70,6 +71,7 @@ e_risk_monitor/src/
 │            ┌─────────────────┐                         │
 │            │ DynamicLeverage │                         │
 │            │ 动态杠杆        │                         │
+│            │ (马丁专用)      │                         │
 │            └────────┬────────┘                         │
 │                     │                                  │
 └─────────────────────┼──────────────────────────────────┘
@@ -80,6 +82,19 @@ e_risk_monitor/src/
 ├─────────────────────────────────────────────────────────┤
 │  RiskPreChecker  →  RiskReChecker  →  OrderCheck      │
 └─────────────────────────────────────────────────────────┘
+
+====================================================================
+策略类型选择指南:
+
+| 策略类型 | SymbolLimitGuard | RateLimiter | DynamicLeverage |
+|----------|-----------------|-------------|----------------|
+| Trend    | ✅ 启用          | ✅ 启用      | ❌ 禁用        |
+| Martin   | ❌ 禁用          | ✅ 启用      | ✅ 启用        |
+
+⚠️ 注意：马丁/高波动策略不应有持仓限额，因为：
+   1. 马丁策略本身是高杠杆
+   2. 高波动时会快速加仓，不能限制仓位
+   3. 只能用频率限制防止过度交易
 ```
 
 ---
@@ -88,8 +103,26 @@ e_risk_monitor/src/
 
 ### 3.1 guard/symbol_limit.rs — 品种限额
 
+> **注意**: 本模块仅适用于**趋势策略**。
+> **马丁/高波动策略** 不应使用本限额，应使用单独的频率限制。
+
 ```rust
-/// 单品种持仓限制
+/// 策略类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrategyType {
+    /// 趋势策略 - 需要限额保护
+    Trend,
+    /// 马丁/高波动策略 - 不应限制持仓
+    Martin,
+}
+
+impl Default for StrategyType {
+    fn default() -> Self {
+        StrategyType::Trend
+    }
+}
+
+/// 单品种持仓限制 (仅适用于趋势策略)
 #[derive(Debug, Clone)]
 pub struct SymbolPositionLimit {
     /// 单品种最大名义价值 (默认 5000 USDT)
@@ -110,7 +143,7 @@ impl Default for SymbolPositionLimit {
     }
 }
 
-/// 全局持仓限制
+/// 全局持仓限制 (仅适用于趋势策略)
 #[derive(Debug, Clone)]
 pub struct GlobalPositionLimit {
     /// 全局最大名义价值
@@ -131,7 +164,12 @@ impl Default for GlobalPositionLimit {
     }
 }
 
-/// 品种限额检查器
+/// 品种限额检查器 (仅适用于趋势策略)
+///
+/// 马丁/高波动策略不应使用此限额，因为：
+/// 1. 马丁策略本身就是高杠杆
+/// 2. 高波动时马丁会快速加仓，不能有持仓上限
+/// 3. 马丁只做频率限制，不做仓位限制
 #[derive(Debug, Clone)]
 pub struct SymbolLimitGuard {
     /// 单品种限制
@@ -145,7 +183,7 @@ pub struct SymbolLimitGuard {
 }
 
 impl SymbolLimitGuard {
-    /// 创建品种限额检查器
+    /// 创建品种限额检查器 (仅适用于趋势策略)
     pub fn new(symbol_limit: SymbolPositionLimit, global_limit: GlobalPositionLimit) -> Self {
         Self {
             symbol_limit,
@@ -155,14 +193,27 @@ impl SymbolLimitGuard {
         }
     }
 
-    /// 预检订单是否允许
+    /// 预检订单是否允许 (趋势策略专用)
+    ///
+    /// # 参数
+    /// - `strategy_type`: 策略类型，必须是 Trend
+    ///
+    /// # 返回
+    /// - Ok: 检查通过
+    /// - Err: 超过限额
     pub fn pre_check(
         &self,
         symbol: &str,
         order_notional: Decimal,
         order_qty: Decimal,
+        strategy_type: StrategyType,
     ) -> Result<(), EngineError> {
-        // 1. 检查单品种限额
+        // 马丁/高波动策略跳过限额检查
+        if strategy_type == StrategyType::Martin {
+            return Ok(());
+        }
+
+        // 1. 检查单品种限额 (趋势策略)
         let current_notional = self.current_notionals.get(symbol).copied().unwrap_or(dec!(0));
         let current_qty = self.current_quantities.get(symbol).copied().unwrap_or(dec!(0));
 
@@ -173,7 +224,7 @@ impl SymbolLimitGuard {
         if self.symbol_limit.max_notional > dec!(0) {
             if new_notional > self.symbol_limit.max_notional {
                 return Err(EngineError::PositionLimitExceeded(format!(
-                    "品种 {} 名义价值 {} 超过单品种限额 {}",
+                    "趋势策略 {} 名义价值 {} 超过单品种限额 {}",
                     symbol, new_notional, self.symbol_limit.max_notional
                 )));
             }
@@ -183,13 +234,13 @@ impl SymbolLimitGuard {
         if self.symbol_limit.max_qty > dec!(0) {
             if new_qty > self.symbol_limit.max_qty {
                 return Err(EngineError::PositionLimitExceeded(format!(
-                    "品种 {} 数量 {} 超过单品种限额 {}",
+                    "趋势策略 {} 数量 {} 超过单品种限额 {}",
                     symbol, new_qty, self.symbol_limit.max_qty
                 )));
             }
         }
 
-        // 2. 检查全局限额
+        // 2. 检查全局限额 (趋势策略)
         let total_notional: Decimal = self.current_notionals.values().sum();
         let new_total_notional = total_notional + order_notional;
 
@@ -489,7 +540,7 @@ pub mod rate_limiter;
 pub mod dynamic_leverage;
 pub mod fund_guard;  // 新增
 
-pub use symbol_limit::{SymbolPositionLimit, GlobalPositionLimit, SymbolLimitGuard};
+pub use symbol_limit::{StrategyType, SymbolPositionLimit, GlobalPositionLimit, SymbolLimitGuard};
 pub use rate_limiter::RateLimiter;
 pub use dynamic_leverage::{DynamicLeverageConfig, DynamicLeverageCalculator, VolatilityLevel};
 pub use fund_guard::FundGuard;
@@ -777,8 +828,13 @@ pub mod shared;
 
 // 导出
 pub use guard::{
-    SymbolPositionLimit, GlobalPositionLimit, SymbolLimitGuard,
-    RateLimiter, DynamicLeverageConfig, DynamicLeverageCalculator, VolatilityLevel,
+    // 品种限额 (仅趋势策略)
+    StrategyType, SymbolPositionLimit, GlobalPositionLimit, SymbolLimitGuard,
+    // 频率限制 (所有策略)
+    RateLimiter,
+    // 动态杠杆 (马丁/高波动策略)
+    DynamicLeverageConfig, DynamicLeverageCalculator, VolatilityLevel,
+    // 资金守护
     FundGuard,
 };
 
@@ -830,11 +886,28 @@ mod tests {
             GlobalPositionLimit::default(),
         );
 
-        // 首笔订单 3000，通过
-        assert!(guard.pre_check("BTC", dec!(3000), dec!(0)).is_ok());
+        // 首笔订单 3000，通过 (趋势策略)
+        assert!(guard.pre_check("BTC", dec!(3000), dec!(0), StrategyType::Trend).is_ok());
 
-        // 第二笔订单 3000，总额 6000 > 5000，拒绝
-        assert!(guard.pre_check("BTC", dec!(3000), dec!(0)).is_err());
+        // 第二笔订单 3000，总额 6000 > 5000，拒绝 (趋势策略)
+        assert!(guard.pre_check("BTC", dec!(3000), dec!(0), StrategyType::Trend).is_err());
+    }
+
+    #[test]
+    fn test_martin_strategy_skips_limit() {
+        let guard = SymbolLimitGuard::new(
+            SymbolPositionLimit {
+                max_notional: dec!(5000),
+                ..Default::default()
+            },
+            GlobalPositionLimit::default(),
+        );
+
+        // 马丁策略不受限额限制
+        // 即使 10000 > 5000，也应该通过
+        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Martin).is_ok());
+        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Martin).is_ok());
+        assert!(guard.pre_check("BTC", dec!(10000), dec!(0), StrategyType::Martin).is_ok());
     }
 
     #[test]
@@ -847,16 +920,16 @@ mod tests {
             },
         );
 
-        // BTC 通过
-        assert!(guard.pre_check("BTC", dec!(1000), dec!(0)).is_ok());
+        // BTC 通过 (趋势策略)
+        assert!(guard.pre_check("BTC", dec!(1000), dec!(0), StrategyType::Trend).is_ok());
         guard.update_position("BTC", dec!(1000), dec!(0));
 
-        // ETH 通过
-        assert!(guard.pre_check("ETH", dec!(1000), dec!(0)).is_ok());
+        // ETH 通过 (趋势策略)
+        assert!(guard.pre_check("ETH", dec!(1000), dec!(0), StrategyType::Trend).is_ok());
         guard.update_position("ETH", dec!(1000), dec!(0));
 
-        // SOL 品种数已达上限，拒绝
-        assert!(guard.pre_check("SOL", dec!(1000), dec!(0)).is_err());
+        // SOL 品种数已达上限，拒绝 (趋势策略)
+        assert!(guard.pre_check("SOL", dec!(1000), dec!(0), StrategyType::Trend).is_err());
     }
 }
 ```
@@ -948,19 +1021,50 @@ mod tests {
 
 ## 9. 实现计划
 
-| 步骤 | 任务 | 优先级 |
-|------|------|--------|
-| 1 | 新增 guard/ 目录和 mod.rs | P0 |
-| 2 | 实现 SymbolLimitGuard | P1 |
-| 3 | 实现 RateLimiter | P1 |
-| 4 | 实现 DynamicLeverageCalculator | P2 |
-| 5 | 实现 FundGuard (统一预占系统) | P0 |
-| 6 | 修复 total_used_margin 更新问题 | P0 |
-| 7 | OrderCheck 改用 FnvHashMap | P1 |
-| 8 | PersistenceService 添加索引 | P1 |
-| 9 | 更新 lib.rs 导出 | P0 |
-| 10 | 编写单元测试 | P1 |
-| 11 | 更新文档 | P2 |
+| 步骤 | 任务 | 优先级 | 适用策略 |
+|------|------|--------|----------|
+| 1 | 新增 guard/ 目录和 mod.rs | P0 | - |
+| 2 | 实现 StrategyType 枚举 | P0 | 全部 |
+| 3 | 实现 SymbolLimitGuard | P1 | 仅 Trend |
+| 4 | 实现 RateLimiter | P1 | 全部 |
+| 5 | 实现 DynamicLeverageCalculator | P2 | 仅 Martin |
+| 6 | 实现 FundGuard (统一预占系统) | P0 | 全部 |
+| 7 | 修复 total_used_margin 更新问题 | P0 | 全部 |
+| 8 | OrderCheck 改用 FnvHashMap | P1 | 全部 |
+| 9 | PersistenceService 添加索引 | P1 | 全部 |
+| 10 | 更新 lib.rs 导出 | P0 | - |
+| 11 | 编写单元测试 | P1 | - |
+| 12 | 更新文档 | P2 | - |
+
+### 9.1 策略类型使用指南
+
+```rust
+use e_risk_monitor::{SymbolLimitGuard, RateLimiter, DynamicLeverageCalculator, StrategyType};
+
+// 趋势策略风控初始化
+fn init_trend_risk() {
+    let symbol_limit = SymbolLimitGuard::new(
+        SymbolPositionLimit { max_notional: dec!(5000), ..Default::default() },
+        GlobalPositionLimit { max_symbol_count: 10, ..Default::default() },
+    );
+    let rate_limiter = RateLimiter::new(10, 100); // 每品种10/全局100
+    // DynamicLeverage 不适用于趋势策略
+}
+
+// 马丁策略风控初始化
+fn init_martin_risk() {
+    // SymbolLimitGuard 不适用于马丁策略！
+    let rate_limiter = RateLimiter::new(60, 1000); // 马丁可以更频繁
+    let leverage_calc = DynamicLeverageCalculator::new(DynamicLeverageConfig::default());
+}
+
+// 订单预检时必须指定策略类型
+fn pre_check_order(guard: &SymbolLimitGuard, order_notional: Decimal, strategy_type: StrategyType) {
+    // 趋势策略会检查限额
+    // 马丁策略会跳过限额
+    guard.pre_check("BTC", order_notional, dec!(0), strategy_type);
+}
+```
 
 ---
 
