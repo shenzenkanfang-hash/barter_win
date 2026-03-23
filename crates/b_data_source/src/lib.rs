@@ -16,7 +16,6 @@ pub use a_common::logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleChe
 
 // Sub-modules
 pub mod recovery;
-pub mod volatility;
 pub mod models;
 
 // 统一数据接口层
@@ -35,4 +34,4 @@ pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 pub use api::trade_settings::{TradeSettings, PositionMode};
 
 // Re-exports - Volatility
-pub use volatility::{VolatilityManager, SymbolVolatility};
+pub use ws::{VolatilityManager, SymbolVolatility};

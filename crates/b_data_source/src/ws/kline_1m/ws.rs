@@ -2,7 +2,7 @@
 //!
 //! 分片订阅: 每批50个symbol，间隔500ms发送
 
-use crate::volatility::VolatilityManager;
+use crate::ws::volatility::VolatilityManager;
 use a_common::Paths;
 use a_common::volatility::KLineInput;
 use chrono::{DateTime, TimeZone, Utc};
