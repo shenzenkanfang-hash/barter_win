@@ -2,8 +2,10 @@
 //!
 //! 默认只订阅 BTC 维护连接，高波动时扩展
 
+use super::orderbook::OrderBook;
 use a_common::Paths;
 use futures_util::{SinkExt, StreamExt};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -34,6 +36,8 @@ pub struct DepthStream {
         >,
     >,
     file_handles: HashMap<String, File>,
+    /// 最新订单簿缓存（按symbol索引）
+    latest_orderbooks: HashMap<String, OrderBook>,
 }
 
 impl DepthStream {
@@ -86,6 +90,7 @@ impl DepthStream {
             symbols,
             ws_stream: Some(read),
             file_handles: HashMap::new(),
+            latest_orderbooks: HashMap::new(),
         })
     }
 
@@ -159,6 +164,50 @@ impl DepthStream {
                         if let Some(json_str) = serde_json::to_string(&depth).ok() {
                             // 覆盖写入：每次只保留最新一条数据
                             let _ = self.write_overwrite(symbol, &json_str);
+
+                            // 解析并缓存最新订单簿
+                            let parse_price = |s: &str| -> Decimal {
+                                s.parse::<Decimal>().unwrap_or(Decimal::ZERO)
+                            };
+
+                            let bids: Vec<(Decimal, Decimal)> = depth.get("bids")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|item| {
+                                            item.as_array().and_then(|pair| {
+                                                let price = pair.get(0).and_then(|p| p.as_str()).map(parse_price);
+                                                let qty = pair.get(1).and_then(|q| q.as_str()).map(parse_price);
+                                                price.zip(qty)
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+
+                            let asks: Vec<(Decimal, Decimal)> = depth.get("asks")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|item| {
+                                            item.as_array().and_then(|pair| {
+                                                let price = pair.get(0).and_then(|p| p.as_str()).map(parse_price);
+                                                let qty = pair.get(1).and_then(|q| q.as_str()).map(parse_price);
+                                                price.zip(qty)
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+
+                            let last_update_id = depth.get("lastUpdateId")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+
+                            let mut orderbook = OrderBook::new(symbol.to_string());
+                            orderbook.update(last_update_id, bids, asks);
+
+                            self.latest_orderbooks.insert(symbol.to_lowercase(), orderbook);
                         }
                     }
                 }
@@ -166,5 +215,10 @@ impl DepthStream {
         }
 
         Some(text)
+    }
+
+    /// 获取最新订单簿
+    pub fn get_latest_orderbook(&self, symbol: &str) -> Option<OrderBook> {
+        self.latest_orderbooks.get(&symbol.to_lowercase()).cloned()
     }
 }

@@ -35,3 +35,6 @@ pub use api::trade_settings::{TradeSettings, PositionMode};
 
 // Re-exports - Volatility
 pub use ws::{VolatilityManager, SymbolVolatility};
+
+// Re-exports - DataFeeder (统一数据接口)
+pub use api::DataFeeder;

@@ -12,3 +12,5 @@ pub use kline_1m::{Kline1mStream, KLineSynthesizer, KlinePersistence};
 pub use kline_1d::Kline1dStream;
 pub use order_books::{OrderBook, DepthStream};
 pub use volatility::{VolatilityManager, SymbolVolatility};
+// Re-export from a_common
+pub use a_common::volatility::VolatilityEntry;
