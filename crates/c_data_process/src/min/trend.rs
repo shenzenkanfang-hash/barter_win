@@ -12,6 +12,7 @@
 //! - 高阶动能指标: jerk, market_force, acc_efficiency
 
 use rust_decimal::Decimal;
+use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -29,6 +30,17 @@ const WINDOW_2H: usize = 120;
 const NORM_WIN: usize = 20;
 
 // ==================== 辅助函数 ====================
+#[inline(always)]
+fn sign(v: Decimal) -> Decimal {
+    if v > Decimal::ZERO {
+        dec!(1)
+    } else if v < Decimal::ZERO {
+        -dec!(1)
+    } else {
+        dec!(0)
+    }
+}
+
 #[inline(always)]
 fn safe_div(n: Decimal, d: Decimal) -> Decimal {
     if d.abs() < EPSILON {
@@ -157,6 +169,7 @@ struct RollingPercentile {
 impl RollingPercentile {
     fn new(window: usize) -> Self {
         Self {
+            window,
             buf: VecDeque::with_capacity(window),
         }
     }
@@ -366,7 +379,7 @@ impl Indicator1m {
         let power_pct = self.power_pct.update(self.power.abs());
 
         // 7. 趋势方向
-        let trend_dir = vel.sign();
+        let trend_dir = sign(vel);
 
         // 8. TR 指标计算
         // TR = max(high, prev_close) - min(low, prev_close)
@@ -437,7 +450,10 @@ impl Indicator1m {
         // 13. Market force = norm_jerk * norm_volume
         // Volume log
         let vol_log_val = if v > dec!(0) {
-            safe_div(v, dec!(1_000_000)).ln().unwrap_or(dec!(0))
+            let ratio = safe_div(v, dec!(1_000_000));
+            // 使用 f64 ln 然后转回 Decimal
+            let f = ratio.to_string().parse::<f64>().unwrap_or(0.0);
+            Decimal::from_str_exact(&format!("{:.6}", f.ln())).unwrap_or(dec!(0))
         } else {
             dec!(0)
         };
