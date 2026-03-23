@@ -2,7 +2,10 @@
 //!
 //! 分片订阅: 每批50个symbol，间隔500ms发送
 
+use crate::volatility::VolatilityManager;
 use a_common::Paths;
+use a_common::volatility::KLineInput;
+use chrono::{DateTime, TimeZone, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -55,6 +58,8 @@ pub struct Kline1mStream {
     last_write_times: HashMap<String, Instant>,
     /// 超时写入间隔（秒）
     write_timeout_secs: u64,
+    /// 波动率管理器
+    volatility_manager: VolatilityManager,
 }
 
 impl Kline1mStream {
@@ -137,6 +142,7 @@ impl Kline1mStream {
             file_handles: HashMap::new(),
             last_write_times: HashMap::new(),
             write_timeout_secs: 5, // 5秒超时写入
+            volatility_manager: VolatilityManager::new(),
         })
     }
 
@@ -293,6 +299,40 @@ impl Kline1mStream {
                     serde_json::to_string(&kline).ok(),
                     kline.get("x").and_then(|v| v.as_bool()),
                 ) {
+                    // 解析 KLineInput 用于波动率计算
+                    if let (Some(o), Some(h), Some(l), Some(c), Some(t)) = (
+                        kline.get("o").and_then(|v| v.as_str()),
+                        kline.get("h").and_then(|v| v.as_str()),
+                        kline.get("l").and_then(|v| v.as_str()),
+                        kline.get("c").and_then(|v| v.as_str()),
+                        kline.get("T").and_then(|v| v.as_i64()),
+                    ) {
+                        // 将字符串转换为 Decimal，Binance 价格精度为 8 位小数
+                        let parse_price = |s: &str| -> rust_decimal::Decimal {
+                            s.parse::<rust_decimal::Decimal>().unwrap_or(rust_decimal::Decimal::ZERO)
+                        };
+                        let timestamp_ms = t;
+                        let timestamp = Utc.timestamp_millis_opt(timestamp_ms).unwrap_or_else(Utc::now);
+
+                        let kline_input = KLineInput {
+                            open: parse_price(o),
+                            high: parse_price(h),
+                            low: parse_price(l),
+                            close: parse_price(c),
+                            timestamp,
+                        };
+
+                        // 每 tick 更新波动率（这是项目的基石）
+                        let _vol_stats = self.volatility_manager.update(symbol, kline_input);
+                        tracing::debug!(
+                            "Volatility update for {}: 1m={:.4}, 15m={:.4}, high={}",
+                            symbol,
+                            _vol_stats.vol_1m,
+                            _vol_stats.vol_15m,
+                            _vol_stats.is_high_volatility
+                        );
+                    }
+
                     // K线闭合时，写入历史目录（结构化格式）
                     if is_closed {
                         let _ = self.write_to_history(symbol, kline);
