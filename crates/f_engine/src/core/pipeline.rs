@@ -1,3 +1,21 @@
+//! Pipeline - 交易流程编排器
+//!
+//! # 架构说明
+//! Pipeline 是跨层协调者，串联：
+//! - `c_data_process` (指标计算、信号生成)
+//! - `d_checktable` (CheckTable 并行检查)
+//! - `e_risk_monitor` (风控串行复核)
+//! - `f_engine` (订单执行)
+//!
+//! # 设计决策
+//! 放在 `f_engine::core` 下因：
+//! - 最终执行入口在 f_engine
+//! - 避免创建新 crate 增加复杂度
+//! - 长期看可迁移到独立 crate
+//!
+//! # 流程
+//! Tick → Indicator → Strategy → RiskPre → OrderRequest
+
 #![forbid(unsafe_code)]
 
 use a_common::logs::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};

@@ -1,8 +1,21 @@
+//! f_engine 核心类型定义
+//!
+//! # 模块划分
+//! - `StrategyId` - 策略标识符
+//! - `TradingDecision` - 交易决策
+//! - `OrderRequest` - 订单请求
+//! - `Side`, `OrderType` - 来自 a_common 的类型重导出
+//! - `Mode`, `ModeSwitcher` - 移至 `channel` 模块
+
 #![forbid(unsafe_code)]
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use c_data_process::types::{PositionSide, TradingAction};
+use c_data_process::types::TradingAction;
+
+// ============================================================================
+// 策略标识符
+// ============================================================================
 
 /// 策略 ID
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -26,56 +39,9 @@ impl std::fmt::Display for StrategyId {
     }
 }
 
-/// 交易模式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Mode {
-    /// 正常交易模式
-    Normal,
-    /// 回测模式
-    Backtest,
-    /// 仿真模式
-    Paper,
-    /// 维护模式
-    Maintenance,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Normal
-    }
-}
-
-/// 模式切换器
-#[derive(Debug, Clone)]
-pub struct ModeSwitcher {
-    current_mode: Mode,
-}
-
-impl ModeSwitcher {
-    pub fn new() -> Self {
-        Self {
-            current_mode: Mode::Normal,
-        }
-    }
-
-    pub fn mode(&self) -> Mode {
-        self.current_mode
-    }
-
-    pub fn set_mode(&mut self, mode: Mode) {
-        self.current_mode = mode;
-    }
-
-    pub fn is_trading_allowed(&self) -> bool {
-        self.current_mode == Mode::Normal || self.current_mode == Mode::Paper
-    }
-}
-
-impl Default for ModeSwitcher {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ============================================================================
+// 交易决策
+// ============================================================================
 
 /// 交易决策 (来自 c_data_process::types::TradingDecision)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,7 +82,11 @@ impl TradingDecision {
     }
 }
 
-/// Side 用于订单方向 (来自 a_common::models::types::Side)
+// ============================================================================
+// 订单相关类型 (来自 a_common)
+// ============================================================================
+
+/// Side 用于订单方向
 pub use a_common::models::types::Side;
 
 /// OrderType 订单类型
@@ -153,3 +123,13 @@ impl OrderRequest {
         }
     }
 }
+
+// ============================================================================
+// 通道模块类型重导出
+// ============================================================================
+
+/// 交易模式
+pub use crate::channel::Mode;
+
+/// 模式切换器
+pub use crate::channel::ModeSwitcher;

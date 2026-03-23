@@ -1,3 +1,10 @@
+//! Core 模块 - 引擎核心组件
+//!
+//! # 子模块
+//! - `engine`: TradingEngine 主引擎
+//! - `pipeline`: 交易流程编排器
+//! - `strategy_pool`: 策略资金池
+
 #![forbid(unsafe_code)]
 
 pub mod engine;
@@ -8,4 +15,5 @@ pub use engine::TradingEngine;
 pub use pipeline::{Pipeline, Processor, MockIndicatorProcessor, MockStrategyProcessor, MockRiskProcessor};
 pub use d_checktable::h_15m::pipeline_form::PipelineForm;
 pub use strategy_pool::{StrategyAllocation, StrategyPool};
-pub use crate::types::{StrategyId, ModeSwitcher, Mode, TradingDecision, OrderRequest, Side, OrderType};
+pub use crate::types::{StrategyId, TradingDecision, OrderRequest, Side, OrderType};
+// ModeSwitcher 和 Mode 从 channel 模块重导出 via types.rs

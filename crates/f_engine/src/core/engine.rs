@@ -31,6 +31,21 @@ use tracing::{info, warn};
 
 /// 交易引擎 - 串联所有层
 ///
+/// # 职责范围 (当前)
+/// - Tick 接收与分发
+/// - Pipeline 流程编排
+/// - 订单执行与持仓更新
+/// - 风控协调
+///
+/// # TODO: 待迁移到 c_data_process
+/// - K线合成 (kline_1m, kline_1d) → b_data_source
+/// - 指标计算 (ema_fast, ema_slow, rsi) → c_data_process
+/// - 市场状态检测逻辑 → c_data_process
+///
+/// # 设计决策
+/// 暂不迁移原因：保持代码稳定，避免引入新问题
+/// 迁移条件：c_data_process 层完善 Pipeline 支持后
+///
 /// 集成所有 Phase 7 Enhancement 模块:
 /// - AccountPool: 账户保证金池 (熔断保护)
 /// - StrategyPool: 策略资金池 (再平衡)
