@@ -170,10 +170,67 @@ impl ExchangeGateway for MockExchangeGateway {
         let price = req.price.unwrap_or(dec!(0));
         let filled_price = price; // 模拟成交价为请求价
 
-        // 更新持仓
-        match req.side {
-            Side::Buy => self.add_long_position(&req.symbol, req.qty, filled_price),
-            Side::Sell => self.add_short_position(&req.symbol, req.qty, filled_price),
+        // 更新持仓 - 需要在同一个事务中处理开仓和平仓
+        {
+            let mut positions = self.positions.write();
+            let pos = positions.entry(req.symbol.clone()).or_insert_with(|| ExchangePosition::new(req.symbol.clone()));
+            
+            match req.side {
+                Side::Buy => {
+                    // 如果有空仓，先平空仓
+                    if pos.short_qty > Decimal::ZERO {
+                        let close_qty = pos.short_qty.min(req.qty);
+                        pos.short_qty = (pos.short_qty - close_qty).max(Decimal::ZERO);
+                        let remaining_qty = req.qty - close_qty;
+                        if remaining_qty > Decimal::ZERO {
+                            // 开多仓
+                            let total_cost = pos.long_qty * pos.long_avg_price + remaining_qty * filled_price;
+                            pos.long_qty += remaining_qty;
+                            pos.long_avg_price = if pos.long_qty > Decimal::ZERO {
+                                total_cost / pos.long_qty
+                            } else {
+                                Decimal::ZERO
+                            };
+                        }
+                    } else {
+                        // 开多仓
+                        let total_cost = pos.long_qty * pos.long_avg_price + req.qty * filled_price;
+                        pos.long_qty += req.qty;
+                        pos.long_avg_price = if pos.long_qty > Decimal::ZERO {
+                            total_cost / pos.long_qty
+                        } else {
+                            Decimal::ZERO
+                        };
+                    }
+                }
+                Side::Sell => {
+                    // 如果有多仓，先平多仓
+                    if pos.long_qty > Decimal::ZERO {
+                        let close_qty = pos.long_qty.min(req.qty);
+                        pos.long_qty = (pos.long_qty - close_qty).max(Decimal::ZERO);
+                        let remaining_qty = req.qty - close_qty;
+                        if remaining_qty > Decimal::ZERO {
+                            // 开空仓
+                            let total_cost = pos.short_qty * pos.short_avg_price + remaining_qty * filled_price;
+                            pos.short_qty += remaining_qty;
+                            pos.short_avg_price = if pos.short_qty > Decimal::ZERO {
+                                total_cost / pos.short_qty
+                            } else {
+                                Decimal::ZERO
+                            };
+                        }
+                    } else {
+                        // 开空仓
+                        let total_cost = pos.short_qty * pos.short_avg_price + req.qty * filled_price;
+                        pos.short_qty += req.qty;
+                        pos.short_avg_price = if pos.short_qty > Decimal::ZERO {
+                            total_cost / pos.short_qty
+                        } else {
+                            Decimal::ZERO
+                        };
+                    }
+                }
+            }
         }
 
         // 扣款

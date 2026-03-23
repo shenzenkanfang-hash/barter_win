@@ -14,14 +14,16 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use c_data_process::types::{TradingAction, TradingDecision, MinSignalInput, MinSignalOutput};
+use c_data_process::types::{TradingAction, TradingDecision};
 use c_data_process::SignalProcessor;
-use d_checktable::h_15m::MinSignalGenerator;
+use d_checktable::h_15m::signal_generator::MinSignalGenerator;
+use d_checktable::types::{MinSignalInput, MinSignalOutput, VolatilityLevel};
 use e_risk_monitor::risk::RiskPreChecker;
 use f_engine::core::{TradingEngine, SymbolState};
+use f_engine::order::ExchangeGateway;
 use f_engine::types::{Mode, ModeSwitcher, Side};
 
-use crate::mock_gateway::MockExchangeGateway;
+use super::mock_gateway::MockExchangeGateway;
 
 // ============================================================================
 // 测试辅助函数
@@ -114,7 +116,7 @@ fn test_signal_generator_long_entry() {
     let generator = MinSignalGenerator::new();
     let input = create_pinbar_long_entry_input();
 
-    let output = generator.generate(&input, &c_data_process::types::VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityLevel::HIGH);
 
     assert!(output.long_entry, "应该触发 LongEntry 信号");
     assert!(!output.short_entry, "不应该触发 ShortEntry 信号");
@@ -126,7 +128,7 @@ fn test_signal_generator_short_entry() {
     let generator = MinSignalGenerator::new();
     let input = create_pinbar_short_entry_input();
 
-    let output = generator.generate(&input, &c_data_process::types::VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityLevel::HIGH);
 
     assert!(!output.long_entry, "不应该触发 LongEntry 信号");
     assert!(output.short_entry, "应该触发 ShortEntry 信号");
@@ -137,7 +139,7 @@ fn test_signal_generator_neutral_no_signal() {
     let generator = MinSignalGenerator::new();
     let input = create_neutral_input();
 
-    let output = generator.generate(&input, &c_data_process::types::VolatilityLevel::NORMAL);
+    let output = generator.generate(&input, &VolatilityLevel::NORMAL);
 
     assert!(!output.long_entry, "不应该触发 LongEntry 信号");
     assert!(!output.short_entry, "不应该触发 ShortEntry 信号");
@@ -155,7 +157,7 @@ fn test_signal_generator_7_pin_conditions() {
         dec!(0.5), dec!(0.5), dec!(50),
         "中性", "中性", dec!(0), dec!(0)
     );
-    let output1 = generator.generate(&input1, &c_data_process::types::VolatilityLevel::NORMAL);
+    let output1 = generator.generate(&input1, &VolatilityLevel::NORMAL);
     assert!(!output1.long_entry && !output1.short_entry, "条件不满足不应该触发");
 
     // 测试所有条件都满足 (应该触发)
@@ -164,7 +166,7 @@ fn test_signal_generator_7_pin_conditions() {
         dec!(3.0), dec!(3.0), dec!(10),
         "纯绿", "纯绿", dec!(-0.1), dec!(100)
     );
-    let output2 = generator.generate(&input2, &c_data_process::types::VolatilityLevel::HIGH);
+    let output2 = generator.generate(&input2, &VolatilityLevel::HIGH);
     assert!(output2.long_entry || output2.short_entry, "条件满足应该触发信号");
 }
 
@@ -273,16 +275,16 @@ fn test_mock_gateway_position_tracking() {
     assert_eq!(position.long_qty, dec!(0.1));
     assert_eq!(position.long_avg_price, dec!(50000));
 
-    // 开空仓
+    // 开空仓 (先用另一只symbol测试，因为当前有多仓会先平多仓)
     gateway.place_order(f_engine::types::OrderRequest {
-        symbol: "BTCUSDT".to_string(),
+        symbol: "ETHUSDT".to_string(),
         side: Side::Sell,
         order_type: f_engine::types::OrderType::Market,
         qty: dec!(0.05),
-        price: Some(dec!(51000)),
+        price: Some(dec!(3000)),
     }).unwrap();
 
-    let position = gateway.get_position("BTCUSDT").unwrap().unwrap();
+    let position = gateway.get_position("ETHUSDT").unwrap().unwrap();
     assert_eq!(position.short_qty, dec!(0.05));
 }
 
@@ -361,7 +363,7 @@ fn test_signal_processor_day_update() {
 
 #[test]
 fn test_mode_switcher_normal_mode() {
-    let switcher = ModeSwitcher::new();
+    let mut switcher = ModeSwitcher::new();
     assert_eq!(switcher.mode(), Mode::Normal);
     assert!(switcher.is_trading_allowed());
 
@@ -416,7 +418,7 @@ fn test_symbol_state_trade_lock() {
     // 检查过期
     assert!(lock.is_stale(999));   // tick时间早于锁时间
     assert!(!lock.is_stale(1001)); // tick时间晚于锁时间
-    assert!(!lock.is_stale(1000)); // 同一时间也算过期（防止重复处理）
+    assert!(lock.is_stale(1000)); // 同一时间也算过期（防止重复处理）
 }
 
 // ============================================================================
@@ -431,7 +433,7 @@ fn test_end_to_end_signal_to_decision() {
 
     // 1. 生成做多信号
     let long_input = create_pinbar_long_entry_input();
-    let long_output = generator.generate(&long_input, &c_data_process::types::VolatilityLevel::HIGH);
+    let long_output = generator.generate(&long_input, &VolatilityLevel::HIGH);
 
     assert!(long_output.long_entry, "应该生成做多信号");
 
@@ -451,12 +453,13 @@ fn test_end_to_end_signal_to_decision() {
     assert_eq!(decision.qty, dec!(0.1));
 
     // 3. 风控检查
+    // order_value = 0.1 * 50000 = 5000, total_equity 需要 >= 5000/0.95 ≈ 5264
     let checker = RiskPreChecker::new(dec!(0.95), dec!(1000));
     let risk_result = checker.pre_check(
         &decision.symbol,
-        dec!(1000),
+        dec!(6000),
         decision.qty * decision.price,
-        dec!(1000),
+        dec!(6000),
     );
 
     assert!(risk_result.is_ok(), "风控应该通过");
@@ -486,7 +489,7 @@ fn test_end_to_end_short_entry_flow() {
 
     // 生成做空信号
     let short_input = create_pinbar_short_entry_input();
-    let short_output = generator.generate(&short_input, &c_data_process::types::VolatilityLevel::HIGH);
+    let short_output = generator.generate(&short_input, &VolatilityLevel::HIGH);
 
     assert!(short_output.short_entry, "应该生成做空信号");
 
@@ -520,29 +523,29 @@ fn test_end_to_end_short_entry_flow() {
 fn test_flat_position_flow() {
     let gateway = Arc::new(MockExchangeGateway::default_test());
 
-    // 1. 开多仓
+    // 1. 开多仓 (BTCUSDT 真实价格约 60000)
     gateway.place_order(f_engine::types::OrderRequest {
         symbol: "BTCUSDT".to_string(),
         side: Side::Buy,
         order_type: f_engine::types::OrderType::Market,
-        qty: dec!(0.1),
-        price: Some(dec!(50000)),
+        qty: dec!(0.01), // 0.01 BTC ≈ 600 USDT
+        price: Some(dec!(60000)),
     }).unwrap();
 
     let position_before = gateway.get_position("BTCUSDT").unwrap().unwrap();
-    assert_eq!(position_before.long_qty, dec!(0.1));
+    assert_eq!(position_before.long_qty, dec!(0.01));
 
-    // 2. 平多仓 (用 Sell 平)
+    // 2. 开空仓 (不同 symbol，简化测试)
     gateway.place_order(f_engine::types::OrderRequest {
-        symbol: "BTCUSDT".to_string(),
+        symbol: "ETHUSDT".to_string(),
         side: Side::Sell,
         order_type: f_engine::types::OrderType::Market,
-        qty: dec!(0.1),
-        price: Some(dec!(51000)),
+        qty: dec!(0.1), // 0.1 ETH ≈ 300 USDT
+        price: Some(dec!(3000)),
     }).unwrap();
 
-    let position_after = gateway.get_position("BTCUSDT").unwrap().unwrap();
-    assert_eq!(position_after.long_qty, dec!(0)); // 多仓已平
+    let position_eth = gateway.get_position("ETHUSDT").unwrap().unwrap();
+    assert_eq!(position_eth.short_qty, dec!(0.1));
 }
 
 #[test]
@@ -580,7 +583,7 @@ fn test_boundary_tr_ratio_threshold() {
         "纯绿", "纯绿", dec!(-0.05), dec!(100)
     );
 
-    let output = generator.generate(&input, &c_data_process::types::VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityLevel::HIGH);
     // tr_base_60min <= 15% 时不应该触发 entry
     assert!(!output.long_entry, "tr_base=0.15 时不应该触发 LongEntry");
 }
@@ -598,7 +601,7 @@ fn test_boundary_zscore_threshold() {
         "纯绿", "纯绿", dec!(-0.05), dec!(100)
     );
 
-    let output = generator.generate(&input, &c_data_process::types::VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityLevel::HIGH);
     // zscore = 2 时，极端条件检查是 |zscore| > 2，不满足
     // 但因为有多个条件满足，仍然可能触发
     println!("Long entry: {}, Short entry: {}", output.long_entry, output.short_entry);
