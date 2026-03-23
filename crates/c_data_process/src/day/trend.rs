@@ -1,7 +1,13 @@
 use rust_decimal::Decimal;
+use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::error::Error;
+use std::io;
+use std::pin::Pin;
+use std::result::Result;
+use std::task::{Context, Poll};
 
 /// 大周期指标计算器
 ///

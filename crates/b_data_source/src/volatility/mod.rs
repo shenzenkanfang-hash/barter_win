@@ -4,8 +4,10 @@
 //! - 1m 3% / 15m 13% 高波动判断
 //! - 进入高波动时触发日志
 //! - 每分钟汇总所有高波动品种
+//! - 窗口灾备：内存盘 → 同步盘 → 自行累计
 
-use a_common::volatility::{KLineInput, VolatilityCalc, VolatilityStats};
+use a_common::config::Paths;
+use a_common::volatility::{KLineInput, VolatilityCalc, VolatilityStats, VolatilityState};
 use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -27,6 +29,51 @@ impl SymbolVolatility {
             calc: VolatilityCalc::new(),
             was_high_volatility: false,
             current_stats: VolatilityStats::default(),
+        }
+    }
+
+    /// 从内存盘加载灾备
+    pub fn load_from_memory(&mut self) -> bool {
+        let paths = Paths::new();
+        let path = Self::memory_path(&paths, &self.symbol);
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(state) = serde_json::from_str::<VolatilityState>(&content) {
+                    self.calc = VolatilityCalc::restore(state);
+                    if self.calc.is_valid() {
+                        tracing::info!("[VOL] Loaded from memory: {}", self.symbol);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 从同步盘加载灾备
+    pub fn load_from_sync(&mut self) -> bool {
+        let paths = Paths::new();
+        let path = Self::sync_path(&paths, &self.symbol);
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(state) = serde_json::from_str::<VolatilityState>(&content) {
+                    self.calc = VolatilityCalc::restore(state);
+                    if self.calc.is_valid() {
+                        tracing::info!("[VOL] Loaded from sync: {}", self.symbol);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 尝试所有加载方式：内存 → 同步 → 自行累计
+    pub fn try_load(&mut self) {
+        if !self.load_from_memory() {
+            if !self.load_from_sync() {
+                tracing::info!("[VOL] No valid backup, starting fresh: {}", self.symbol);
+            }
         }
     }
 
@@ -61,6 +108,20 @@ impl SymbolVolatility {
         stats
     }
 
+    /// 保存窗口到内存盘（K线闭合时调用）
+    pub fn save_window_to_memory(&self) {
+        let paths = Paths::new();
+        let path = Self::memory_path(&paths, &self.symbol);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let state = self.calc.get_state();
+        if let Ok(json) = serde_json::to_string(&state) {
+            let _ = std::fs::write(&path, json);
+            tracing::debug!("[VOL] Saved window to memory: {}", self.symbol);
+        }
+    }
+
     pub fn symbol(&self) -> &str {
         &self.symbol
     }
@@ -71,6 +132,22 @@ impl SymbolVolatility {
 
     pub fn get_stats(&self) -> VolatilityStats {
         self.current_stats
+    }
+
+    fn memory_path(paths: &Paths, symbol: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!(
+            "{}/volatility_{}.json",
+            paths.memory_backup_dir,
+            symbol.to_lowercase()
+        ))
+    }
+
+    fn sync_path(paths: &Paths, symbol: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!(
+            "{}/volatility_{}.json",
+            paths.disk_sync_dir,
+            symbol.to_lowercase()
+        ))
     }
 }
 
@@ -92,17 +169,28 @@ impl VolatilityManager {
         }
     }
 
-    /// 获取或创建品种检测器
+    /// 获取或创建品种检测器（带灾备加载）
     pub fn get_or_create(&mut self, symbol: &str) -> &mut SymbolVolatility {
         self.detectors
             .entry(symbol.to_string())
-            .or_insert_with(|| SymbolVolatility::new(symbol.to_string()))
+            .or_insert_with(|| {
+                let mut vol = SymbolVolatility::new(symbol.to_string());
+                vol.try_load();
+                vol
+            })
     }
 
     /// 更新品种波动率（纯内存计算，不写文件）
     pub fn update(&mut self, symbol: &str, kline: KLineInput) -> VolatilityStats {
         let detector = self.get_or_create(symbol);
         detector.update(kline)
+    }
+
+    /// K线闭合时保存窗口（由调用者触发）
+    pub fn save_window_on_close(&mut self, symbol: &str) {
+        if let Some(detector) = self.detectors.get_mut(symbol) {
+            detector.save_window_to_memory();
+        }
     }
 
     /// 检查是否需要输出每分钟汇总
