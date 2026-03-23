@@ -7,7 +7,8 @@
 //! 4. 订阅 Depth 订单簿 WS (仅 BTC 维护连接)
 //! 5. 定时打印账户余额
 
-use b_data_source::{BinanceApiGateway, Kline1mStream, Kline1dStream, DepthStream, Paths, FuturesDataSyncer};
+use a_common::BinanceApiGateway;
+use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 
 #[tokio::main]
