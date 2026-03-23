@@ -22,6 +22,7 @@ pub mod order_books;
 pub mod symbol_rules;
 pub mod recovery;
 pub mod misc;
+pub mod volatility;
 
 // Futures data modules
 pub mod futures;
@@ -46,6 +47,9 @@ pub use futures::{FuturesDataSyncer, FuturesSyncResult};
 
 // Re-exports - Trade settings
 pub use misc::{TradeSettings, PositionMode};
+
+// Re-exports - Volatility
+pub use volatility::{VolatilityManager, SymbolVolatility};
 
 #[cfg(test)]
 pub mod tests;

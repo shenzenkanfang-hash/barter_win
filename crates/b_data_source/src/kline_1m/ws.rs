@@ -312,7 +312,10 @@ impl Kline1mStream {
                             s.parse::<rust_decimal::Decimal>().unwrap_or(rust_decimal::Decimal::ZERO)
                         };
                         let timestamp_ms = t;
-                        let timestamp = Utc.timestamp_millis_opt(timestamp_ms).unwrap_or_else(Utc::now);
+                        let timestamp = match Utc.timestamp_millis_opt(timestamp_ms) {
+                            chrono::LocalResult::Single(t) => t,
+                            _ => chrono::Utc::now(),
+                        };
 
                         let kline_input = KLineInput {
                             open: parse_price(o),

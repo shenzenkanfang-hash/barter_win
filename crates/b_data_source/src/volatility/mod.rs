@@ -6,6 +6,7 @@
 //! - 每分钟汇总所有高波动品种
 
 use a_common::volatility::{KLineInput, VolatilityCalc, VolatilityStats};
+use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,8 @@ pub struct SymbolVolatility {
     calc: VolatilityCalc,
     /// 上次是否高波动（用于检测进入/退出）
     was_high_volatility: bool,
+    /// 当前统计值（用于日志输出）
+    current_stats: VolatilityStats,
 }
 
 impl SymbolVolatility {
@@ -23,12 +26,14 @@ impl SymbolVolatility {
             symbol,
             calc: VolatilityCalc::new(),
             was_high_volatility: false,
+            current_stats: VolatilityStats::default(),
         }
     }
 
     /// 每 tick 更新
     pub fn update(&mut self, kline: KLineInput) -> VolatilityStats {
         let stats = self.calc.update(kline);
+        self.current_stats = stats;
 
         // 检测是否进入高波动（1m 或 15m）
         let is_1m_high = stats.vol_1m >= self.calc.thresholds().0;
@@ -38,16 +43,16 @@ impl SymbolVolatility {
             tracing::warn!(
                 "[HIGH_VOL] 🔴 1m进入 | {} 1m={:.2}% 15m={:.2}% | {}",
                 self.symbol,
-                stats.vol_1m * 100,
-                stats.vol_15m * 100,
+                stats.vol_1m * dec!(100),
+                stats.vol_15m * dec!(100),
                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
             );
         } else if is_15m_high && !self.was_high_volatility {
             tracing::warn!(
                 "[HIGH_VOL] 🟠 15m进入 | {} 1m={:.2}% 15m={:.2}% | {}",
                 self.symbol,
-                stats.vol_1m * 100,
-                stats.vol_15m * 100,
+                stats.vol_1m * dec!(100),
+                stats.vol_15m * dec!(100),
                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
             );
         }
@@ -62,6 +67,10 @@ impl SymbolVolatility {
 
     pub fn is_high_volatility(&self) -> bool {
         self.was_high_volatility
+    }
+
+    pub fn get_stats(&self) -> VolatilityStats {
+        self.current_stats
     }
 }
 
@@ -122,7 +131,7 @@ impl VolatilityManager {
                 .iter()
                 .map(|v| {
                     let stats = v.get_stats();
-                    format!("{}: 1m={:.2}% 15m={:.2}%", v.symbol(), stats.vol_1m * 100, stats.vol_15m * 100)
+                    format!("{}: 1m={:.2}% 15m={:.2}%", v.symbol(), stats.vol_1m * dec!(100), stats.vol_15m * dec!(100))
                 })
                 .collect::<Vec<_>>()
                 .join(" | ");

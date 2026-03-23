@@ -14,6 +14,10 @@ pub mod claint;
 pub mod util;
 pub mod backup;
 pub mod exchange;
+pub mod volatility;
+
+// Re-exports - Volatility
+pub use volatility::{VolatilityCalc, VolatilityStats, VolatilityState, KLineInput};
 
 // Re-exports - API
 pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesData, RateLimit};

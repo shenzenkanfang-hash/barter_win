@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod check_table;
+pub mod types;
 
 // 周期策略模块
 pub mod h_15min;  // 高频15分钟策略检查
