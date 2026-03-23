@@ -1,5 +1,5 @@
 use a_common::{EngineError, ExchangeAccount, ExchangePosition, OrderResult};
-use crate::strategy::types::OrderRequest;
+use crate::types::OrderRequest;
 
 /// 交易所网关 trait
 ///

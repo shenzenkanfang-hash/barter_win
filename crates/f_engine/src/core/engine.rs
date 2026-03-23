@@ -1,11 +1,12 @@
 use e_risk_monitor::shared::account_pool::{AccountPool, CircuitBreakerState};
-use e_strategy::shared::check_table::CheckTable;
+use d_checktable::check_table::CheckTable;
 use e_risk_monitor::persistence::disaster_recovery::{DisasterRecovery, LocalPositionSnapshot as RecoveryPosition, OrderSnapshot as RecoveryOrder};
 use a_common::EngineError;
 use crate::order::gateway::ExchangeGateway;
 use e_risk_monitor::shared::market_status::{MarketStatus, MarketStatusDetector};
 use a_common::backup::MemoryBackup;
-use e_strategy::channel::mode::ModeSwitcher;
+use crate::types::{ModeSwitcher, StrategyId};
+use crate::order::mock_binance_gateway::{OrderResult, OrderStatus, MockAccount, MockPosition};
 use e_risk_monitor::risk::order_check::OrderCheck;
 use e_risk_monitor::persistence::PersistenceService;
 use e_risk_monitor::position::position_exclusion::PositionExclusionChecker;
@@ -18,6 +19,7 @@ use e_risk_monitor::shared::round_guard::{RoundGuard, RoundGuardScope};
 use crate::strategy_pool::StrategyPool;
 use e_risk_monitor::risk::thresholds::ThresholdConstants;
 use c_data_process::{EMA, RSI};
+use c_data_process::types::{OrderRequest, Side, OrderType};
 use b_data_source::{KLineSynthesizer, MarketStream, Period, Tick};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -25,8 +27,6 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use e_strategy::strategy::types::{OrderRequest, Side};
-use e_strategy::strategy::StrategyId;
 use tracing::{info, warn};
 
 /// 交易引擎 - 串联所有层
@@ -300,7 +300,7 @@ impl TradingEngine {
     /// 1. 风控预检 (锁外)
     /// 2. 调用 gateway 执行订单
     /// 3. 更新持仓
-    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<crate::order::mock_binance_gateway::OrderResult, a_common::EngineError> {
+    pub async fn execute_order(&mut self, order: OrderRequest) -> Result<OrderResult, a_common::EngineError> {
         let order_value = order.qty * order.price.unwrap_or(order.qty);
 
         // 1. 预占保证金
@@ -312,7 +312,7 @@ impl TradingEngine {
 
         // 3. 执行订单 (内部包含风控预检)
         let result = match order.order_type {
-            crate::strategy::types::OrderType::Market => {
+            OrderType::Market => {
                 self.order_executor.execute_market_order(
                     &order.symbol,
                     order.side,
@@ -320,7 +320,7 @@ impl TradingEngine {
                     order.price.unwrap_or(self.current_price),
                 )?
             }
-            crate::strategy::types::OrderType::Limit => {
+            OrderType::Limit => {
                 self.order_executor.execute_limit_order(
                     &order.symbol,
                     order.side,
@@ -331,7 +331,7 @@ impl TradingEngine {
         };
 
         // 4. 如果订单成功，更新持仓
-        if result.status == crate::order::mock_binance_gateway::OrderStatus::Filled {
+        if result.status == OrderStatus::Filled {
             let direction = match order.side {
                 Side::Long => Direction::Long,
                 Side::Short => Direction::Short,
@@ -408,12 +408,12 @@ impl TradingEngine {
     }
 
     /// 获取网关账户信息
-    pub fn get_gateway_account(&self) -> crate::order::mock_binance_gateway::MockAccount {
+    pub fn get_gateway_account(&self) -> MockAccount {
         self.gateway.get_account()
     }
 
     /// 获取网关持仓信息
-    pub fn get_gateway_position(&self, symbol: &str) -> Option<crate::order::mock_binance_gateway::MockPosition> {
+    pub fn get_gateway_position(&self, symbol: &str) -> Option<MockPosition> {
         self.gateway.get_position(symbol)
     }
 
@@ -778,7 +778,7 @@ mod tests {
         let order = OrderRequest {
             symbol: "BTCUSDT".to_string(),
             side: Side::Long,
-            order_type: crate::strategy::types::OrderType::Market,
+            order_type: OrderType::Market,
             price: Some(dec!(100.0)),
             qty: dec!(1.0),
         };

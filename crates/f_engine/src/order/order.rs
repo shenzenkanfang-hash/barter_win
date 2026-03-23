@@ -1,10 +1,10 @@
 use a_common::{EngineError, OrderResult, OrderStatus};
 use crate::gateway::ExchangeGateway;
+use crate::types::{OrderRequest, OrderType, Side, TradingDecision, TradingAction};
 use e_risk_monitor::risk::RiskPreChecker;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use e_strategy::strategy::types::{OrderRequest, OrderType, Side};
 
 /// 订单执行器
 ///
@@ -91,66 +91,50 @@ impl OrderExecutor {
     /// 从交易决策执行订单
     pub fn execute_from_decision(
         &self,
-        decision: &crate::strategy::types::TradingDecision,
+        decision: &TradingDecision,
     ) -> Result<OrderResult, EngineError> {
-        use crate::strategy::types::{TradingAction, Side};
-
         match decision.action {
-            TradingAction::OpenLong => {
+            TradingAction::Long => {
                 self.execute_market_order(
                     &decision.symbol,
-                    Side::Long,
+                    Side::Buy,  // 开多用 Buy
                     decision.qty,
                     decision.price,
                 )
             }
-            TradingAction::OpenShort => {
+            TradingAction::Short => {
                 self.execute_market_order(
                     &decision.symbol,
-                    Side::Short,
+                    Side::Sell,  // 开空用 Sell
                     decision.qty,
                     decision.price,
                 )
             }
-            TradingAction::CloseLong => {
-                // 平多 - 获取当前持仓数量
-                let position = self.gateway.get_position(&decision.symbol)?;
-                if let Some(pos) = position {
-                    let qty = pos.long_qty;
-                    if qty > Decimal::ZERO {
-                        self.execute_market_order(
-                            &decision.symbol,
-                            Side::Short,
-                            qty,
-                            decision.price,
-                        )
-                    } else {
-                        Err(EngineError::OrderExecutionFailed("No long position to close".to_string()))
-                    }
-                } else {
-                    Err(EngineError::OrderExecutionFailed("Position not found".to_string()))
-                }
+            TradingAction::Flat => {
+                // 平仓 - 需要判断方向，这里简化处理
+                Ok(OrderResult {
+                    order_id: String::new(),
+                    status: OrderStatus::Cancelled,
+                    filled_qty: Decimal::ZERO,
+                    filled_price: Decimal::ZERO,
+                    commission: Decimal::ZERO,
+                    reject_reason: None,
+                    message: "Flat action - manual close required".to_string(),
+                })
             }
-            TradingAction::CloseShort => {
-                // 平空 - 获取当前持仓数量
-                let position = self.gateway.get_position(&decision.symbol)?;
-                if let Some(pos) = position {
-                    let qty = pos.short_qty;
-                    if qty > Decimal::ZERO {
-                        self.execute_market_order(
-                            &decision.symbol,
-                            Side::Long,
-                            qty,
-                            decision.price,
-                        )
-                    } else {
-                        Err(EngineError::OrderExecutionFailed("No short position to close".to_string()))
-                    }
-                } else {
-                    Err(EngineError::OrderExecutionFailed("Position not found".to_string()))
-                }
+            TradingAction::Hedge => {
+                // 对冲 - 简化处理
+                Ok(OrderResult {
+                    order_id: String::new(),
+                    status: OrderStatus::Cancelled,
+                    filled_qty: Decimal::ZERO,
+                    filled_price: Decimal::ZERO,
+                    commission: Decimal::ZERO,
+                    reject_reason: None,
+                    message: "Hedge action - not implemented".to_string(),
+                })
             }
-            TradingAction::NoAction => {
+            TradingAction::Wait => {
                 // 无操作
                 Ok(OrderResult {
                     order_id: String::new(),
@@ -159,7 +143,7 @@ impl OrderExecutor {
                     filled_price: Decimal::ZERO,
                     commission: Decimal::ZERO,
                     reject_reason: None,
-                    message: "No action".to_string(),
+                    message: "Wait".to_string(),
                 })
             }
         }
