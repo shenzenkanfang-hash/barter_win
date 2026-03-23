@@ -1,6 +1,29 @@
 //! 加仓/对冲检查
 //!
-//! 逻辑组合：调用 signal_generator 获取信号，结合仓位状态判断
+//! ```text
+//! Add/Hedge Check Flow
+//! ──────────────────────────────────────────────
+//!   MinSignalInput
+//!       |
+//!       v
+//!   MinSignalGenerator::generate(input, vol_level)
+//!       |
+//!       v
+//!   MinSignalOutput { long_hedge, short_hedge, ... }
+//!       |
+//!       +---> output.long_hedge  (tr<15% AND dev<0 AND 6cond>=4)
+//!       +---> output.short_hedge (tr<15% AND dev>0 AND 6cond>=4)
+//!       |
+//!       v
+//!   output.long_hedge OR output.short_hedge
+//!       |
+//!       v
+//!   CheckSignal::Add
+//! ──────────────────────────────────────────────
+//!
+//! 触发条件：基础波动率<15% 且 价格偏离方向正确 且 6个条件>=4
+//! - long_hedge: 回落对冲，tr_base_60min<15% AND price_deviation<0 AND 6cond>=4
+//! - short_hedge: 回升对冲，tr_base_60min<15% AND price_deviation>0 AND 6cond>=4
 
 use crate::types::MinSignalInput;
 use crate::h_15m::signal_generator::MinSignalGenerator;

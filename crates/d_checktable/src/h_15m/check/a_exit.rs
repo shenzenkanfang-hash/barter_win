@@ -1,6 +1,29 @@
 //! 退出检查
 //!
-//! 逻辑组合：调用 signal_generator 获取信号，结合仓位状态判断
+//! ```text
+//! Exit Check Flow
+//! ──────────────────────────────────────────────
+//!   MinSignalInput
+//!       |
+//!       v
+//!   MinSignalGenerator::generate(input, vol_level)
+//!       |
+//!       v
+//!   MinSignalOutput { long_exit, short_exit, ... }
+//!       |
+//!       +---> output.long_exit  (pin>=4 AND pos_norm_60>80)
+//!       +---> output.short_exit (pin>=4 AND pos_norm_60<20)
+//!       |
+//!       v
+//!   output.long_exit OR output.short_exit
+//!       |
+//!       v
+//!   CheckSignal::Exit
+//! ──────────────────────────────────────────────
+//!
+//! 触发条件：pin条件>=4 且 价格位置到周期极点
+//! - long_exit: pos_norm_60 > 80 (多头持仓，到达周期高点)
+//! - short_exit: pos_norm_60 < 20 (空头持仓，到达周期低点)
 
 use crate::types::MinSignalInput;
 use crate::h_15m::signal_generator::MinSignalGenerator;

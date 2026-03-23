@@ -5,6 +5,37 @@ use rust_decimal_macros::dec;
 use crate::types::{MinSignalInput, MinSignalOutput, VolatilityLevel};
 
 /// 分钟级信号生成器（纯指标判断）
+///
+/// ```text
+/// Pin Condition Scoring (7 conditions, satisfied >= 4 triggers entry/exit)
+/// ─────────────────────────────────────────────────────────────────────────
+///  #  Condition                      Threshold                       Count
+/// ─────────────────────────────────────────────────────────────────────────
+///  1  extreme_zscore                |zscore_14_1m| > 2 OR           +1
+///                                    |zscore_1h_1m| > 2
+///  2  extreme_vol (tr_ratio)         tr_ratio_60min_5h > 1 OR       +1
+///                                    tr_ratio_10min_1h > 1
+///  3  extreme_pos                    pos_norm_60 > 80 OR < 20        +1
+///  4  extreme_speed (acc_percentile) acc_percentile_1h > 90          +1
+///  5  extreme_bg_color              pine_bg_color == "纯绿" OR       +1
+///                                    pine_bg_color == "纯红"
+///  6  extreme_bar_color             pine_bar_color == "纯绿" OR      +1
+///                                    pine_bar_color == "纯红"
+///  7  extreme_price_deviation        |price_deviation_horizontal_    +1
+///                                    position| == 100
+/// ─────────────────────────────────────────────────────────────────────────
+///                                                     pin_satisfied: 0-7
+///
+/// Signal Logic:
+/// ────────────
+/// long_entry    : tr_base_60min > 15% AND price_deviation < 0 AND pin >= 4
+/// short_entry   : tr_base_60min > 15% AND price_deviation > 0 AND pin >= 4
+/// long_exit    : pin >= 4 AND pos_norm_60 > 80
+/// short_exit   : pin >= 4 AND pos_norm_60 < 20
+/// long_hedge   : tr_base_60min < 15% AND price_deviation < 0 AND 6 cond >= 4
+/// short_hedge  : tr_base_60min < 15% AND price_deviation > 0 AND 6 cond >= 4
+/// exit_high_vol: tr_base_60min < 15% AND 3 cond >= 2
+/// ```
 pub struct MinSignalGenerator;
 
 impl MinSignalGenerator {

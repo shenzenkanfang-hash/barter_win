@@ -1,7 +1,30 @@
 //! 检查链入口
 //!
-//! 提供统一的检查链执行入口
-//! 从 SignalProcessor 获取指标数据，执行各检查
+//! ```text
+//! Check Chain Flow (优先级从左到右，第一个信号胜出)
+//!
+//!   run_check_chain(symbol, input)
+//!           |
+//!     +-----+-----+-----+-----+
+//!     |     |     |     |     |
+//!     v     v     v     v     v
+//!   a_exit b_close d_add e_open
+//!     |     |      |     |
+//!     v     v      v     v
+//!   Exit  [始终]  Add   Open
+//!   (最高) false (最低)
+//!     |           |
+//!     +-----+-----+
+//!           |
+//!           v
+//!     TriggerEvent
+//!           |
+//!           v
+//!     TradingEngine
+//! ```
+//!
+//! 注意：检查逻辑上顺序执行（优先级固定），但实际在线程池并发执行以提高吞吐。
+//! 信号优先级：Exit > Close > Add > Open（由 Vec 中的顺序决定）。
 
 use crate::h_15m::check::{a_exit, b_close, d_add, e_open};
 use crate::types::MinSignalInput;

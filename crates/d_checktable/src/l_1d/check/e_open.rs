@@ -1,6 +1,29 @@
 //! 开仓检查
 //!
-//! 逻辑组合：调用 signal_generator 获取信号
+//! ```text
+//! Open Check Flow (日线)
+//! ──────────────────────────────────────────────
+//!   DaySignalInput
+//!       |
+//!       v
+//!   DaySignalGenerator::generate(input, vol_level)
+//!       |
+//!       v
+//!   DaySignalOutput { long_entry, short_entry, ... }
+//!       |
+//!       +---> output.long_entry  (all_green AND vol AND ma5_pos>70)
+//!       +---> output.short_entry (all_red_purple AND vol AND ma5_pos<30)
+//!       |
+//!       v
+//!   output.long_entry OR output.short_entry
+//!       |
+//!       v
+//!   CheckSignal::Open
+//! ──────────────────────────────────────────────
+//!
+//! 触发条件：
+//! - long_entry: 全部3组 Pine 颜色=纯绿 AND (tr>1 OR tr>1) AND ma5_pos>70
+//! - short_entry: 全部3组 Pine 颜色=纯红/紫色 AND (tr>1 OR tr>1) AND ma5_pos<30
 
 use crate::types::DaySignalInput;
 use crate::l_1d::signal_generator::DaySignalGenerator;

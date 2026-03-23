@@ -1,6 +1,29 @@
 //! 加仓/对冲检查
 //!
-//! 逻辑组合：调用 signal_generator 获取信号
+//! ```text
+//! Add/Hedge Check Flow (日线)
+//! ──────────────────────────────────────────────
+//!   DaySignalInput
+//!       |
+//!       v
+//!   DaySignalGenerator::generate(input, vol_level)
+//!       |
+//!       v
+//!   DaySignalOutput { long_hedge, short_hedge, ... }
+//!       |
+//!       +---> output.long_hedge  (max_bg=="淡绿" AND ma5_pos>50)
+//!       +---> output.short_hedge (max_bg=="淡红" AND ma5_pos<50)
+//!       |
+//!       v
+//!   output.long_hedge OR output.short_hedge
+//!       |
+//!       v
+//!   CheckSignal::Add
+//! ──────────────────────────────────────────────
+//!
+//! 触发条件：
+//! - long_hedge (回落对冲): 最大周期背景=淡绿 且 ma5_pos>50
+//! - short_hedge (回升对冲): 最大周期背景=淡红 且 ma5_pos<50
 
 use crate::types::DaySignalInput;
 use crate::l_1d::signal_generator::DaySignalGenerator;

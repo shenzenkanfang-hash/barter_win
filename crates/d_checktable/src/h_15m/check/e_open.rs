@@ -1,6 +1,29 @@
 //! 开仓检查
 //!
-//! 逻辑组合：调用 signal_generator 获取信号，结合仓位状态判断
+//! ```text
+//! Open Check Flow
+//! ──────────────────────────────────────────────
+//!   MinSignalInput
+//!       |
+//!       v
+//!   MinSignalGenerator::generate(input, vol_level)
+//!       |
+//!       v
+//!   MinSignalOutput { long_entry, short_entry, ... }
+//!       |
+//!       +---> output.long_entry  (tr>15% AND dev<0 AND pin>=4)
+//!       +---> output.short_entry (tr>15% AND dev>0 AND pin>=4)
+//!       |
+//!       v
+//!   output.long_entry OR output.short_entry
+//!       |
+//!       v
+//!   CheckSignal::Open
+//! ──────────────────────────────────────────────
+//!
+//! 触发条件：基础波动率>15% 且 价格偏离方向正确 且 pin条件>=4
+//! - long_entry: tr_base_60min>15% AND price_deviation<0 AND pin>=4
+//! - short_entry: tr_base_60min>15% AND price_deviation>0 AND pin>=4
 
 use crate::types::MinSignalInput;
 use crate::h_15m::signal_generator::MinSignalGenerator;

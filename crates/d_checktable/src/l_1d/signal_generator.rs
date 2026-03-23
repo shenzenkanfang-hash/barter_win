@@ -5,6 +5,47 @@ use rust_decimal_macros::dec;
 use crate::types::{DaySignalInput, DaySignalOutput, VolatilityLevel};
 
 /// 日线级信号生成器（纯指标判断）
+///
+/// ```text
+/// Day Signal Logic (不同于 h_15m 的 7 条件模式)
+/// ─────────────────────────────────────────────────────────────────────
+///
+/// Pine Color Groups (3 组，需全部满足):
+///   12_26 组: pine_bar_color_12_26 + pine_bg_color_12_26
+///   20_50 组: pine_bar_color_20_50 + pine_bg_color_20_50
+///   100_200 组: pine_bar_color_100_200 + pine_bg_color_100_200
+///
+/// Entry Conditions:
+/// ───────────────
+/// long_entry:
+///   all_green AND (tr_ratio_5d_20d>1 OR tr_ratio_20d_60d>1)
+///   AND ma5_in_20d_ma5_pos > 70
+///   [2/2 conditions must pass]
+///
+/// short_entry:
+///   all_red_purple AND (tr_ratio_5d_20d>1 OR tr_ratio_20d_60d>1)
+///   AND ma5_in_20d_ma5_pos < 30
+///   [2/2 conditions must pass]
+///
+/// Exit Conditions:
+/// ──────────────
+/// long_exit: max_valid_bg != "纯绿" AND ma5_pos > 50  [2/2]
+/// short_exit: max_valid_bg != "纯红" AND ma5_pos < 50  [2/2]
+///   (max_valid_bg: 优先取最大周期 100_200 > 20_50 > 12_26)
+///
+/// Hedge Conditions:
+/// ───────────────
+/// long_hedge: max_valid_bg == "淡绿" AND ma5_pos > 50
+/// short_hedge: max_valid_bg == "淡红" AND ma5_pos < 50
+///
+/// Color Definitions:
+/// ───────────────
+/// 纯绿 = pure green (bullish)
+/// 纯红 = pure red (bearish)
+/// 紫色 = purple
+/// 淡绿 = light green
+/// 淡红 = light red
+/// ```
 pub struct DaySignalGenerator;
 
 impl DaySignalGenerator {

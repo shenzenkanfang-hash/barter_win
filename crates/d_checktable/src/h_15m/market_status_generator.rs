@@ -5,6 +5,32 @@ use rust_decimal_macros::dec;
 use crate::types::{MarketStatus, VolatilityLevel, MinMarketStatusInput, MinMarketStatusOutput};
 
 /// 分钟级市场状态生成器
+///
+/// ```text
+/// Volatility Level Decision Tree
+/// ─────────────────────────────────────────────
+///   tr_ratio_15min > 13%  ──> HIGH
+///   tr_ratio_15min < 3%  ──> LOW
+///   otherwise             ──> NORMAL
+/// ─────────────────────────────────────────────
+///
+/// Market Status Decision Tree
+/// ───────────────────────────────────────────────────────────
+///   if tr_base_60min > 15% AND pin_conditions >= 2
+///       ──> PIN (with reason)
+///   else if volatility == LOW AND tr_ratio_15min < 1.0
+///       AND |zscore| < 0.5
+///       ──> RANGE
+///   else
+///       ──> TREND
+/// ───────────────────────────────────────────────────────────
+///
+/// PIN Conditions (simplified, 4 conditions):
+///   1. |zscore| > 2
+///   2. tr_ratio_15min > 13%
+///   3. price_position > 90% or < 10%
+///   4. tr_base_60min > 20%
+/// ```
 pub struct MinMarketStatusGenerator {
     data_timeout_seconds: i64,
 }

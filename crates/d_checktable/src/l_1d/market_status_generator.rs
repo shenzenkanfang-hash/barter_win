@@ -5,6 +5,31 @@ use rust_decimal_macros::dec;
 use crate::types::{MarketStatus, VolatilityLevel, DayMarketStatusInput, DayMarketStatusOutput, DaySignalInput};
 
 /// 日线级市场状态生成器
+///
+/// ```text
+/// Volatility Level Decision Tree (日线级阈值 > h_15m)
+/// ─────────────────────────────────────────────────
+///   tr_ratio_5d_20d > 1.5  ─┐
+///   OR                     ──> HIGH
+///   tr_ratio_20d_60d > 1.5 ─┘
+/// ─────────────────────────────────────────────────
+///   tr_ratio_5d_20d < 0.5  ─┐
+///   AND                     ──> LOW
+///   tr_ratio_20d_60d < 0.5 ─┘
+/// ─────────────────────────────────────────────────
+///   otherwise               ──> NORMAL
+/// ─────────────────────────────────────────────────
+///
+/// Market Status Decision Tree:
+/// ─────────────────────────────────────────────────
+///   if pine_color == "纯绿" or "纯红"  ──> TREND
+///   else if volatility_level == LOW       ──> RANGE
+///   else                                  ──> TREND
+/// ─────────────────────────────────────────────────
+///
+/// 注意：日线级使用更大的 TR 阈值 (1.5 vs h_15m 的 1.0)
+/// 因为日线级波动范围更大，需要更大的阈值才能判断为极端。
+/// ```
 pub struct DayMarketStatusGenerator {
     data_timeout_seconds: i64,
 }
