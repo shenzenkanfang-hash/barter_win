@@ -6,8 +6,8 @@
 //!
 //! 分层架构：
 //! - ws/     - WebSocket 数据接口（K线、深度）
-//! - api/    - REST API 数据接口（账户、持仓）
-//! - 其他模块 - 内部实现（symbol_rules, recovery, volatility等）
+//! - api/    - REST API 数据接口（账户、持仓、交易设置）
+//! - 其他模块 - 内部实现（recovery, volatility等）
 
 // Re-exports from a_common (仅基础设施错误和配置)
 pub use a_common::MarketError;
@@ -16,7 +16,6 @@ pub use a_common::logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleChe
 
 // Sub-modules
 pub mod recovery;
-pub mod misc;
 pub mod volatility;
 pub mod models;
 
@@ -33,7 +32,7 @@ pub use api::symbol_registry::SymbolRegistry;
 pub use recovery::{CheckpointData, CheckpointManager, RedisRecovery};
 
 // Re-exports - Trade settings
-pub use misc::{TradeSettings, PositionMode};
+pub use api::trade_settings::{TradeSettings, PositionMode};
 
 // Re-exports - Volatility
 pub use volatility::{VolatilityManager, SymbolVolatility};
