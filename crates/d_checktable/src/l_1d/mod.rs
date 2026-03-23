@@ -5,4 +5,7 @@
 
 #![forbid(unsafe_code)]
 
-pub mod check;      // 检查: a_exit, b_close, d_add, e_open, check_chain, TriggerEvent
+pub mod check;      // 检查: a_exit, b_close, d_add, e_open, check_chain
+
+// 导出检查链类型
+pub use check::check_chain::{CheckSignal, TriggerEvent, run_check_chain};

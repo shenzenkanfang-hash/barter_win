@@ -6,4 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod 信号;           // 信号: 市场状态、信号、价格控制生成器
-pub mod check;        // 检查: a_exit, b_close, d_add, e_open, check_chain, TriggerEvent
+pub mod check;        // 检查: a_exit, b_close, d_add, e_open, check_chain
+
+// 导出检查链类型
+pub use check::check_chain::{CheckSignal, TriggerEvent, run_check_chain};
