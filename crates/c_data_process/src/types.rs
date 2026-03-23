@@ -304,10 +304,15 @@ pub struct TradingTriggerInput {
 /// 交易决策
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingDecision {
+    pub symbol: String,
     pub action: TradingAction,
     pub reason: String,
     pub confidence: u8,
     pub level: StrategyLevel,
+    /// 数量
+    pub qty: Decimal,
+    /// 价格
+    pub price: Decimal,
     /// 信号生成时间戳 (秒)
     pub timestamp: i64,
 }

@@ -272,22 +272,130 @@ impl TradingEngine {
 
     /// 执行交易决策
     pub async fn execute_decision(&mut self, symbol: &str, decision: TradingDecision) -> bool {
-        // 风控预检
+        // 1. 风控预检
+        if !self.mode_switcher.is_trading_allowed() {
+            warn!("Trading not allowed");
+            return false;
+        }
+
+        // 2. 风控预检 - 订单价值检查
+        let order_value = decision.qty * decision.price;
+        if !self.pre_trade_check(order_value) {
+            warn!("Pre-trade check failed for {}", symbol);
+            return false;
+        }
+
+        // 3. 构建订单请求
+        let side = match decision.action {
+            TradingAction::Long => Side::Buy,
+            TradingAction::Short => Side::Sell,
+            TradingAction::Flat => {
+                // 平仓 - 需要根据当前持仓方向决定
+                info!("Flat action received for {}", symbol);
+                return self.execute_flat(symbol, decision.price).await;
+            }
+            TradingAction::Hedge | TradingAction::Wait => {
+                // 不执行
+                info!("No action: {:?}", decision.action);
+                return false;
+            }
+        };
+
+        // 4. 执行订单
+        let order = OrderRequest {
+            symbol: symbol.to_string(),
+            side,
+            order_type: OrderType::Market,
+            qty: decision.qty,
+            price: Some(decision.price),
+        };
+
+        match self.execute_order_internal(order).await {
+            Ok(_) => {
+                info!("Order executed: {} {:?} {}@{}",
+                    symbol, side, decision.qty, decision.price);
+
+                // 更新交易锁
+                let mut states = self.symbol_states.write();
+                if let Some(state) = states.get_mut(symbol) {
+                    state.trade_lock.update(
+                        decision.timestamp,
+                        decision.qty,
+                        decision.price,
+                    );
+                }
+
+                true
+            }
+            Err(e) => {
+                warn!("Order failed for {}: {}", symbol, e);
+                false
+            }
+        }
+    }
+
+    /// 执行平仓
+    async fn execute_flat(&mut self, symbol: &str, price: Decimal) -> bool {
+        // 获取当前持仓方向 (同步调用)
+        if let Ok(Some(pos)) = self.gateway.get_position(symbol) {
+            let side = match pos.direction.as_str() {
+                "long" => Side::Sell,
+                "short" => Side::Buy,
+                _ => return false,
+            };
+
+            let order = OrderRequest {
+                symbol: symbol.to_string(),
+                side,
+                order_type: OrderType::Market,
+                qty: pos.quantity,
+                price: Some(price),
+            };
+
+            match self.execute_order_internal(order).await {
+                Ok(_) => {
+                    info!("Flat position: {} qty={}", symbol, pos.quantity);
+                    true
+                }
+                Err(e) => {
+                    warn!("Flat failed for {}: {}", symbol, e);
+                    false
+                }
+            }
+        } else {
+            info!("No position to flat for {}", symbol);
+            false
+        }
+    }
+
+    /// 内部订单执行
+    async fn execute_order_internal(&mut self, order: OrderRequest) -> Result<a_common::OrderResult, EngineError> {
+        self.order_executor.execute(
+            &order.symbol,
+            order.side,
+            order.qty,
+            order.price.unwrap_or(self.current_price),
+            order.order_type,
+        )
+    }
+
+    /// 风控预检
+    fn pre_trade_check(&self, order_value: Decimal) -> bool {
         if !self.mode_switcher.is_trading_allowed() {
             return false;
         }
 
-        // 构建订单 (简化版，需要 symbol, qty, price 等字段)
-        // 注意：c_data_process 的 TradingDecision 没有这些字段
-        // 这里需要根据实际业务逻辑调整
-        info!("Executing decision: {:?}", decision.action);
+        // 检查订单价值是否合理
+        if order_value <= Decimal::ZERO {
+            return false;
+        }
+
+        // TODO: 添加更多风控检查
+        // - 账户余额检查
+        // - 持仓限制检查
+        // - 风险敞口检查
 
         true
-    }
-
-    /// 风控预检
-    fn pre_trade_check(&self) -> bool {
-        self.mode_switcher.is_trading_allowed()
     }
 
     /// 停止引擎
