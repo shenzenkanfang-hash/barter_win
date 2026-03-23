@@ -18,14 +18,12 @@ use e_risk_monitor::position::position_exclusion::PositionExclusionChecker;
 use e_risk_monitor::shared::market_status::MarketStatusDetector;
 use e_risk_monitor::persistence::disaster_recovery::DisasterRecovery;
 use e_risk_monitor::persistence::PersistenceService;
-use e_risk_monitor::position::position_manager::Direction;
 use d_checktable::check_table::CheckTable;
 use a_common::EngineError;
 use a_common::backup::MemoryBackup;
 use crate::order::gateway::ExchangeGateway;
 use crate::order::OrderExecutor;
 use crate::core::strategy_pool::StrategyPool;
-use c_data_process::{EMA, RSI};
 use fnv::FnvHashMap;
 use futures::future::join_all;
 use parking_lot::{Mutex, RwLock};
@@ -42,9 +40,6 @@ use tracing::{info, warn};
 pub struct TradingEngine {
     market_stream: Arc<Mutex<Box<dyn MarketStream>>>,
     kline_1m: KLineSynthesizer,
-    ema_fast: EMA,
-    ema_slow: EMA,
-    rsi: RSI,
     risk_checker: Arc<RiskPreChecker>,
     risk_rechecker: RiskReChecker,
     mode_switcher: ModeSwitcher,
@@ -100,9 +95,6 @@ impl TradingEngine {
         Self {
             market_stream: Arc::new(Mutex::new(market_stream)),
             kline_1m: KLineSynthesizer::new(symbol.clone(), Period::Minute(1)),
-            ema_fast: EMA::new(12),
-            ema_slow: EMA::new(26),
-            rsi: RSI::new(14),
             risk_checker,
             risk_rechecker: RiskReChecker::new(),
             mode_switcher: ModeSwitcher::new(),
@@ -234,40 +226,6 @@ impl TradingEngine {
         }
 
         false
-    }
-
-    /// 检查日线级策略
-    fn check_daily_strategies_batch(&mut self) {
-        let symbols: Vec<String> = self.symbol_states.read().keys().cloned().collect();
-
-        for symbol in symbols {
-            self.check_daily_strategy(&symbol);
-        }
-    }
-
-    /// 检查单品种日线级策略
-    fn check_daily_strategy(&mut self, symbol: &str) {
-        let now_ts = chrono::Utc::now().timestamp();
-
-        let mut states = self.symbol_states.write();
-        let state = match states.get_mut(symbol) {
-            Some(s) => s,
-            None => return,
-        };
-
-        if state.last_daily_request_ts == 0 {
-            state.record_daily_request(now_ts);
-        }
-
-        if state.is_daily_timeout(now_ts) {
-            warn!("Daily timeout for {}", symbol);
-            self.mode_switcher.set_mode(Mode::Maintenance);
-            return;
-        }
-
-        if let Some((decision, _)) = self.signal_processor.get_day_signal(symbol) {
-            state.record_daily_ok(now_ts, decision);
-        }
     }
 
     /// 执行交易决策
