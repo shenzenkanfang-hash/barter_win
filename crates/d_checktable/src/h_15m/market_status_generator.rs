@@ -64,7 +64,7 @@ impl MinMarketStatusGenerator {
     }
 
     /// 判断波动率等级
-    fn determine_volatility_level(&self, tr_15min: Decimal) -> VolatilityLevel {
+    pub fn determine_volatility_level(&self, tr_15min: Decimal) -> VolatilityLevel {
         if tr_15min > dec!(0.13) {
             VolatilityLevel::HIGH
         } else if tr_15min < dec!(0.03) {

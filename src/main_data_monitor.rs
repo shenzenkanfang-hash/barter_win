@@ -9,7 +9,7 @@
 use clap::Parser;
 use chrono::{DateTime, Local, TimeZone, Timelike, Utc};
 use futures_util::StreamExt;
-use c_data_process::{VolatilityDetector, VolatilityStats};
+use a_common::volatility::{VolatilityCalc, VolatilityStats};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Serialize;
@@ -51,6 +51,41 @@ struct TradeRecord {
     price: String,
     qty: String,
     side: String,
+}
+
+// ============================================================================
+// 本地 VolatilityDetector 实现 (适配现有代码)
+// ============================================================================
+
+/// 简化的波动率检测器 (使用 a_common::volatility::VolatilityCalc)
+struct VolatilityDetector {
+    calc: VolatilityCalc,
+    last_price: Decimal,
+}
+
+impl VolatilityDetector {
+    fn new(_symbol: String) -> Self {
+        Self {
+            calc: VolatilityCalc::new(),
+            last_price: Decimal::ZERO,
+        }
+    }
+
+    fn update(&mut self, price: Decimal, timestamp: DateTime<Utc>) -> VolatilityStats {
+        // 构建 KLineInput (使用 price 作为 open/high/low/close)
+        let kline = a_common::volatility::KLineInput {
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            timestamp,
+        };
+        self.calc.update(kline)
+    }
+
+    fn thresholds(&self) -> (Decimal, Decimal) {
+        (dec!(0.03), dec!(0.13))
+    }
 }
 
 /// 高波动信号记录

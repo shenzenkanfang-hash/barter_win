@@ -5,7 +5,7 @@ members = [
     "crates/c_data_process",
     "crates/d_checktable",
     "crates/e_risk_monitor",
-    # "crates/f_engine",  # TODO: 编译错误，待修复
+    "crates/f_engine",
     "crates/g_test",
 ]
 resolver = "3"
