@@ -324,13 +324,9 @@ impl Kline1mStream {
 
                         // 每 tick 更新波动率（这是项目的基石）
                         let _vol_stats = self.volatility_manager.update(symbol, kline_input);
-                        tracing::debug!(
-                            "Volatility update for {}: 1m={:.4}, 15m={:.4}, high={}",
-                            symbol,
-                            _vol_stats.vol_1m,
-                            _vol_stats.vol_15m,
-                            _vol_stats.is_high_volatility
-                        );
+
+                        // 检查是否需要输出每分钟汇总
+                        self.volatility_manager.check_and_log_summary();
                     }
 
                     // K线闭合时，写入历史目录（结构化格式）
