@@ -5,9 +5,10 @@
 
 #![forbid(unsafe_code)]
 
-pub mod market_status_generator;  // 通用市场状态生成器
-pub mod signal;                   // 信号生成器模块
-pub mod check;                    // 检查: a_exit, b_close, d_add, e_open, check_chain
+pub mod market_status_generator;
+pub mod signal_generator;
+pub mod price_control_generator;
+pub mod check;
 
 // 导出检查链类型
 pub use check::check_chain::{CheckSignal, TriggerEvent, run_check_chain};
