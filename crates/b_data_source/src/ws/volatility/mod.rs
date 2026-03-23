@@ -1,9 +1,9 @@
-//! 高波动检测模块（简化版）
+//! 高波动检测模块
 //!
 //! 设计原则：
 //! - 被动驱动：只有收到 1m K线闭合时才计算
-//! - 单一文件：所有品种汇总到一个 volatility/summary.json
-//! - 最小数据：只保存 15m close 列表 + 更新时间
+//! - 每个品种独立文件：rolling_15m/{symbol}.json（15min close列表 + timestamp）
+//! - 汇总文件：volatility/summary.json（所有品种的波动率排名）
 //! - 加锁计算：所有品种一次性计算，不逐个处理
 
 use a_common::config::Paths;
@@ -15,6 +15,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// 单个品种的15min rolling window文件格式
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rolling15mWindow {
+    pub close: Vec<Decimal>,
+    pub timestamp: i64,
+}
 
 /// 单个品种的高波动检测器
 pub struct SymbolVolatility {
@@ -108,19 +115,60 @@ pub struct VolatilityManager {
     last_summary_time: RwLock<Instant>,
     summary_interval: Duration,
     summary_path: std::path::PathBuf,
+    /// 15min rolling window 文件目录
+    rolling_15m_dir: std::path::PathBuf,
 }
 
 impl VolatilityManager {
     pub fn new() -> Self {
         let paths = Paths::new();
         let summary_path = std::path::PathBuf::from(format!("{}/volatility/summary.json", paths.memory_backup_dir));
+        let rolling_15m_dir = std::path::PathBuf::from(format!("{}/rolling_15m", paths.memory_backup_dir));
         Self {
             detectors: RwLock::new(HashMap::new()),
             rank: RwLock::new(VolatilityRank::new()),
             last_summary_time: RwLock::new(Instant::now()),
             summary_interval: Duration::from_secs(60),
             summary_path,
+            rolling_15m_dir,
         }
+    }
+
+    /// 保存单个品种的15min rolling window到文件
+    pub fn save_rolling_15m(&self, symbol: &str) {
+        let detectors = self.detectors.read();
+        if let Some(vol) = detectors.get(symbol) {
+            let state = vol.read().get_state();
+            let (_symbol, closes, _count) = state;
+            if closes.is_empty() {
+                return;
+            }
+            let window = Rolling15mWindow {
+                close: closes,
+                timestamp: chrono::Utc::now().timestamp(),
+            };
+            let path = self.rolling_15m_dir.join(format!("{}.json", symbol.to_lowercase()));
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(json) = serde_json::to_string(&window) {
+                let _ = std::fs::write(&path, json);
+            }
+        }
+    }
+
+    /// 从文件加载单个品种的15min rolling window
+    pub fn load_rolling_15m(&self, symbol: &str) -> Option<Rolling15mWindow> {
+        let path = self.rolling_15m_dir.join(format!("{}.json", symbol.to_lowercase()));
+        if !path.exists() {
+            return None;
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(window) = serde_json::from_str::<Rolling15mWindow>(&content) {
+                return Some(window);
+            }
+        }
+        None
     }
 
     /// 获取或创建品种检测器

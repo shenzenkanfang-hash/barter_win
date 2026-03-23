@@ -337,6 +337,8 @@ impl Kline1mStream {
                         let _ = self.write_to_history(symbol, kline);
                         // K线闭合时保存波动率窗口（灾备到汇总文件）
                         self.volatility_manager.save_summary();
+                        // 保存15min rolling window（每个品种独立文件）
+                        self.volatility_manager.save_rolling_15m(symbol);
                     }
                     // 写入条件：收盘 或 超时(5秒)
                     if self.should_write(symbol, is_closed) {
