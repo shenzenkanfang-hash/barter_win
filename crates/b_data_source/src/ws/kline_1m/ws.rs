@@ -335,8 +335,8 @@ impl Kline1mStream {
                     // K线闭合时，写入历史目录（结构化格式）
                     if is_closed {
                         let _ = self.write_to_history(symbol, kline);
-                        // K线闭合时保存波动率窗口（灾备）
-                        self.volatility_manager.save_window_on_close(symbol);
+                        // K线闭合时保存波动率窗口（灾备到汇总文件）
+                        self.volatility_manager.save_summary();
                     }
                     // 写入条件：收盘 或 超时(5秒)
                     if self.should_write(symbol, is_closed) {
