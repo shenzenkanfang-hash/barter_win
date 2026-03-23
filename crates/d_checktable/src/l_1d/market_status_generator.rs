@@ -2,7 +2,7 @@
 
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use crate::types::{MarketStatus, VolatilityLevel, DayMarketStatusInput, DayMarketStatusOutput};
+use crate::types::{MarketStatus, VolatilityLevel, DayMarketStatusInput, DayMarketStatusOutput, DaySignalInput};
 
 /// 日线级市场状态生成器
 pub struct DayMarketStatusGenerator {
@@ -37,8 +37,19 @@ impl DayMarketStatusGenerator {
     }
 
     /// 判断波动率等级（基于 tr_ratio_5d_20d 和 tr_ratio_20d_60d）
-    fn determine_volatility_level(&self, input: &DayMarketStatusInput) -> VolatilityLevel {
+    pub fn determine_volatility_level(&self, input: &DayMarketStatusInput) -> VolatilityLevel {
         // 日线级使用更大的阈值
+        if input.tr_ratio_5d_20d > dec!(1.5) || input.tr_ratio_20d_60d > dec!(1.5) {
+            VolatilityLevel::HIGH
+        } else if input.tr_ratio_5d_20d < dec!(0.5) && input.tr_ratio_20d_60d < dec!(0.5) {
+            VolatilityLevel::LOW
+        } else {
+            VolatilityLevel::NORMAL
+        }
+    }
+
+    /// 判断波动率等级（基于 DaySignalInput）
+    pub fn determine_volatility_level_from_signal(&self, input: &DaySignalInput) -> VolatilityLevel {
         if input.tr_ratio_5d_20d > dec!(1.5) || input.tr_ratio_20d_60d > dec!(1.5) {
             VolatilityLevel::HIGH
         } else if input.tr_ratio_5d_20d < dec!(0.5) && input.tr_ratio_20d_60d < dec!(0.5) {

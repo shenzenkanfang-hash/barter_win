@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use crate::types::{DaySignalInput, DaySignalOutput, VolatilityLevel};
 
-/// 日线级信号生成器
+/// 日线级信号生成器（纯指标判断）
 pub struct DaySignalGenerator;
 
 impl DaySignalGenerator {
@@ -22,6 +22,10 @@ impl DaySignalGenerator {
         let long_entry = self.check_long_entry(input, all_green);
         let short_entry = self.check_short_entry(input, all_red_purple);
 
+        // 退出信号
+        let long_exit = self.check_long_exit(input);
+        let short_exit = self.check_short_exit(input);
+
         // 对冲信号
         let long_hedge = self.check_long_hedge(input);
         let short_hedge = self.check_short_hedge(input);
@@ -29,15 +33,15 @@ impl DaySignalGenerator {
         DaySignalOutput {
             long_entry,
             short_entry,
-            long_exit: false, // 由 PriceControl 判断
-            short_exit: false,
+            long_exit,
+            short_exit,
             long_hedge,
             short_hedge,
         }
     }
 
     /// 检查所有有效组是否都是纯绿
-    fn check_all_pine_green(&self, input: &DaySignalInput) -> bool {
+    pub fn check_all_pine_green(&self, input: &DaySignalInput) -> bool {
         let groups = [
             (input.pine_bar_color_12_26.as_str(), input.pine_bg_color_12_26.as_str()),
             (input.pine_bar_color_20_50.as_str(), input.pine_bg_color_20_50.as_str()),
@@ -60,7 +64,7 @@ impl DaySignalGenerator {
                     return false;
                 }
             } else {
-                return false; // 半有效组无效
+                return false;
             }
         }
 
@@ -68,7 +72,7 @@ impl DaySignalGenerator {
     }
 
     /// 检查所有有效组是否都是紫色/纯红
-    fn check_all_pine_red_purple(&self, input: &DaySignalInput) -> bool {
+    pub fn check_all_pine_red_purple(&self, input: &DaySignalInput) -> bool {
         let groups = [
             (input.pine_bar_color_12_26.as_str(), input.pine_bg_color_12_26.as_str()),
             (input.pine_bar_color_20_50.as_str(), input.pine_bg_color_20_50.as_str()),
@@ -99,12 +103,11 @@ impl DaySignalGenerator {
     }
 
     /// 检查做多入场条件
-    fn check_long_entry(&self, input: &DaySignalInput, all_green: bool) -> bool {
+    pub fn check_long_entry(&self, input: &DaySignalInput, all_green: bool) -> bool {
         if !all_green {
             return false;
         }
 
-        // 条件判断
         let vol_condition = input.tr_ratio_5d_20d > dec!(1) || input.tr_ratio_20d_60d > dec!(1);
         let pos_condition = input.ma5_in_20d_ma5_pos > dec!(70);
 
@@ -112,7 +115,7 @@ impl DaySignalGenerator {
     }
 
     /// 检查做空入场条件
-    fn check_short_entry(&self, input: &DaySignalInput, all_red_purple: bool) -> bool {
+    pub fn check_short_entry(&self, input: &DaySignalInput, all_red_purple: bool) -> bool {
         if !all_red_purple {
             return false;
         }
@@ -123,26 +126,49 @@ impl DaySignalGenerator {
         [vol_condition, pos_condition].iter().filter(|&&x| x).count() >= 2
     }
 
-    /// 检查多头对冲条件
-    fn check_long_hedge(&self, input: &DaySignalInput) -> bool {
-        // 日线级对冲条件基于最大有效周期
+    /// 检查做多退出条件
+    pub fn check_long_exit(&self, input: &DaySignalInput) -> bool {
         let max_bg = self.get_max_valid_bg(input);
-
-        if max_bg != "淡绿" {
+        if max_bg.is_empty() {
             return false;
         }
 
+        // 最大周期背景色非纯绿
+        let color_ok = max_bg != "纯绿";
+        // ma5 位置 > 50
+        let pos_ok = input.ma5_in_20d_ma5_pos > dec!(50);
+
+        [color_ok, pos_ok].iter().filter(|&&x| x).count() >= 2
+    }
+
+    /// 检查做空退出条件
+    pub fn check_short_exit(&self, input: &DaySignalInput) -> bool {
+        let max_bg = self.get_max_valid_bg(input);
+        if max_bg.is_empty() {
+            return false;
+        }
+
+        let color_ok = max_bg != "纯红";
+        let pos_ok = input.ma5_in_20d_ma5_pos < dec!(50);
+
+        [color_ok, pos_ok].iter().filter(|&&x| x).count() >= 2
+    }
+
+    /// 检查多头对冲条件
+    pub fn check_long_hedge(&self, input: &DaySignalInput) -> bool {
+        let max_bg = self.get_max_valid_bg(input);
+        if max_bg != "淡绿" {
+            return false;
+        }
         input.ma5_in_20d_ma5_pos > dec!(50)
     }
 
     /// 检查空头对冲条件
-    fn check_short_hedge(&self, input: &DaySignalInput) -> bool {
+    pub fn check_short_hedge(&self, input: &DaySignalInput) -> bool {
         let max_bg = self.get_max_valid_bg(input);
-
         if max_bg != "淡红" {
             return false;
         }
-
         input.ma5_in_20d_ma5_pos < dec!(50)
     }
 
