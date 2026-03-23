@@ -9,8 +9,7 @@ pub mod check_table;
 pub mod types;
 
 // 周期策略模块
-// pub mod h_15min;  // 高频15分钟策略检查 (TODO: 待实现)
-// pub mod h_1m;     // 高频1分钟策略检查 (TODO: 待实现)
-// pub mod l_1d;     // 低频1天策略检查 (TODO: 待实现)
+pub mod h_15m;     // 高频15分钟策略检查
+pub mod l_1d;      // 低频1天策略检查
 
 pub use check_table::{CheckTable, CheckEntry};
