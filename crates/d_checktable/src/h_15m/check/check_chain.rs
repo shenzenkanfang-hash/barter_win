@@ -4,7 +4,6 @@
 //! 从 SignalProcessor 获取指标数据，执行各检查
 
 use crate::h_15m::check::{a_exit, b_close, d_add, e_open};
-use crate::h_15m::check::trigger::TriggerEvent;
 use crate::types::MinSignalInput;
 
 /// 检查信号枚举
@@ -14,6 +13,19 @@ pub enum CheckSignal {
     Close,  // 关仓信号
     Add,    // 加仓信号
     Open,   // 开仓信号
+}
+
+/// 触发事件
+#[derive(Debug, Clone)]
+pub struct TriggerEvent {
+    pub symbol: String,
+    pub signal: CheckSignal,
+}
+
+impl TriggerEvent {
+    pub fn new(symbol: String, signal: CheckSignal) -> Self {
+        Self { symbol, signal }
+    }
 }
 
 /// 检查链结果
