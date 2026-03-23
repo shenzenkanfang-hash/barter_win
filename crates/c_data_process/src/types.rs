@@ -308,4 +308,6 @@ pub struct TradingDecision {
     pub reason: String,
     pub confidence: u8,
     pub level: StrategyLevel,
+    /// 信号生成时间戳 (秒)
+    pub timestamp: i64,
 }

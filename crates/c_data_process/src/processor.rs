@@ -9,10 +9,11 @@
 //! - 日级品种自动管理（无需注册）
 //! - TTL 机制自动清理过时的 1m 品种（默认10分钟无更新则移除）
 //! - 日级品种上限清理（超过 MAX_DAY_SYMBOLS 时清理最旧的）
+//! - 信号缓存机制：缓存最新的 TradingDecision，供 f_engine 拉取
 
 use crate::min::trend::{Indicator1m, Indicator1mOutput};
 use crate::day::trend::{BigCycleCalculator, BigCycleIndicators, PineColorBig as DayPineColorBig};
-use crate::types::PineColor;
+use crate::types::{PineColor, TradingDecision, StrategyLevel};
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -21,6 +22,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
+
+/// 信号缓存条目
+#[derive(Debug, Clone)]
+struct SignalCacheEntry {
+    decision: TradingDecision,
+    timestamp: Instant,
+}
 
 /// 信号处理器
 pub struct SignalProcessor {
@@ -42,6 +50,11 @@ pub struct SignalProcessor {
     max_day_symbols: usize,
     /// 是否正在运行（用于优雅shutdown）
     running: AtomicBool,
+
+    /// 分钟级信号缓存
+    min_signal_cache: RwLock<HashMap<String, SignalCacheEntry>>,
+    /// 日线级信号缓存
+    day_signal_cache: RwLock<HashMap<String, SignalCacheEntry>>,
 }
 
 /// 日级指标最大数量
@@ -62,6 +75,8 @@ impl SignalProcessor {
             ttl: Duration::from_secs(600), // 10分钟
             max_day_symbols: MAX_DAY_SYMBOLS,
             running: AtomicBool::new(false),
+            min_signal_cache: RwLock::new(HashMap::new()),
+            day_signal_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -77,6 +92,8 @@ impl SignalProcessor {
             ttl: Duration::from_secs(ttl_secs),
             max_day_symbols: MAX_DAY_SYMBOLS,
             running: AtomicBool::new(false),
+            min_signal_cache: RwLock::new(HashMap::new()),
+            day_signal_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -440,12 +457,92 @@ impl SignalProcessor {
             tracing::debug!("Cleaned up {} expired symbols", removed);
         }
 
+        // 同时清理过期的信号缓存
+        self.cleanup_expired_signals();
+
         removed
     }
 
     /// 获取活跃品种数量（已注册且有数据）
     pub fn active_count(&self) -> usize {
         self.min_indicators.read().len()
+    }
+
+    // ==================== 信号缓存 ====================
+
+    /// 设置分钟级信号缓存（由信号生成器调用）
+    pub fn set_min_signal(&self, symbol: &str, decision: TradingDecision) {
+        let mut cache = self.min_signal_cache.write();
+        cache.insert(symbol.to_uppercase(), SignalCacheEntry {
+            decision,
+            timestamp: Instant::now(),
+        });
+    }
+
+    /// 获取分钟级信号缓存（供 f_engine 拉取）
+    ///
+    /// 返回：(信号, 信号生成时间戳)
+    /// 如果缓存过期（超过 TTL），返回 None
+    pub fn get_min_signal(&self, symbol: &str) -> Option<(TradingDecision, i64)> {
+        let cache = self.min_signal_cache.read();
+        cache.get(&symbol.to_uppercase()).map(|entry| {
+            (entry.decision.clone(), entry.timestamp)
+        }).filter(|(_, ts)| {
+            // 检查是否过期
+            Instant::now().duration_since(*ts) < self.ttl
+        })
+    }
+
+    /// 获取分钟级信号年龄（秒）
+    pub fn get_min_signal_age_secs(&self, symbol: &str) -> Option<i64> {
+        let cache = self.min_signal_cache.read();
+        cache.get(&symbol.to_uppercase()).map(|entry| {
+            Instant::now().duration_since(entry.timestamp).as_secs() as i64
+        })
+    }
+
+    /// 设置日线级信号缓存
+    pub fn set_day_signal(&self, symbol: &str, decision: TradingDecision) {
+        let mut cache = self.day_signal_cache.write();
+        cache.insert(symbol.to_uppercase(), SignalCacheEntry {
+            decision,
+            timestamp: Instant::now(),
+        });
+    }
+
+    /// 获取日线级信号缓存
+    pub fn get_day_signal(&self, symbol: &str) -> Option<(TradingDecision, i64)> {
+        let cache = self.day_signal_cache.read();
+        cache.get(&symbol.to_uppercase()).map(|entry| {
+            (entry.decision.clone(), entry.timestamp)
+        }).filter(|(_, ts)| {
+            Instant::now().duration_since(*ts) < self.ttl
+        })
+    }
+
+    /// 获取日线级信号年龄（秒）
+    pub fn get_day_signal_age_secs(&self, symbol: &str) -> Option<i64> {
+        let cache = self.day_signal_cache.read();
+        cache.get(&symbol.to_uppercase()).map(|entry| {
+            Instant::now().duration_since(entry.timestamp).as_secs() as i64
+        })
+    }
+
+    /// 清理过期的信号缓存
+    fn cleanup_expired_signals(&self) {
+        let now = Instant::now();
+
+        // 清理分钟级信号缓存
+        {
+            let mut cache = self.min_signal_cache.write();
+            cache.retain(|_, entry| now.duration_since(entry.timestamp) < self.ttl);
+        }
+
+        // 清理日线级信号缓存
+        {
+            let mut cache = self.day_signal_cache.write();
+            cache.retain(|_, entry| now.duration_since(entry.timestamp) < self.ttl);
+        }
     }
 
     // ==================== 自循环服务 ====================
