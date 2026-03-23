@@ -153,7 +153,7 @@ impl SymbolState {
     /// 创建灾备恢复状态的品种
     pub fn new_recovery(symbol: String) -> Self {
         Self {
-            symbol,
+            symbol: symbol.clone(),
             startup_state: StartupState::Recovery,
             ..Self::new(symbol)
         }
@@ -172,7 +172,7 @@ impl SymbolState {
         if self.last_daily_request_ts == 0 {
             return false;
         }
-        now_ts - self.daily_request_ts > self.timeout_secs
+        now_ts - self.last_daily_request_ts > self.timeout_secs
     }
 
     /// 检查信号是否过期（age > timeout）

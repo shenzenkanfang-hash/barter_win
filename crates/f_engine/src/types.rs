@@ -11,7 +11,13 @@
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use c_data_process::types::TradingAction;
+
+// ============================================================================
+// 从 c_data_process 导入
+// ============================================================================
+
+/// TradingAction 交易动作
+pub use c_data_process::types::TradingAction;
 
 // ============================================================================
 // 策略标识符
@@ -52,6 +58,8 @@ pub struct TradingDecision {
     pub symbol: String,
     pub qty: Decimal,
     pub price: Decimal,
+    /// 信号生成时间戳 (秒)
+    pub timestamp: i64,
 }
 
 impl TradingDecision {
@@ -62,6 +70,7 @@ impl TradingDecision {
         symbol: String,
         qty: Decimal,
         price: Decimal,
+        timestamp: i64,
     ) -> Self {
         Self {
             action,
@@ -70,6 +79,7 @@ impl TradingDecision {
             symbol,
             qty,
             price,
+            timestamp,
         }
     }
 

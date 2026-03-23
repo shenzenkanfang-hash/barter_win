@@ -23,10 +23,10 @@
 
 #![forbid(unsafe_code)]
 
-use a_common::logs::{CheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult};
+use a_common::logs::{CheckpointLogger, Stage, StageResult};
 use d_checktable::check_table::{CheckEntry, CheckTable};
-use c_data_process::PineColor;
-use c_data_process::types::{OrderRequest, Side, Signal};
+use c_data_process::types::Signal;
+use crate::types::{OrderRequest, Side, OrderType};
 use b_data_source::Tick;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -144,8 +144,8 @@ impl Pipeline {
         Some(OrderRequest {
             symbol: self.symbol.clone(),
             side: match entry.final_signal {
-                Signal::LongEntry | Signal::LongHedge => Side::Long,
-                Signal::ShortEntry | Signal::ShortHedge => Side::Short,
+                Signal::LongEntry | Signal::LongHedge => Side::Buy,
+                Signal::ShortEntry | Signal::ShortHedge => Side::Sell,
                 _ => return None,
             },
             order_type: OrderType::Market,
@@ -406,12 +406,12 @@ mod tests {
 
         let tick = make_tick("BTCUSDT", dec!(50000));
 
-        // 完整流程通过，生成 Long 订单
+        // 完整流程通过，生成 Buy 订单
         let result = pipeline.process(&tick);
         assert!(result.is_some());
         let order = result.unwrap();
         assert_eq!(order.symbol, "BTCUSDT");
-        assert_eq!(order.side, Side::Long);
+        assert_eq!(order.side, Side::Buy);
         assert_eq!(order.price, Some(dec!(50000)));
         assert_eq!(order.qty, dec!(0.1));
     }
@@ -428,12 +428,12 @@ mod tests {
 
         let tick = make_tick("BTCUSDT", dec!(50000));
 
-        // 完整流程通过，生成 Short 订单
+        // 完整流程通过，生成 Sell 订单
         let result = pipeline.process(&tick);
         assert!(result.is_some());
         let order = result.unwrap();
         assert_eq!(order.symbol, "BTCUSDT");
-        assert_eq!(order.side, Side::Short);
+        assert_eq!(order.side, Side::Sell);
     }
 
     #[test]
@@ -448,10 +448,10 @@ mod tests {
 
         let tick = make_tick("BTCUSDT", dec!(50000));
 
-        // LongHedge 信号，生成 Long 订单
+        // LongHedge 信号，生成 Buy 订单
         let result = pipeline.process(&tick);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().side, Side::Long);
+        assert_eq!(result.unwrap().side, Side::Buy);
     }
 
     #[test]

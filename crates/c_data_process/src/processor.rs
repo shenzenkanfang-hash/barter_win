@@ -481,16 +481,16 @@ impl SignalProcessor {
 
     /// 获取分钟级信号缓存（供 f_engine 拉取）
     ///
-    /// 返回：(信号, 信号生成时间戳)
+    /// 返回：(信号, 信号生成时间戳的秒数)
     /// 如果缓存过期（超过 TTL），返回 None
     pub fn get_min_signal(&self, symbol: &str) -> Option<(TradingDecision, i64)> {
         let cache = self.min_signal_cache.read();
-        cache.get(&symbol.to_uppercase()).map(|entry| {
-            (entry.decision.clone(), entry.timestamp)
-        }).filter(|(_, ts)| {
-            // 检查是否过期
-            Instant::now().duration_since(*ts) < self.ttl
-        })
+        cache.get(&symbol.to_uppercase())
+            .filter(|entry| Instant::now().duration_since(entry.timestamp) < self.ttl)
+            .map(|entry| {
+                let ts_secs = entry.timestamp.elapsed().as_secs() as i64;
+                (entry.decision.clone(), ts_secs)
+            })
     }
 
     /// 获取分钟级信号年龄（秒）
@@ -513,11 +513,12 @@ impl SignalProcessor {
     /// 获取日线级信号缓存
     pub fn get_day_signal(&self, symbol: &str) -> Option<(TradingDecision, i64)> {
         let cache = self.day_signal_cache.read();
-        cache.get(&symbol.to_uppercase()).map(|entry| {
-            (entry.decision.clone(), entry.timestamp)
-        }).filter(|(_, ts)| {
-            Instant::now().duration_since(*ts) < self.ttl
-        })
+        cache.get(&symbol.to_uppercase())
+            .filter(|entry| Instant::now().duration_since(entry.timestamp) < self.ttl)
+            .map(|entry| {
+                let ts_secs = entry.timestamp.elapsed().as_secs() as i64;
+                (entry.decision.clone(), ts_secs)
+            })
     }
 
     /// 获取日线级信号年龄（秒）

@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod market_status_generator;
+pub mod pipeline_form;
 pub mod signal_generator;
 pub mod price_control_generator;
 pub mod check;
