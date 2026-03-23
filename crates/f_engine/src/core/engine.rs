@@ -296,23 +296,30 @@ impl TradingEngine {
     async fn execute_flat(&mut self, symbol: &str, price: Decimal) -> bool {
         // 获取当前持仓方向 (同步调用)
         if let Ok(Some(pos)) = self.gateway.get_position(symbol) {
-            let side = match pos.direction.as_str() {
-                "long" => Side::Sell,
-                "short" => Side::Buy,
+            use a_common::exchange::PositionDirection;
+            
+            let (side, qty) = match pos.net_direction() {
+                PositionDirection::Long => (Side::Sell, pos.long_qty),
+                PositionDirection::Short => (Side::Buy, pos.short_qty),
                 _ => return false,
             };
+
+            if qty <= Decimal::ZERO {
+                info!("No position to flat for {}", symbol);
+                return false;
+            }
 
             let order = OrderRequest {
                 symbol: symbol.to_string(),
                 side,
                 order_type: OrderType::Market,
-                qty: pos.quantity,
+                qty,
                 price: Some(price),
             };
 
             match self.execute_order_internal(order).await {
                 Ok(_) => {
-                    info!("Flat position: {} qty={}", symbol, pos.quantity);
+                    info!("Flat position: {} qty={}", symbol, qty);
                     true
                 }
                 Err(e) => {
