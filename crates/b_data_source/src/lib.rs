@@ -21,6 +21,7 @@ pub mod models;
 // 统一数据接口层
 pub mod ws;      // WebSocket 数据接口
 pub mod api;     // REST API 数据接口
+pub mod symbol_rules; // 交易对规则服务
 
 // Re-exports - Models (业务数据类型)
 pub use models::{MarketStream, MockMarketStream};
@@ -38,3 +39,6 @@ pub use ws::{VolatilityManager, SymbolVolatility};
 
 // Re-exports - DataFeeder (统一数据接口)
 pub use api::DataFeeder;
+
+// Re-exports - SymbolRules (交易对规则服务)
+pub use symbol_rules::{SymbolRuleService, ParsedSymbolRules};
