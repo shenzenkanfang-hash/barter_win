@@ -3,6 +3,40 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::{HashMap, HashSet};
 
+/// 盈亏覆盖检查结果
+#[derive(Debug, Clone)]
+pub struct PnlCoverageResult {
+    /// 是否可以覆盖
+    pub can_cover: bool,
+    /// 总浮亏
+    pub total_loss: Decimal,
+    /// 当前盈利
+    pub current_profit: Decimal,
+    /// 累计盈利
+    pub accumulated_profit: Decimal,
+    /// 净盈利
+    pub net_profit: Decimal,
+    /// 低波动品种数
+    pub symbol_count: u32,
+}
+
+/// 解救结果
+#[derive(Debug, Clone)]
+pub struct RescueResult {
+    /// 是否成功
+    pub success: bool,
+    /// 是否可以解救
+    pub can_rescue: bool,
+    /// 总浮亏
+    pub total_loss: Decimal,
+    /// 可用盈利总额
+    pub total_available_profit: Decimal,
+    /// 被解救的品种列表
+    pub rescued_symbols: Vec<String>,
+    /// 剩余盈利
+    pub remaining_profit: Decimal,
+}
+
 /// 盈亏管理器
 ///
 /// 负责计算和管理已实现盈亏、未实现盈亏，以及累计盈利。
@@ -265,6 +299,89 @@ impl PnlManager {
 
         (false, "not_reached")
     }
+
+    /// 计算低波动品种总浮亏
+    pub fn calculate_low_volatility_total_loss(&self) -> Decimal {
+        let low_vol = self.low_volatility_symbols.read();
+        low_vol
+            .iter()
+            .map(|s| self.get_unrealized_pnl(s).max(dec!(0)))
+            .sum()
+    }
+
+    /// 检查盈亏覆盖
+    pub fn check_pnl_coverage(
+        &self,
+        high_vol_profit: Decimal,
+        is_realized: bool,
+    ) -> PnlCoverageResult {
+        let accumulated = self.get_cumulative_profit();
+        let total_available = if is_realized {
+            high_vol_profit + accumulated
+        } else {
+            accumulated
+        };
+
+        let total_loss = self.calculate_low_volatility_total_loss();
+        let can_cover = total_available >= total_loss;
+        let net_profit = if can_cover { total_available - total_loss } else { dec!(0) };
+
+        PnlCoverageResult {
+            can_cover,
+            total_loss,
+            current_profit: high_vol_profit,
+            accumulated_profit: accumulated,
+            net_profit,
+            symbol_count: self.low_volatility_symbols.read().len() as u32,
+        }
+    }
+
+    /// 解救低波动品种
+    pub fn rescue_low_volatility(&mut self, high_vol_profit: Decimal) -> RescueResult {
+        let coverage = self.check_pnl_coverage(high_vol_profit, true);
+
+        if !coverage.can_cover {
+            return RescueResult {
+                success: false,
+                can_rescue: false,
+                total_loss: dec!(0),
+                total_available_profit: dec!(0),
+                rescued_symbols: vec![],
+                remaining_profit: dec!(0),
+            };
+        }
+
+        let rescued_symbols: Vec<String> = self.low_volatility_symbols.read().iter().cloned().collect();
+
+        // 清空低波动品种
+        {
+            let mut low_vol = self.low_volatility_symbols.write();
+            low_vol.clear();
+        }
+        {
+            let mut unrealized = self.unrealized_pnl.write();
+            for sym in &rescued_symbols {
+                unrealized.remove(sym);
+            }
+        }
+
+        // 更新累计盈利
+        *self.cumulative_profit.write() = coverage.net_profit;
+
+        RescueResult {
+            success: true,
+            can_rescue: true,
+            total_loss: coverage.total_loss,
+            total_available_profit: coverage.current_profit + coverage.accumulated_profit,
+            rescued_symbols,
+            remaining_profit: coverage.net_profit,
+        }
+    }
+
+    /// 获取低波动品种数
+    pub fn get_low_vol_count(&self) -> u32 {
+        self.low_volatility_symbols.read().len() as u32
+    }
 }
 
 #[cfg(test)]
@@ -330,5 +447,29 @@ mod tests {
         );
         assert!(should_close);
         assert_eq!(reason, "stop_loss_triggered");
+    }
+
+    #[test]
+    fn test_rescue_mechanism() {
+        let mut manager = PnlManager::new();
+
+        // 添加低波动品种和浮亏
+        manager.add_low_volatility_symbol("BTC".to_string());
+        manager.update_unrealized_pnl("BTC", dec!(-500)); // 浮亏 500
+
+        // 无盈利，无法解救
+        let result = manager.rescue_low_volatility(dec!(0));
+        assert!(!result.can_rescue);
+
+        // 有盈利但不足
+        manager.update_cumulative_profit(dec!(300)); // 只有 300
+        let result = manager.rescue_low_volatility(dec!(0));
+        assert!(!result.can_rescue);
+
+        // 盈利足够，解救
+        manager.update_cumulative_profit(dec!(300)); // 现在累计 600
+        let result = manager.rescue_low_volatility(dec!(0));
+        assert!(result.can_rescue);
+        assert_eq!(result.rescued_symbols, vec!["BTC"]);
     }
 }
