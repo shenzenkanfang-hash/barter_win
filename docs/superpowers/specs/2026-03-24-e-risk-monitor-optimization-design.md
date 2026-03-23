@@ -4,7 +4,7 @@
 Author: 软件架构师
 Created: 2026-03-24
 GSD-Phase: e-risk-optimization
-Status: draft
+Status: reviewed
 ---
 
 ## 1. 概述
@@ -42,15 +42,15 @@ e_risk_monitor/src/
 │   ├── mod.rs
 │   ├── symbol_limit.rs           # 品种限额检查
 │   ├── rate_limiter.rs          # 频率限制
-│   └── dynamic_leverage.rs       # 动态杠杆计算
+│   ├── dynamic_leverage.rs       # 动态杠杆计算
+│   └── fund_guard.rs             # 统一资金守护 (P0)
 │
 ├── risk/                        # 现有
 │   └── ...
 │
 ├── position/
 │   ├── position_manager.rs
-│   ├── position_exclusion.rs
-│   └── position_limit.rs        # 持仓限额 (从 guard 迁移)
+│   └── position_exclusion.rs
 ```
 
 ### 2.2 guard 模块职责
@@ -245,6 +245,7 @@ impl SymbolLimitGuard {
 ### 3.2 guard/rate_limiter.rs — 频率限制
 
 ```rust
+use parking_lot::RwLock;
 use std::collections::VecDeque;
 
 /// 订单记录
@@ -257,14 +258,15 @@ struct OrderRecord {
 /// 频率限制器
 ///
 /// 使用滑动窗口算法限制单位时间内的订单数量。
+/// 线程安全：使用 RwLock 保护 recent_orders。
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
     /// 单品种每分钟最大订单数
     per_symbol_per_minute: u32,
     /// 全局每分钟最大订单数
     global_per_minute: u32,
-    /// 滑动窗口记录 (最多保留 10 分钟)
-    recent_orders: VecDeque<OrderRecord>,
+    /// 滑动窗口记录 (线程安全)
+    recent_orders: RwLock<VecDeque<OrderRecord>>,
     /// 窗口大小 (秒)
     window_secs: i64,
 }
@@ -275,24 +277,23 @@ impl RateLimiter {
         Self {
             per_symbol_per_minute,
             global_per_minute,
-            recent_orders: VecDeque::new(),
+            recent_orders: RwLock::new(VecDeque::new()),
             window_secs: 60, // 1分钟窗口
         }
     }
 
-    /// 检查是否允许下单
+    /// 检查是否允许下单 (自动清理过期记录)
     pub fn check(&self, symbol: &str, current_ts: i64) -> Result<(), EngineError> {
-        let window_start = current_ts - self.window_secs;
+        // 自动清理过期记录
+        self.cleanup_internal(current_ts);
 
-        // 清理过期记录
-        let valid_orders: Vec<&OrderRecord> = self.recent_orders
-            .iter()
-            .filter(|o| o.timestamp > window_start)
-            .collect();
+        let orders = self.recent_orders.read();
 
         // 1. 检查单品种频率
-        let symbol_orders = valid_orders.iter()
-            .filter(|o| o.symbol == symbol)
+        let window_start = current_ts - self.window_secs;
+        let symbol_orders = orders
+            .iter()
+            .filter(|o| o.symbol == symbol && o.timestamp > window_start)
             .count() as u32;
 
         if symbol_orders >= self.per_symbol_per_minute {
@@ -303,10 +304,10 @@ impl RateLimiter {
         }
 
         // 2. 检查全局频率
-        if valid_orders.len() as u32 >= self.global_per_minute {
+        if orders.iter().filter(|o| o.timestamp > window_start).count() as u32 >= self.global_per_minute {
             return Err(EngineError::RiskCheckFailed(format!(
                 "全局频率超限: {}/{} (1分钟内)",
-                valid_orders.len(), self.global_per_minute
+                orders.len(), self.global_per_minute
             )));
         }
 
@@ -314,26 +315,34 @@ impl RateLimiter {
     }
 
     /// 记录订单
-    pub fn record(&mut self, symbol: String, timestamp: i64) {
-        self.recent_orders.push_back(OrderRecord { symbol, timestamp });
+    pub fn record(&self, symbol: String, timestamp: i64) {
+        let mut orders = self.recent_orders.write();
+        orders.push_back(OrderRecord { symbol, timestamp });
     }
 
-    /// 清理过期记录
-    pub fn cleanup(&mut self, current_ts: i64) {
+    /// 自动清理过期记录 (惰性清理)
+    fn cleanup_internal(&self, current_ts: i64) {
         let window_start = current_ts - self.window_secs;
-        while let Some(oldest) = self.recent_orders.front() {
+        let mut orders = self.recent_orders.write();
+        while let Some(oldest) = orders.front() {
             if oldest.timestamp <= window_start {
-                self.recent_orders.pop_front();
+                orders.pop_front();
             } else {
                 break;
             }
         }
     }
 
+    /// 手动清理 (供外部调用)
+    pub fn cleanup(&self, current_ts: i64) {
+        self.cleanup_internal(current_ts);
+    }
+
     /// 获取指定品种当前订单数
     pub fn symbol_order_count(&self, symbol: &str, current_ts: i64) -> u32 {
         let window_start = current_ts - self.window_secs;
-        self.recent_orders
+        let orders = self.recent_orders.read();
+        orders
             .iter()
             .filter(|o| o.symbol == symbol && o.timestamp > window_start)
             .count() as u32
@@ -342,7 +351,8 @@ impl RateLimiter {
     /// 获取全局当前订单数
     pub fn global_order_count(&self, current_ts: i64) -> u32 {
         let window_start = current_ts - self.window_secs;
-        self.recent_orders
+        let orders = self.recent_orders.read();
+        orders
             .iter()
             .filter(|o| o.timestamp > window_start)
             .count() as u32
@@ -353,8 +363,6 @@ impl RateLimiter {
 ### 3.3 guard/dynamic_leverage.rs — 动态杠杆
 
 ```rust
-use std::collections::HashMap;
-
 /// 波动级别
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VolatilityLevel {
@@ -369,6 +377,9 @@ pub enum VolatilityLevel {
 }
 
 /// 动态杠杆配置
+///
+/// 使用数组而非 HashMap，提高性能。
+/// 索引顺序: [Low, Normal, High, Extreme]
 #[derive(Debug, Clone)]
 pub struct DynamicLeverageConfig {
     /// 低波动阈值
@@ -379,25 +390,32 @@ pub struct DynamicLeverageConfig {
     pub high_volatility_threshold: Decimal,
     /// 极端波动阈值 (强制使用最低杠杆)
     pub extreme_volatility_threshold: Decimal,
-    /// 各波动级别对应的杠杆倍数
-    pub leverage_by_level: HashMap<VolatilityLevel, Decimal>,
+    /// 各波动级别对应的杠杆倍数 [Low, Normal, High, Extreme]
+    leverage_by_level: [Decimal; 4],
 }
 
 impl Default for DynamicLeverageConfig {
     fn default() -> Self {
-        let mut leverage_by_level = HashMap::new();
-        leverage_by_level.insert(VolatilityLevel::Low, dec!(15));
-        leverage_by_level.insert(VolatilityLevel::Normal, dec!(10));
-        leverage_by_level.insert(VolatilityLevel::High, dec!(5));
-        leverage_by_level.insert(VolatilityLevel::Extreme, dec!(2));
-
         Self {
-            low_volatility_threshold: dec!(0.01),    // 1%
-            normal_volatility_threshold: dec!(0.03),  // 3%
-            high_volatility_threshold: dec!(0.05),   // 5%
-            extreme_volatility_threshold: dec!(0.10), // 10%
-            leverage_by_level,
+            low_volatility_threshold: dec!(0.01),      // 1%
+            normal_volatility_threshold: dec!(0.03),    // 3%
+            high_volatility_threshold: dec!(0.05),      // 5%
+            extreme_volatility_threshold: dec!(0.10),    // 10%
+            leverage_by_level: [dec!(15), dec!(10), dec!(5), dec!(2)],
         }
+    }
+}
+
+impl DynamicLeverageConfig {
+    /// 通过波动级别获取杠杆
+    fn get_leverage(&self, level: VolatilityLevel) -> Decimal {
+        let idx = match level {
+            VolatilityLevel::Low => 0,
+            VolatilityLevel::Normal => 1,
+            VolatilityLevel::High => 2,
+            VolatilityLevel::Extreme => 3,
+        };
+        self.leverage_by_level[idx]
     }
 }
 
@@ -440,14 +458,7 @@ impl DynamicLeverageCalculator {
         base_leverage: Decimal,
     ) -> Decimal {
         let level = self.get_volatility_level(current_volatility);
-
-        // 获取该波动级别对应的杠杆
-        let level_leverage = self.config.leverage_by_level
-            .get(&level)
-            .copied()
-            .unwrap_or(base_leverage);
-
-        // 返回较小值：不能超过基准杠杆
+        let level_leverage = self.config.get_leverage(level);
         level_leverage.min(base_leverage)
     }
 
@@ -462,8 +473,7 @@ impl DynamicLeverageCalculator {
     pub fn leverage_factor(&self, current_volatility: Decimal) -> Decimal {
         let level = self.get_volatility_level(current_volatility);
         match level {
-            VolatilityLevel::Low => dec!(1.0),
-            VolatilityLevel::Normal => dec!(1.0),
+            VolatilityLevel::Low | VolatilityLevel::Normal => dec!(1.0),
             VolatilityLevel::High => dec!(0.5),
             VolatilityLevel::Extreme => dec!(0.2),
         }
@@ -477,10 +487,12 @@ impl DynamicLeverageCalculator {
 pub mod symbol_limit;
 pub mod rate_limiter;
 pub mod dynamic_leverage;
+pub mod fund_guard;  // 新增
 
 pub use symbol_limit::{SymbolPositionLimit, GlobalPositionLimit, SymbolLimitGuard};
 pub use rate_limiter::RateLimiter;
 pub use dynamic_leverage::{DynamicLeverageConfig, DynamicLeverageCalculator, VolatilityLevel};
+pub use fund_guard::FundGuard;
 ```
 
 ---
@@ -574,10 +586,14 @@ AccountPool.freeze()   → 冻结在 AccountPool.account.frozen
 新增 `FundGuard` (资金守护)，作为统一的资金管理层：
 
 ```rust
+use std::sync::Arc;
+
 /// 资金守护
 ///
 /// 统一的资金管理层，确保预占、冻结、扣除的一致性。
 /// 替代原有的 OrderCheck 预占系统。
+///
+/// 线程安全：所有操作使用原子锁保护。
 #[derive(Debug, Clone)]
 pub struct FundGuard {
     /// 账户池引用
@@ -589,15 +605,28 @@ pub struct FundGuard {
 }
 
 impl FundGuard {
+    /// 创建资金守护
+    ///
+    /// # 参数
+    /// - `account_pool`: 账户池 Arc 引用
+    pub fn new(account_pool: Arc<AccountPool>) -> Self {
+        Self {
+            account_pool,
+            total_reserved: RwLock::new(dec!(0)),
+            reservations: RwLock::new(FnvHashMap::default()),
+        }
+    }
+
     /// 预检并预占资金
+    ///
+    /// 原子操作：在同一锁内完成资金检查、冻结、预占记录。
     pub fn pre_reserve(
         &self,
         order_id: &str,
         amount: Decimal,
     ) -> Result<Decimal, EngineError> {
-        let available = self.account_pool.available();
-
         // 1. 资金充足性检查
+        let available = self.account_pool.available();
         if available < amount {
             return Err(EngineError::InsufficientFund(format!(
                 "可用资金 {} 不足预占 {}",
@@ -605,31 +634,27 @@ impl FundGuard {
             )));
         }
 
-        // 2. 检查是否已存在预占
-        {
-            let reservations = self.reservations.read();
-            if reservations.contains_key(order_id) {
-                return Err(EngineError::RiskCheckFailed(format!(
-                    "订单 {} 已有预占记录",
-                    order_id
-                )));
-            }
-        }
-
-        // 3. 冻结资金
+        // 2. 冻结资金 (写锁)
         self.account_pool.freeze(amount)?;
 
-        // 4. 记录预占
-        {
-            let mut reservations = self.reservations.write();
-            reservations.insert(order_id.to_string(), amount);
+        // 3. 原子写入预占记录和总额
+        let mut reservations = self.reservations.write();
+        let mut total = self.total_reserved.write();
+
+        // 双重检查是否已存在预占
+        if reservations.contains_key(order_id) {
+            drop(reservations);
+            drop(total);
+            // 回滚冻结
+            self.account_pool.unfreeze(amount);
+            return Err(EngineError::RiskCheckFailed(format!(
+                "订单 {} 已有预占记录",
+                order_id
+            )));
         }
 
-        // 5. 更新预占总额
-        {
-            let mut total = self.total_reserved.write();
-            *total += amount;
-        }
+        reservations.insert(order_id.to_string(), amount);
+        *total += amount;
 
         Ok(amount)
     }
@@ -638,22 +663,20 @@ impl FundGuard {
     pub fn confirm(&self, order_id: &str) -> Result<(), EngineError> {
         let amount = {
             let mut reservations = self.reservations.write();
-            reservations.remove(order_id)
+            let mut total = self.total_reserved.write();
+
+            let amount = reservations.remove(order_id)
                 .ok_or_else(|| EngineError::RiskCheckFailed(format!(
                     "订单 {} 没有预占记录",
                     order_id
-                )))?
+                )))?;
+
+            *total -= amount;
+            amount
         };
 
         // 从冻结转为已用
         self.account_pool.deduct_margin(amount)?;
-
-        // 更新预占总额
-        {
-            let mut total = self.total_reserved.write();
-            *total -= amount;
-        }
-
         Ok(())
     }
 
@@ -661,28 +684,31 @@ impl FundGuard {
     pub fn cancel(&self, order_id: &str) -> Result<Decimal, EngineError> {
         let amount = {
             let mut reservations = self.reservations.write();
-            reservations.remove(order_id)
+            let mut total = self.total_reserved.write();
+
+            let amount = reservations.remove(order_id)
                 .ok_or_else(|| EngineError::RiskCheckFailed(format!(
                     "订单 {} 没有预占记录",
                     order_id
-                )))?
+                )))?;
+
+            *total -= amount;
+            amount
         };
 
         // 释放冻结资金
         self.account_pool.unfreeze(amount);
-
-        // 更新预占总额
-        {
-            let mut total = self.total_reserved.write();
-            *total -= amount;
-        }
-
         Ok(amount)
     }
 
     /// 获取总预占金额
     pub fn total_reserved(&self) -> Decimal {
         *self.total_reserved.read()
+    }
+
+    /// 检查预占是否存在
+    pub fn has_reservation(&self, order_id: &str) -> bool {
+        self.reservations.read().contains_key(order_id)
     }
 }
 ```
@@ -844,10 +870,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_per_symbol() {
-        let limiter = RateLimiter::new(
-            per_symbol_per_minute: 3,
-            global_per_minute: 10,
-        );
+        let limiter = RateLimiter::new(3, 10);
         let ts = 1000;
 
         // 前3笔订单通过
@@ -860,6 +883,36 @@ mod tests {
 
         // 第4笔拒绝
         assert!(limiter.check("BTC", ts).is_err());
+    }
+
+    #[test]
+    fn test_rate_limiter_boundary() {
+        let limiter = RateLimiter::new(3, 10);
+        let ts = 1000;
+
+        // 正好3笔应该通过
+        for i in 0..3 {
+            assert!(limiter.check("BTC", ts).is_ok(), "第{}笔应该通过", i + 1);
+            limiter.record("BTC".to_string(), ts);
+        }
+
+        // 第4笔应该拒绝
+        assert!(limiter.check("BTC", ts).is_err());
+    }
+
+    #[test]
+    fn test_rate_limiter_window_expiry() {
+        let limiter = RateLimiter::new(3, 10);
+
+        // 60秒后的订单不受窗口限制
+        let ts_0 = 1000;
+        limiter.record("BTC".to_string(), ts_0);
+        limiter.record("BTC".to_string(), ts_0);
+        limiter.record("BTC".to_string(), ts_0);
+
+        // 61秒后，窗口已过期
+        let ts_61 = 1061;
+        assert!(limiter.check("BTC", ts_61).is_ok());
     }
 }
 ```
