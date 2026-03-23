@@ -16,7 +16,7 @@
 use a_common::EngineError;
 use a_common::backup::{MemoryBackup, PositionSnapshot as MemoryPositionSnapshot};
 use crate::persistence::sqlite_persistence::SqliteRecordService;
-use a_common::api::SymbolRulesFetcher;
+use b_data_source::api::SymbolRulesFetcher;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
