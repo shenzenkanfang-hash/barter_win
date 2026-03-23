@@ -305,7 +305,7 @@ impl PnlManager {
         let low_vol = self.low_volatility_symbols.read();
         low_vol
             .iter()
-            .map(|s| self.get_unrealized_pnl(s).max(dec!(0)))
+            .map(|s| (-self.get_unrealized_pnl(s)).max(dec!(0)))
             .sum()
     }
 

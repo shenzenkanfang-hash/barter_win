@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_pre_check_symbol_count_limit() {
-        let guard = TrendRiskLimitGuard::new(
+        let mut guard = TrendRiskLimitGuard::new(
             TrendSymbolLimit::default(),
             TrendGlobalLimit {
                 max_total_notional: dec!(0),
@@ -193,9 +193,11 @@ mod tests {
 
         // 品种1 通过
         assert!(guard.pre_check("BTC", dec!(1000), dec!(0)).is_ok());
+        guard.update_position("BTC", dec!(1000), dec!(0));
 
         // 品种2 通过
         assert!(guard.pre_check("ETH", dec!(1000), dec!(0)).is_ok());
+        guard.update_position("ETH", dec!(1000), dec!(0));
 
         // 品种3 超过上限，拒绝
         assert!(guard.pre_check("SOL", dec!(1000), dec!(0)).is_err());

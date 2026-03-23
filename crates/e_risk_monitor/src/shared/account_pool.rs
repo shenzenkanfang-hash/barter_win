@@ -631,7 +631,7 @@ mod tests {
         assert_eq!(pool.margin_used(), dec!(1000));
 
         // 释放保证金
-        pool.release_margin(dec!(1000)).unwrap();
+        pool.release_margin(dec!(1000));
         assert_eq!(pool.margin_used(), dec!(0));
     }
 }
