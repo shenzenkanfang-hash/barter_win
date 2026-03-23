@@ -3,7 +3,7 @@
 //! 提供统一的检查链执行入口
 //! 从 SignalProcessor 获取指标数据，执行各检查
 
-use crate::h_15m::check::{a_exit, b_close, c_risk, d_add, e_open};
+use crate::h_15m::check::{a_exit, b_close, d_add, e_open};
 use crate::h_15m::check::trigger::TriggerEvent;
 use crate::types::MinSignalInput;
 
@@ -12,7 +12,6 @@ use crate::types::MinSignalInput;
 pub enum CheckSignal {
     Exit,   // 退出信号
     Close,  // 关仓信号
-    Risk,   // 风控信号
     Add,    // 加仓信号
     Open,   // 开仓信号
 }
@@ -46,12 +45,9 @@ impl CheckChainResult {
 
 /// 执行完整检查链（接收指标输入）
 pub fn run_check_chain(symbol: &str, input: &MinSignalInput) -> Option<TriggerEvent> {
-    let result = CheckChainResult::new();
-
     // 各检查函数接收 MinSignalInput
     let exit_result = a_exit::check(input);
     let close_result = b_close::check(input);
-    let risk_result = c_risk::check(input);
     let add_result = d_add::check(input);
     let open_result = e_open::check(input);
 
@@ -59,7 +55,6 @@ pub fn run_check_chain(symbol: &str, input: &MinSignalInput) -> Option<TriggerEv
     let mut signals = Vec::new();
     if exit_result { signals.push(CheckSignal::Exit); }
     if close_result { signals.push(CheckSignal::Close); }
-    if risk_result { signals.push(CheckSignal::Risk); }
     if add_result { signals.push(CheckSignal::Add); }
     if open_result { signals.push(CheckSignal::Open); }
 
