@@ -624,8 +624,8 @@ impl TradingEngine {
 mod tests {
     use super::*;
     use b_data_source::MockMarketStream;
+    use crate::order::mock_binance_gateway::MockBinanceGateway;
     use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     /// 辅助函数：创建测试用 Tick
     fn create_tick(symbol: &str, price: Decimal, qty: Decimal, timestamp: i64) -> Tick {
@@ -652,10 +652,12 @@ mod tests {
     #[tokio::test]
     async fn test_engine_creation() {
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(100000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(100000.0), // 初始资金 100000
+            gateway,
         );
 
         // 验证初始状态
@@ -672,10 +674,12 @@ mod tests {
     #[tokio::test]
     async fn test_engine_single_tick_processing() {
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(100000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(100000.0),
+            gateway,
         );
 
         // 发送一个 Tick
@@ -694,10 +698,12 @@ mod tests {
     #[tokio::test]
     async fn test_engine_multiple_tick_processing() {
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(100000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(100000.0),
+            gateway,
         );
 
         // 第一个 Tick: 分钟 0
@@ -729,10 +735,12 @@ mod tests {
     async fn test_circuit_breaker_trigger() {
         // 使用高初始资金创建引擎
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(1000000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(1000000.0), // 高初始资金
+            gateway,
         );
 
         // 模拟连续亏损的 Tick（价格持续下跌）
@@ -764,10 +772,12 @@ mod tests {
     #[tokio::test]
     async fn test_position_opening() {
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(100000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(100000.0),
+            gateway,
         );
 
         // 发送 Tick 更新价格
@@ -777,7 +787,7 @@ mod tests {
         // 尝试开多仓
         let order = OrderRequest {
             symbol: "BTCUSDT".to_string(),
-            side: Side::Long,
+            side: Side::Buy,  // 开多用 Buy
             order_type: OrderType::Market,
             price: Some(dec!(100.0)),
             qty: dec!(1.0),
@@ -799,10 +809,12 @@ mod tests {
     #[tokio::test]
     async fn test_account_balance_tracking() {
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(100000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(100000.0),
+            gateway,
         );
 
         // 获取初始账户信息
@@ -831,10 +843,12 @@ mod tests {
     #[tokio::test]
     async fn test_market_status_detection() {
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(100000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(100000.0),
+            gateway,
         );
 
         // 发送 Tick 序列
@@ -868,10 +882,12 @@ mod tests {
     #[tokio::test]
     async fn test_strategy_pool_allocation() {
         let mock_stream = MockMarketStream::new("BTCUSDT".to_string(), dec!(100.0));
+        let gateway = Arc::new(MockBinanceGateway::new(dec!(100000.0)));
         let mut engine = TradingEngine::new(
             Box::new(mock_stream),
             "BTCUSDT".to_string(),
             dec!(100000.0),
+            gateway,
         );
 
         // 验证策略池信息
