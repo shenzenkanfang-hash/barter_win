@@ -2,7 +2,8 @@
 //!
 //! 运行: cargo run --example test_trade_settings --package b_data_source
 
-use b_data_source::{BinanceApiGateway, TradeSettings};
+use a_common::BinanceApiGateway;
+use b_data_source::TradeSettings;
 
 #[tokio::main]
 async fn main() {

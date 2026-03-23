@@ -1,8 +1,12 @@
 //! WebSocket 数据接口层
 //!
 //! 封装所有 WebSocket 数据获取接口
-//! 其他模块只能通过这里获取 WS 数据，不能直接访问 a_common::ws
+//! 其他模块只能通过这里获取 WS 数据
 
-pub use crate::kline_1m::Kline1mStream;
-pub use crate::kline_1d::Kline1dStream;
-pub use crate::order_books::DepthStream;
+pub mod kline_1m;
+pub mod kline_1d;
+pub mod order_books;
+
+pub use kline_1m::{Kline1mStream, KLineSynthesizer, KlinePersistence};
+pub use kline_1d::Kline1dStream;
+pub use order_books::{OrderBook, DepthStream};
