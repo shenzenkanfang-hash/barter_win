@@ -8,6 +8,7 @@
 //! - 1m 品种需要主动注册，后台自循环处理
 //! - 日级品种自动管理（无需注册）
 //! - TTL 机制自动清理过时的 1m 品种（默认10分钟无更新则移除）
+//! - 日级品种上限清理（超过 MAX_DAY_SYMBOLS 时清理最旧的）
 
 use crate::min::trend::{Indicator1m, Indicator1mOutput};
 use crate::day::trend::{BigCycleCalculator, BigCycleIndicators, PineColorBig as DayPineColorBig};
@@ -16,8 +17,10 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::watch;
 
 /// 信号处理器
 pub struct SignalProcessor {
@@ -31,9 +34,20 @@ pub struct SignalProcessor {
     registered_symbols: RwLock<HashSet<String>>,
     /// 日级指标计算器（按品种索引）
     day_indicators: RwLock<HashMap<String, BigCycleCalculator>>,
+    /// 日级指标最后访问时间（用于上限清理）
+    day_timestamps: RwLock<HashMap<String, Instant>>,
     /// TTL 时长（默认10分钟）
     ttl: Duration,
+    /// 日级指标最大数量（超过则清理最旧的）
+    max_day_symbols: usize,
+    /// 是否正在运行（用于优雅shutdown）
+    running: AtomicBool,
 }
+
+/// 日级指标最大数量
+const MAX_DAY_SYMBOLS: usize = 100;
+/// 日级清理阈值（超过此数量时触发清理）
+const DAY_CLEANUP_THRESHOLD: usize = 80;
 
 impl SignalProcessor {
     /// 创建信号处理器（默认TTL 10分钟）
@@ -44,7 +58,10 @@ impl SignalProcessor {
             min_timestamps: RwLock::new(HashMap::new()),
             registered_symbols: RwLock::new(HashSet::new()),
             day_indicators: RwLock::new(HashMap::new()),
+            day_timestamps: RwLock::new(HashMap::new()),
             ttl: Duration::from_secs(600), // 10分钟
+            max_day_symbols: MAX_DAY_SYMBOLS,
+            running: AtomicBool::new(false),
         }
     }
 
@@ -56,7 +73,10 @@ impl SignalProcessor {
             min_timestamps: RwLock::new(HashMap::new()),
             registered_symbols: RwLock::new(HashSet::new()),
             day_indicators: RwLock::new(HashMap::new()),
+            day_timestamps: RwLock::new(HashMap::new()),
             ttl: Duration::from_secs(ttl_secs),
+            max_day_symbols: MAX_DAY_SYMBOLS,
+            running: AtomicBool::new(false),
         }
     }
 
@@ -110,13 +130,24 @@ impl SignalProcessor {
     // ==================== 1m 数据更新 ====================
 
     /// 更新分钟级指标（被外部调用，通常来自 DataFeeder）
-    /// 返回是否成功更新
-    pub fn min_update(&self, symbol: &str, high: Decimal, low: Decimal, close: Decimal, volume: Decimal) -> bool {
+    /// 返回 Result: Ok(()) 或 Err(原因)
+    pub fn min_update(&self, symbol: &str, high: Decimal, low: Decimal, close: Decimal, volume: Decimal) -> Result<(), String> {
+        // 数据验证: high >= low, close 在 [low, high] 范围内
+        if high < low {
+            return Err(format!("Invalid data: high({}) < low({})", high, low));
+        }
+        if close < low || close > high {
+            return Err(format!("Invalid data: close({}) not in [low({}), high({})]", close, low, high));
+        }
+        if volume < Decimal::ZERO {
+            return Err(format!("Invalid data: volume({}) < 0", volume));
+        }
+
         let symbol_upper = symbol.to_uppercase();
 
         // 检查是否已注册
         if !self.is_registered(&symbol_upper) {
-            return false;
+            return Err(format!("Symbol {} not registered for 1m", symbol_upper));
         }
 
         let mut indicators = self.min_indicators.write();
@@ -130,9 +161,9 @@ impl SignalProcessor {
             // 更新 timestamp
             let mut timestamps = self.min_timestamps.write();
             timestamps.insert(symbol_upper, Instant::now());
-            true
+            Ok(())
         } else {
-            false
+            Err(format!("Indicator not found for symbol {}", symbol_upper))
         }
     }
 
@@ -214,11 +245,68 @@ impl SignalProcessor {
     // ==================== 日级数据更新 ====================
 
     /// 更新日级指标
-    pub fn day_update(&self, symbol: &str, high: Decimal, low: Decimal, close: Decimal) {
+    /// 返回 Result: Ok(()) 或 Err(原因)
+    pub fn day_update(&self, symbol: &str, high: Decimal, low: Decimal, close: Decimal) -> Result<(), String> {
+        // 数据验证: high >= low, close 在 [low, high] 范围内
+        if high < low {
+            return Err(format!("Invalid data: high({}) < low({})", high, low));
+        }
+        if close < low || close > high {
+            return Err(format!("Invalid data: close({}) not in [low({}), high({})]", close, low, high));
+        }
+
         let symbol_upper = symbol.to_uppercase();
+
+        // 先检查是否需要清理
+        self.day_cleanup_if_needed();
+
         let mut indicators = self.day_indicators.write();
         let indicator = indicators.entry(symbol_upper.clone()).or_insert_with(BigCycleCalculator::new);
         indicator.calculate(high, low, close);
+
+        // 更新访问时间
+        drop(indicators);
+        let mut timestamps = self.day_timestamps.write();
+        timestamps.insert(symbol_upper, Instant::now());
+
+        Ok(())
+    }
+
+    /// 检查并清理日级指标（超过阈值时清理最旧的）
+    fn day_cleanup_if_needed(&self) {
+        let count = {
+            let indicators = self.day_indicators.read();
+            indicators.len()
+        };
+
+        if count > DAY_CLEANUP_THRESHOLD {
+            self.day_cleanup_oldest(count - self.max_day_symbols);
+        }
+    }
+
+    /// 清理最旧的日级指标
+    fn day_cleanup_oldest(&self, count: usize) {
+        let mut timestamps = self.day_timestamps.write();
+        let mut indicators = self.day_indicators.write();
+
+        // 按访问时间排序，保留最新的
+        let mut sorted: Vec<_> = timestamps.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(a.1)); // 按时间降序
+
+        let to_remove: Vec<String> = sorted.into_iter()
+            .skip(self.max_day_symbols)
+            .take(count)
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for symbol in &to_remove {
+            timestamps.remove(symbol);
+            indicators.remove(symbol);
+        }
+
+        if !to_remove.is_empty() {
+            tracing::debug!("Cleaned up {} oldest day symbols", to_remove.len());
+        }
     }
 
     // ==================== 日级数据查询 ====================
@@ -289,6 +377,31 @@ impl SignalProcessor {
         })
     }
 
+    /// 检查日级指标是否就绪（至少60根K线）
+    pub fn day_is_ready(&self, symbol: &str) -> bool {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase())
+            .map(|ind| ind.is_ready())
+            .unwrap_or(false)
+    }
+
+    /// 获取日级指标数据量
+    pub fn day_bar_count(&self, symbol: &str) -> usize {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase())
+            .map(|ind| ind.len())
+            .unwrap_or(0)
+    }
+
+    /// 检查分钟级指标是否就绪
+    pub fn min_is_ready(&self, symbol: &str) -> bool {
+        let outputs = self.min_outputs.read();
+        // 分钟级指标就绪：至少60根K线（需要1小时窗口数据）
+        outputs.get(&symbol.to_uppercase())
+            .map(|o| o.pos_norm_60 != dec!(50) || o.velocity != Decimal::ZERO)
+            .unwrap_or(false)
+    }
+
     // ==================== TTL 清理 ====================
 
     /// 清理过期的分钟级品种（超过 TTL 未更新则移除）
@@ -337,19 +450,60 @@ impl SignalProcessor {
 
     // ==================== 自循环服务 ====================
 
-    /// 启动后台自循环（需要手动调用）
-    /// 会定期清理过期的品种
-    pub async fn start_loop(self: Arc<Self>) {
-        tracing::info!("SignalProcessor started with TTL={}s", self.ttl.as_secs());
+    /// 启动后台自循环（内部创建 Arc）
+    /// 返回 shutdown signal sender
+    pub fn start_loop(self: &Arc<Self>) -> watch::Sender<bool> {
+        let processor = Arc::clone(self);
+        processor.running.store(true, Ordering::SeqCst);
 
-        loop {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
 
-            let removed = self.cleanup_expired();
-            if removed > 0 {
-                tracing::info!("SignalProcessor: cleaned up {} expired symbols", removed);
+        tracing::info!("SignalProcessor started with TTL={}s, max_day_symbols={}",
+            self.ttl.as_secs(), self.max_day_symbols);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    // 定期清理
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                        if !processor.running.load(Ordering::SeqCst) {
+                            tracing::info!("SignalProcessor loop received shutdown signal");
+                            break;
+                        }
+
+                        let removed = processor.cleanup_expired();
+                        if removed > 0 {
+                            tracing::debug!("SignalProcessor: cleaned up {} expired symbols", removed);
+                        }
+
+                        // 日级上限清理
+                        processor.day_cleanup_if_needed();
+                    }
+                    // shutdown 信号
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            tracing::info!("SignalProcessor shutting down");
+                            break;
+                        }
+                    }
+                }
             }
-        }
+            processor.running.store(false, Ordering::SeqCst);
+            tracing::info!("SignalProcessor loop stopped");
+        });
+
+        shutdown_tx
+    }
+
+    /// 检查是否正在运行
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    /// 优雅停止
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
+        tracing::info!("SignalProcessor stop requested");
     }
 }
 
@@ -387,7 +541,7 @@ mod tests {
             let high = base + dec!(2);
             let low = base - dec!(2);
             let close = base;
-            processor.day_update("BTCUSDT", high, low, close);
+            assert!(processor.day_update("BTCUSDT", high, low, close).is_ok());
         }
 
         // 验证可以获取指标
@@ -396,5 +550,54 @@ mod tests {
 
         let pine = processor.day_get_pine_20_50("BTCUSDT");
         assert!(pine.is_some());
+
+        // 验证就绪检查
+        assert!(processor.day_is_ready("BTCUSDT"));
+        assert_eq!(processor.day_bar_count("BTCUSDT"), 100);
+    }
+
+    #[test]
+    fn test_day_update_validation() {
+        let processor = SignalProcessor::new();
+
+        // 测试 high < low
+        let result = processor.day_update("BTCUSDT", dec!(100), dec!(102), dec!(101));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("high"));
+
+        // 测试 close < low
+        let result = processor.day_update("BTCUSDT", dec!(102), dec!(100), dec!(99));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("close"));
+    }
+
+    #[test]
+    fn test_min_update_validation() {
+        let processor = SignalProcessor::new();
+        processor.register_symbol("btcusdt");
+
+        // 测试 high < low
+        let result = processor.min_update("btcusdt", dec!(100), dec!(102), dec!(101), dec!(1000));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("high"));
+
+        // 测试未注册
+        processor.unregister_symbol("btcusdt");
+        let result = processor.min_update("btcusdt", dec!(102), dec!(100), dec!(101), dec!(1000));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not registered"));
+    }
+
+    #[test]
+    fn test_running_state() {
+        let processor = SignalProcessor::new();
+        assert!(!processor.is_running());
+
+        let _ = processor.start_loop();
+        assert!(processor.is_running());
+
+        processor.stop();
+        // stop 后需要等待一下让 loop 退出
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
