@@ -1,0 +1,382 @@
+#![forbid(unsafe_code)]
+
+//! 信号处理器 - 自循环服务
+//!
+//! 管理分钟级和日级指标计算器，提供数据查询接口
+//!
+//! 设计：
+//! - 1m 品种需要主动注册，后台自循环处理
+//! - 日级品种自动管理（无需注册）
+//! - TTL 机制自动清理过时的 1m 品种（默认10分钟无更新则移除）
+
+use crate::min::trend::{Indicator1m, Indicator1mOutput};
+use crate::day::trend::{BigCycleCalculator, PineColorBig as DayPineColorBig};
+use crate::types::PineColor;
+use parking_lot::RwLock;
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// 信号处理器
+pub struct SignalProcessor {
+    /// 分钟级指标计算器（按品种索引）
+    min_indicators: RwLock<HashMap<String, Indicator1m>>,
+    /// 分钟级最新输出缓存（按品种索引）
+    min_outputs: RwLock<HashMap<String, Indicator1mOutput>>,
+    /// 分钟级最后更新时间（用于TTL清理）
+    min_timestamps: RwLock<HashMap<String, Instant>>,
+    /// 已注册的分钟级品种
+    registered_symbols: RwLock<HashSet<String>>,
+    /// 日级指标计算器（按品种索引）
+    day_indicators: RwLock<HashMap<String, BigCycleCalculator>>,
+    /// TTL 时长（默认10分钟）
+    ttl: Duration,
+}
+
+impl SignalProcessor {
+    /// 创建信号处理器（默认TTL 10分钟）
+    pub fn new() -> Self {
+        Self {
+            min_indicators: RwLock::new(HashMap::new()),
+            min_outputs: RwLock::new(HashMap::new()),
+            min_timestamps: RwLock::new(HashMap::new()),
+            registered_symbols: RwLock::new(HashSet::new()),
+            day_indicators: RwLock::new(HashMap::new()),
+            ttl: Duration::from_secs(600), // 10分钟
+        }
+    }
+
+    /// 创建信号处理器（自定义TTL）
+    pub fn with_ttl(ttl_secs: u64) -> Self {
+        Self {
+            min_indicators: RwLock::new(HashMap::new()),
+            min_outputs: RwLock::new(HashMap::new()),
+            min_timestamps: RwLock::new(HashMap::new()),
+            registered_symbols: RwLock::new(HashSet::new()),
+            day_indicators: RwLock::new(HashMap::new()),
+            ttl: Duration::from_secs(ttl_secs),
+        }
+    }
+
+    // ==================== 注册管理 ====================
+
+    /// 注册分钟级品种（1m 需要主动注册才会处理）
+    pub fn register_symbol(&self, symbol: &str) {
+        let symbol_upper = symbol.to_uppercase();
+        let mut registered = self.registered_symbols.write();
+        registered.insert(symbol_upper.clone());
+
+        // 初始化计算器（如果不存在）
+        let mut indicators = self.min_indicators.write();
+        indicators.entry(symbol_upper.clone()).or_insert_with(Indicator1m::new);
+
+        // 初始化输出缓存
+        let mut outputs = self.min_outputs.write();
+        outputs.entry(symbol_upper.clone()).or_insert_with(Indicator1mOutput::default);
+
+        tracing::debug!("Registered symbol for 1m: {}", symbol_upper);
+    }
+
+    /// 取消注册分钟级品种
+    pub fn unregister_symbol(&self, symbol: &str) {
+        let symbol_upper = symbol.to_uppercase();
+        let mut registered = self.registered_symbols.write();
+        registered.remove(&symbol_upper);
+
+        let mut indicators = self.min_indicators.write();
+        indicators.remove(&symbol_upper);
+
+        let mut outputs = self.min_outputs.write();
+        outputs.remove(&symbol_upper);
+
+        let mut timestamps = self.min_timestamps.write();
+        timestamps.remove(&symbol_upper);
+
+        tracing::debug!("Unregistered symbol: {}", symbol_upper);
+    }
+
+    /// 获取已注册的品种列表
+    pub fn registered_symbols(&self) -> Vec<String> {
+        self.registered_symbols.read().iter().cloned().collect()
+    }
+
+    /// 检查品种是否已注册
+    pub fn is_registered(&self, symbol: &str) -> bool {
+        self.registered_symbols.read().contains(&symbol.to_uppercase())
+    }
+
+    // ==================== 1m 数据更新 ====================
+
+    /// 更新分钟级指标（被外部调用，通常来自 DataFeeder）
+    /// 返回是否成功更新
+    pub fn min_update(&self, symbol: &str, high: Decimal, low: Decimal, close: Decimal, volume: Decimal) -> bool {
+        let symbol_upper = symbol.to_uppercase();
+
+        // 检查是否已注册
+        if !self.is_registered(&symbol_upper) {
+            return false;
+        }
+
+        let mut indicators = self.min_indicators.write();
+        if let Some(indicator) = indicators.get_mut(&symbol_upper) {
+            let output = indicator.update(high, low, close, volume);
+
+            // 缓存输出
+            let mut outputs = self.min_outputs.write();
+            outputs.insert(symbol_upper.clone(), output);
+
+            // 更新 timestamp
+            let mut timestamps = self.min_timestamps.write();
+            timestamps.insert(symbol_upper, Instant::now());
+            true
+        } else {
+            false
+        }
+    }
+
+    // ==================== 1m 数据查询 ====================
+
+    /// 获取分钟级 TR Ratio (tr_ratio_10min_1h)
+    pub fn min_get_tr_ratio(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.tr_ratio_10min_1h)
+    }
+
+    /// 获取分钟级 TR Ratio ZScore
+    pub fn min_get_tr_ratio_zscore(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.tr_ratio_zscore_10min_1h)
+    }
+
+    /// 获取分钟级 Pine 颜色（需要单独计算，Indicator1m 不包含）
+    pub fn min_get_pine(&self, _symbol: &str) -> Option<PineColor> {
+        // Indicator1m 目前没有 Pine 颜色输出
+        // 如需 Pine 颜色，需要扩展 Indicator1mOutput
+        None
+    }
+
+    /// 获取分钟级 velocity
+    pub fn min_get_velocity(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.velocity)
+    }
+
+    /// 获取分钟级 acceleration
+    pub fn min_get_acceleration(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.acceleration)
+    }
+
+    /// 获取分钟级 power
+    pub fn min_get_power(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.power)
+    }
+
+    /// 获取分钟级 zscore (1h)
+    pub fn min_get_zscore_1h(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.zscore_1h_1m)
+    }
+
+    /// 获取分钟级 zscore (14)
+    pub fn min_get_zscore_14(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.zscore_14_1m)
+    }
+
+    /// 获取分钟级位置 (pos_norm_60)
+    pub fn min_get_pos_norm_60(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.pos_norm_60)
+    }
+
+    /// 获取分钟级 velocity percentile
+    pub fn min_get_velocity_percentile(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.velocity_percentile)
+    }
+
+    /// 获取分钟级 power percentile
+    pub fn min_get_power_percentile(&self, symbol: &str) -> Option<Decimal> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).map(|o| o.power_percentile)
+    }
+
+    /// 获取完整的分钟级输出
+    pub fn min_get_output(&self, symbol: &str) -> Option<Indicator1mOutput> {
+        let outputs = self.min_outputs.read();
+        outputs.get(&symbol.to_uppercase()).cloned()
+    }
+
+    // ==================== 日级数据更新 ====================
+
+    /// 更新日级指标
+    pub fn day_update(&self, symbol: &str, high: Decimal, low: Decimal, close: Decimal) {
+        let symbol_upper = symbol.to_uppercase();
+        let mut indicators = self.day_indicators.write();
+        let indicator = indicators.entry(symbol_upper.clone()).or_insert_with(BigCycleCalculator::new);
+        indicator.calculate(high, low, close);
+    }
+
+    // ==================== 日级数据查询 ====================
+
+    /// 获取日级 TR Ratio (tr_ratio_5d_20d, tr_ratio_20d_60d)
+    pub fn day_get_tr_ratio(&self, symbol: &str) -> Option<(Decimal, Decimal)> {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
+            ind.calculate_tr_ratio()
+        })
+    }
+
+    /// 获取日级 Pine 颜色 (100/200)
+    pub fn day_get_pine_100_200(&self, symbol: &str) -> Option<DayPineColorBig> {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
+            ind.detect_pine_color_100_200()
+        })
+    }
+
+    /// 获取日级 Pine 颜色 (20/50)
+    pub fn day_get_pine_20_50(&self, symbol: &str) -> Option<DayPineColorBig> {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
+            ind.detect_pine_color_20_50()
+        })
+    }
+
+    /// 获取日级 Pine 颜色 (12/26)
+    pub fn day_get_pine_12_26(&self, symbol: &str) -> Option<DayPineColorBig> {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
+            ind.detect_pine_color_12_26()
+        })
+    }
+
+    /// 获取日级 20 日区间位置
+    pub fn day_get_pos_norm_20(&self, symbol: &str) -> Option<Decimal> {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
+            ind.calculate_pos_norm_20()
+        })
+    }
+
+    /// 获取日级 MA5 在 20 日 MA5 区间位置
+    pub fn day_get_ma5_in_20d_ma5_pos(&self, symbol: &str) -> Option<Decimal> {
+        let indicators = self.day_indicators.read();
+        indicators.get(&symbol.to_uppercase()).map(|ind: &BigCycleCalculator| {
+            ind.calculate_ma5_in_20d_ma5_pos()
+        })
+    }
+
+    // ==================== TTL 清理 ====================
+
+    /// 清理过期的分钟级品种（超过 TTL 未更新则移除）
+    pub fn cleanup_expired(&self) -> usize {
+        let now = Instant::now();
+        let ttl = self.ttl;
+        let mut removed = 0;
+
+        // 收集过期的品种
+        let symbols_to_remove: Vec<String> = {
+            let timestamps = self.min_timestamps.read();
+            timestamps
+                .iter()
+                .filter(|item| now.duration_since(*item.1) > ttl)
+                .map(|item| item.0.clone())
+                .collect()
+        };
+
+        // 移除过期的品种
+        if !symbols_to_remove.is_empty() {
+            let mut timestamps = self.min_timestamps.write();
+            let mut indicators = self.min_indicators.write();
+            let mut outputs = self.min_outputs.write();
+            let mut registered = self.registered_symbols.write();
+
+            for symbol in &symbols_to_remove {
+                timestamps.remove(symbol);
+                indicators.remove(symbol);
+                outputs.remove(symbol);
+                registered.remove(symbol);
+                removed += 1;
+            }
+        }
+
+        if removed > 0 {
+            tracing::debug!("Cleaned up {} expired symbols", removed);
+        }
+
+        removed
+    }
+
+    /// 获取活跃品种数量（已注册且有数据）
+    pub fn active_count(&self) -> usize {
+        self.min_indicators.read().len()
+    }
+
+    // ==================== 自循环服务 ====================
+
+    /// 启动后台自循环（需要手动调用）
+    /// 会定期清理过期的品种
+    pub async fn start_loop(self: Arc<Self>) {
+        tracing::info!("SignalProcessor started with TTL={}s", self.ttl.as_secs());
+
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+
+            let removed = self.cleanup_expired();
+            if removed > 0 {
+                tracing::info!("SignalProcessor: cleaned up {} expired symbols", removed);
+            }
+        }
+    }
+}
+
+impl Default for SignalProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_register_unregister() {
+        let processor = SignalProcessor::new();
+
+        processor.register_symbol("btcusdt");
+        assert!(processor.is_registered("btcusdt"));
+        assert!(processor.is_registered("BTCUSDT"));
+        assert_eq!(processor.active_count(), 1);
+
+        processor.unregister_symbol("btcusdt");
+        assert!(!processor.is_registered("btcusdt"));
+        assert_eq!(processor.active_count(), 0);
+    }
+
+    #[test]
+    fn test_day_indicators() {
+        let processor = SignalProcessor::new();
+
+        // 模拟日线数据
+        for i in 0..100 {
+            let base = dec!(100) + Decimal::from(i);
+            let high = base + dec!(2);
+            let low = base - dec!(2);
+            let close = base;
+            processor.day_update("BTCUSDT", high, low, close);
+        }
+
+        // 验证可以获取指标
+        let tr_ratio = processor.day_get_tr_ratio("BTCUSDT");
+        assert!(tr_ratio.is_some());
+
+        let pine = processor.day_get_pine_20_50("BTCUSDT");
+        assert!(pine.is_some());
+    }
+}
