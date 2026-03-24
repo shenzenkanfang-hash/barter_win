@@ -9,13 +9,8 @@
 #![forbid(unsafe_code)]
 
 use rust_decimal::Decimal;
-use std::sync::Arc;
-use parking_lot::RwLock;
 
-use crate::core::{
-    EngineStateHandle, SymbolState, VolatilityTier, RiskState,
-    StrategyQuery, StrategyResponse, ChannelType,
-};
+use crate::core::EngineStateHandle;
 
 /// 触发器配置
 #[derive(Debug, Clone)]

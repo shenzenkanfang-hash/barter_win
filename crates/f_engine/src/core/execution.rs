@@ -184,7 +184,7 @@ impl TradingPipeline {
     /// 构建 StrategyQuery
     pub fn build_strategy_query(
         &self,
-        symbol: &str,
+        _symbol: &str,
         account_available: Decimal,
         account_risk_state: RiskState,
         current_price: Decimal,

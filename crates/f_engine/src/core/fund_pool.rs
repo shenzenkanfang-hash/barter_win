@@ -5,7 +5,6 @@
 #![forbid(unsafe_code)]
 
 use rust_decimal::Decimal;
-use std::collections::HashMap;
 use std::sync::Arc;
 use parking_lot::RwLock;
 
@@ -116,7 +115,7 @@ impl FundPoolManager {
         &self,
         channel_type: ChannelType,
         _max_symbols: usize,
-        current_symbols: usize,
+        _current_symbols: usize,
         _amount: Decimal,
     ) -> bool {
         // 检查品种数量

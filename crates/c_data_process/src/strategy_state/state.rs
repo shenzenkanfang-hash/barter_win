@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use super::error::{Result, StrategyStateError};
 
 /// 持仓方向
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]

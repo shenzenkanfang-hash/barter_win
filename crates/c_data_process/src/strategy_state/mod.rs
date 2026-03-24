@@ -19,7 +19,6 @@ pub use state::{PositionSide, PositionState, PnlState, TradingStats, RiskState, 
 use std::sync::Arc;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use fnv::FnvHashMap;
 
 /// 策略状态管理器

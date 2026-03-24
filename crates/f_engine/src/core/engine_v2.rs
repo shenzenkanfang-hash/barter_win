@@ -244,7 +244,7 @@ impl TradingEngineV2 {
         // 8. 状态对齐（在锁内完成）
         // V1.4: 检查本地状态与交易所状态是否一致
         let state_syncer = self.pipeline.state_syncer();
-        if let Err(e) = state_syncer.sync_position(
+        if let Err(_e) = state_syncer.sync_position(
             current_position_qty,
             current_position_qty, // 实际应从交易所获取
             current_position_price,

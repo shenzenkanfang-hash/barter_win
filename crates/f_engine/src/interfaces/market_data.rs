@@ -5,7 +5,6 @@
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use std::sync::Arc;
 
 /// K线数据（接口契约）
 ///

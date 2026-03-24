@@ -2,7 +2,6 @@
 //!
 //! 管理交易引擎的运行模式（正常/回测/仿真/维护）。
 
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 /// 交易模式

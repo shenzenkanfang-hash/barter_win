@@ -6,7 +6,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection};
 
-use super::error::{Result, StrategyStateError};
+use super::error::Result;
 use super::state::StrategyState;
 
 const CREATE_TABLE_SQL: &str = r#"

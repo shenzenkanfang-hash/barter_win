@@ -9,7 +9,7 @@
 
 use a_common::BinanceApiGateway;
 use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}, MockMarketStream};
-use f_engine::core::{TradingEngineV2, TradingEngineConfig};
+use f_engine::core::TradingEngineV2;
 use f_engine::order::mock_binance_gateway::{MockBinanceGateway, MockGatewayConfig};
 use rust_decimal_macros::dec;
 use std::sync::Arc;
@@ -39,14 +39,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("=== TradingEngine Example ===");
 
     // 创建 Mock 网关（用于测试）
-    let config = MockGatewayConfig {
+    let _gateway_config = MockGatewayConfig {
         initial_balance: dec!(10000.0),
         commission_rate: dec!(0.0004),
         slippage_rate: dec!(0.0001),
         simulate_fill: true,
         fill_delay_ms: 100,
     };
-    let gateway = Arc::new(MockBinanceGateway::with_config(config));
+    let _gateway = Arc::new(MockBinanceGateway::with_config(_gateway_config.clone()));
 
     // 创建 Mock 市场数据流
     let _market_stream = Box::new(MockMarketStream::new(
