@@ -439,6 +439,61 @@ impl MemoryBackup {
         }
     }
 
+    // =========================================================================
+    // 同步方法（用于恢复启动）
+    // =========================================================================
+
+    /// 同步加载持仓数据（用于启动恢复）
+    pub fn load_positions_sync(&self) -> Result<Option<Positions>, EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, POSITIONS_FILE);
+        match self.load_json_sync::<Positions>(&path) {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                if let EngineError::MemoryBackup(ref msg) = e {
+                    if msg.contains("打开文件失败") {
+                        return Ok(None);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// 同步加载账户数据（用于启动恢复）
+    pub fn load_account_sync(&self) -> Result<Option<AccountSnapshot>, EngineError> {
+        let path = format!("{}/{}", self.tmpfs_dir, ACCOUNT_FILE);
+        match self.load_json_sync::<AccountSnapshot>(&path) {
+            Ok(data) => Ok(Some(data)),
+            Err(e) => {
+                if let EngineError::MemoryBackup(ref msg) = e {
+                    if msg.contains("打开文件失败") {
+                        return Ok(None);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// 同步加载 JSON（阻塞）
+    fn load_json_sync<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T, EngineError> {
+        use std::fs::File;
+        use std::io::Read;
+        
+        let mut file = File::open(path).map_err(|e| {
+            EngineError::MemoryBackup(format!("打开文件失败: {}", e))
+        })?;
+
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).map_err(|e| {
+            EngineError::MemoryBackup(format!("读取文件失败: {}", e))
+        })?;
+
+        serde_json::from_str(&contents).map_err(|e| {
+            EngineError::MemoryBackup(format!("解析 JSON 失败: {}", e))
+        })
+    }
+
     pub async fn save_trading_pairs(&self, pairs: &TradingPairs) -> Result<(), EngineError> {
         let path = format!("{}/{}", self.tmpfs_dir, TRADING_PAIRS_FILE);
         self.ensure_dir(&path).await?;

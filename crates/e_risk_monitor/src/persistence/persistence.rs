@@ -298,6 +298,7 @@ pub struct PersistenceStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_save_trade() {
