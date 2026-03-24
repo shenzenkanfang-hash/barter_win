@@ -1,10 +1,15 @@
 //! 市场数据接口
+//!
+//! 定义市场数据访问的统一接口。
 
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 
 // Re-export market data types from a_common
-pub use a_common::models::market_data::{MarketKLine, MarketTick, VolatilityInfo, VolatilityLevel, OrderBookLevel, OrderBookSnapshot};
+pub use a_common::models::market_data::{
+    MarketKLine, MarketTick, VolatilityInfo, VolatilityLevel,
+    OrderBookLevel, OrderBookSnapshot,
+};
 
 /// 市场数据提供者接口
 ///

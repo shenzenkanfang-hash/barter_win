@@ -2,7 +2,6 @@
 
 //! Futures 账户/持仓 API 功能测试
 
-use b_data_source::api::{FuturesAccount, FuturesPosition};
 
 #[test]
 fn test_futures_account_creation() {

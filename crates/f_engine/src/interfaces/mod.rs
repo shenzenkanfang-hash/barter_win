@@ -7,6 +7,10 @@
 //! - 所有跨模块调用必须通过 Trait 接口
 //! - 接口只暴露必要的方法，不暴露内部结构
 //! - 所有异步接口统一使用 #[async_trait] + Send + Sync
+//!
+//! # DTO 迁移说明
+//! 所有接口 DTO 已迁移到 a_common::models::dto
+//! 本目录只保留纯 Trait 定义
 
 pub mod market_data;
 pub mod strategy;

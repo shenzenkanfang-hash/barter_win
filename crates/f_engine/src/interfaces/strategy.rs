@@ -1,81 +1,15 @@
 //! 策略接口
+//!
+//! 定义策略相关的统一接口。
 
 use a_common::models::market_data::{MarketKLine, MarketTick, VolatilityInfo};
-use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use std::sync::Arc;
 
-/// 交易信号方向
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignalDirection {
-    Long,
-    Short,
-    Flat,
-}
-
-impl Default for SignalDirection {
-    fn default() -> Self {
-        Self::Flat
-    }
-}
-
-/// 交易信号类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignalType {
-    Open,
-    Add,
-    Reduce,
-    Close,
-}
-
-impl Default for SignalType {
-    fn default() -> Self {
-        Self::Close
-    }
-}
-
-/// 交易信号
-#[derive(Debug, Clone)]
-pub struct TradingSignal {
-    pub id: String,
-    pub symbol: String,
-    pub direction: SignalDirection,
-    pub signal_type: SignalType,
-    pub quantity: Decimal,
-    pub price: Option<Decimal>,
-    pub stop_loss: Option<Decimal>,
-    pub take_profit: Option<Decimal>,
-    pub priority: u8,
-    pub confidence: u8,
-    pub timestamp: DateTime<Utc>,
-}
-
-/// 策略状态
-#[derive(Debug, Clone)]
-pub struct StrategyState {
-    pub id: String,
-    pub name: String,
-    pub enabled: bool,
-    pub position_direction: SignalDirection,
-    pub position_qty: Decimal,
-    pub status: StrategyStatus,
-    pub last_signal_time: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StrategyStatus {
-    Idle,
-    Running,
-    Waiting,
-    Error,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarketStatusType {
-    Pin,
-    Trend,
-    Range,
-}
+// Re-export DTO from a_common
+pub use a_common::models::dto::{
+    SignalDirection, SignalType, TradingSignal,
+    StrategyState, StrategyStatus, MarketStatusType,
+};
 
 /// 策略实例接口
 ///

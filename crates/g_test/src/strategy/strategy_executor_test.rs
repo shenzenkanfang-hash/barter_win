@@ -4,18 +4,15 @@
 
 #![forbid(unsafe_code)]
 
-use chrono::Utc;
 use parking_lot::RwLock;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
-use std::sync::Arc;
 
 use f_engine::strategy::{
-    Direction, SignalAggregator, SignalType, Strategy, StrategyExecutor, StrategyKLine,
+    Strategy, StrategyKLine,
     StrategyState, TradingSignal,
 };
 
 /// 测试策略实现
+#[allow(dead_code)]
 struct TestStrategy {
     id: String,
     name: String,
@@ -25,6 +22,7 @@ struct TestStrategy {
     signals_to_return: RwLock<Vec<TradingSignal>>,
 }
 
+#[allow(dead_code)]
 impl TestStrategy {
     fn new(id: &str, symbols: Vec<String>) -> Self {
         Self {

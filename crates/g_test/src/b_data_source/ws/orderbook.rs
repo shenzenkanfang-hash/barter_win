@@ -2,9 +2,6 @@
 
 //! 订单簿功能测试
 
-use b_data_source::ws::order_books::OrderBook;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 
 #[test]
 fn test_orderbook_new() {

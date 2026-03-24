@@ -615,6 +615,10 @@ impl Default for SignalProcessor {
 mod tests {
     use super::*;
 
+    // Import tokio for async tests
+    #[allow(unused_imports)]
+    use tokio::test as async_test;
+
     #[test]
     fn test_register_unregister() {
         let processor = SignalProcessor::new();
@@ -688,10 +692,19 @@ mod tests {
 
     #[test]
     fn test_running_state() {
+        // Create a Tokio runtime for this test
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime");
+
         let processor = Arc::new(SignalProcessor::new());
         assert!(!processor.is_running());
 
-        let _ = processor.start_loop();
+        // Use block_on to run the async start_loop in sync context
+        rt.block_on(async {
+            let _ = processor.start_loop();
+        });
         assert!(processor.is_running());
 
         processor.stop();

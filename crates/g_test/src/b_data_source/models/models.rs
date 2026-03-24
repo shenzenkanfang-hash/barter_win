@@ -2,9 +2,6 @@
 
 //! 数据模型功能测试
 
-use b_data_source::models::types::{KLine, Period, Tick};
-use chrono::{TimeZone, Utc};
-use rust_decimal_macros::dec;
 
 #[test]
 fn test_tick_creation() {

@@ -10,4 +10,3 @@ pub mod strategy_executor_test;
 pub mod trading_integration_test;
 
 pub use mock_gateway::MockExchangeGateway;
-pub use trading_integration_test::*;

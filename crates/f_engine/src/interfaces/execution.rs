@@ -8,30 +8,8 @@ use rust_decimal::Decimal;
 // Re-export ExchangeGateway from order module
 pub use crate::order::ExchangeGateway;
 
-/// 执行错误类型
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum ExecutionError {
-    #[error("Network error: {0}")]
-    Network(String),
-
-    #[error("API error: {0}")]
-    Api(String),
-
-    #[error("Insufficient balance: {0}")]
-    InsufficientBalance(String),
-
-    #[error("Position limit exceeded: {0}")]
-    PositionLimitExceeded(String),
-
-    #[error("Order rejected: {0}")]
-    OrderRejected(String),
-
-    #[error("Invalid order: {0}")]
-    InvalidOrder(String),
-
-    #[error("Gateway error: {0}")]
-    Gateway(String),
-}
+// Re-export ExecutionError from a_common
+pub use a_common::models::dto::ExecutionError;
 
 /// 订单簿提供者接口
 pub trait MarketDepthProvider: Send + Sync {

@@ -4,7 +4,6 @@
 
 #![forbid(unsafe_code)]
 
-use b_data_source::trader_pool::{SymbolMeta, TradingStatus, TraderPool};
 
 #[test]
 fn test_trader_pool_register_and_unregister() {

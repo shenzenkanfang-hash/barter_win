@@ -11,7 +11,6 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Mock 交易所网关 - 用于测试
 pub struct MockExchangeGateway {

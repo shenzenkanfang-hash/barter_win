@@ -5,25 +5,8 @@
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 
-/// CheckTable 检查结果
-#[derive(Debug, Clone)]
-pub struct CheckTableResult {
-    /// 检查是否通过
-    pub passed: bool,
-    /// 拒绝原因（如果未通过）
-    pub reject_reason: Option<String>,
-    /// 检查执行时间（毫秒）
-    pub execution_time_ms: u64,
-}
-
-/// CheckTable 配置
-#[derive(Debug, Clone)]
-pub struct CheckTableConfig {
-    /// 检查表标识
-    pub id: String,
-    /// 超时时间（毫秒）
-    pub timeout_ms: u64,
-}
+// Re-export DTO from a_common
+pub use a_common::models::dto::{CheckTableResult, CheckTableConfig};
 
 /// CheckTableProvider 接口
 ///

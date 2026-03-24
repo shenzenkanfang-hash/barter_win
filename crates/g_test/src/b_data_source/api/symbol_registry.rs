@@ -2,8 +2,6 @@
 
 //! 品种注册中心功能测试
 
-use b_data_source::api::symbol_registry::SymbolRegistry;
-use fnv::FnvHashSet;
 
 #[test]
 fn test_symbol_registry_new_mock() {

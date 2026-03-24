@@ -2,11 +2,8 @@
 
 //! K线合成器功能测试
 
-use b_data_source::ws::kline_1m::KLineSynthesizer;
-use b_data_source::models::types::{KLine, Period, Tick};
-use chrono::{TimeZone, Utc};
+use b_data_source::models::types::Tick;
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 
 #[allow(dead_code)]
 fn create_tick(symbol: &str, price: Decimal, qty: Decimal, timestamp: chrono::DateTime<chrono::Utc>) -> Tick {

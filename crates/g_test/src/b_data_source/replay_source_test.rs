@@ -5,11 +5,10 @@
 #![forbid(unsafe_code)]
 
 use b_data_source::models::{KLine, Period};
-use b_data_source::replay_source::{KLineSource, ReplaySource};
 use chrono::Utc;
-use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+#[allow(dead_code)]
 fn create_sample_klines() -> Vec<KLine> {
     vec![
         KLine {
@@ -65,6 +64,7 @@ fn create_sample_klines() -> Vec<KLine> {
     ]
 }
 
+#[allow(dead_code)]
 fn create_multi_symbol_klines() -> Vec<KLine> {
     let base_time = Utc::now();
     vec![

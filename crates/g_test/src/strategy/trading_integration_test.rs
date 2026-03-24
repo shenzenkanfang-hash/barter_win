@@ -8,28 +8,18 @@
 
 #![forbid(unsafe_code)]
 
-use std::sync::Arc;
-use chrono::Utc;
-use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use c_data_process::types::{TradingAction, TradingDecision};
-use c_data_process::SignalProcessor;
-use d_checktable::h_15m::signal_generator::MinSignalGenerator;
-use d_checktable::types::{MinSignalInput, MinSignalOutput, VolatilityLevel};
-use e_risk_monitor::risk::RiskPreChecker;
-use f_engine::core::{TradingEngineV2, SymbolState};
-use f_engine::order::ExchangeGateway;
-use f_engine::types::{Mode, ModeSwitcher, Side};
+use d_checktable::types::MinSignalInput;
 
-use super::mock_gateway::MockExchangeGateway;
 
 // ============================================================================
 // 测试辅助函数
 // ============================================================================
 
 /// 创建测试用 MinSignalInput
+#[allow(dead_code)]
 fn create_test_signal_input(
     tr_base_60min: Decimal,
     tr_ratio_10min_1h: Decimal,
@@ -60,6 +50,7 @@ fn create_test_signal_input(
 }
 
 /// 创建高波动插针信号 (应该触发 LongEntry)
+#[allow(dead_code)]
 fn create_pinbar_long_entry_input() -> MinSignalInput {
     create_test_signal_input(
         dec!(0.20),     // tr_base_60min > 15%
@@ -76,6 +67,7 @@ fn create_pinbar_long_entry_input() -> MinSignalInput {
 }
 
 /// 创建高波动插针信号 (应该触发 ShortEntry)
+#[allow(dead_code)]
 fn create_pinbar_short_entry_input() -> MinSignalInput {
     create_test_signal_input(
         dec!(0.20),     // tr_base_60min > 15%
@@ -92,6 +84,7 @@ fn create_pinbar_short_entry_input() -> MinSignalInput {
 }
 
 /// 创建中性信号 (应该不触发任何信号)
+#[allow(dead_code)]
 fn create_neutral_input() -> MinSignalInput {
     create_test_signal_input(
         dec!(0.05),     // tr_base_60min < 15%
