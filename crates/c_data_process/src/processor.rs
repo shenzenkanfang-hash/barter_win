@@ -688,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_running_state() {
-        let processor = SignalProcessor::new();
+        let processor = Arc::new(SignalProcessor::new());
         assert!(!processor.is_running());
 
         let _ = processor.start_loop();
