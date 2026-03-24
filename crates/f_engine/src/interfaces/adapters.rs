@@ -197,7 +197,7 @@ impl<S: f_engine::strategy::Strategy> StrategyInstance for StrategyAdapter<S> {
                 MarketStatusType::Trend => f_engine::strategy::MarketStatusType::Trend,
                 MarketStatusType::Range => f_engine::strategy::MarketStatusType::Range,
             },
-            volatility: f_engine::strategy::VolatilityLevel::Normal,
+            volatility: f_engine::strategy::VolatilityTier::Low,
             volatility_value: 0.0,
         };
         self.inner.on_market_status(&market_status);

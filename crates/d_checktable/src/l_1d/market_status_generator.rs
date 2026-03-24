@@ -1,33 +1,26 @@
 #![forbid(unsafe_code)]
 
-use rust_decimal_macros::dec;
-use crate::types::{MarketStatus, VolatilityLevel, DayMarketStatusInput, DayMarketStatusOutput, DaySignalInput};
+use a_common::config::VOLATILITY_CONFIG;
+use crate::types::{MarketStatus, VolatilityTier, DayMarketStatusInput, DayMarketStatusOutput, DaySignalInput};
 
 /// 日线级市场状态生成器
 ///
 /// ```text
-/// Volatility Level Decision Tree (日线级阈值 > h_15m)
+/// VolatilityTier Decision Tree (使用全局阈值配置)
 /// ─────────────────────────────────────────────────
-///   tr_ratio_5d_20d > 1.5  ─┐
-///   OR                     ──> HIGH
-///   tr_ratio_20d_60d > 1.5 ─┘
-/// ─────────────────────────────────────────────────
-///   tr_ratio_5d_20d < 0.5  ─┐
-///   AND                     ──> LOW
-///   tr_ratio_20d_60d < 0.5 ─┘
-/// ─────────────────────────────────────────────────
-///   otherwise               ──> NORMAL
+///   tr_ratio >= high_vol_15m  ──> High
+///   tr_ratio >= high_vol_1m   ──> Medium
+///   otherwise                 ──> Low
 /// ─────────────────────────────────────────────────
 ///
 /// Market Status Decision Tree:
 /// ─────────────────────────────────────────────────
 ///   if pine_color == "纯绿" or "纯红"  ──> TREND
-///   else if volatility_level == LOW       ──> RANGE
+///   else if volatility_tier == Low       ──> RANGE
 ///   else                                  ──> TREND
 /// ─────────────────────────────────────────────────
 ///
-/// 注意：日线级使用更大的 TR 阈值 (1.5 vs h_15m 的 1.0)
-/// 因为日线级波动范围更大，需要更大的阈值才能判断为极端。
+/// 注意：日线级使用相同的全局阈值配置
 /// ```
 pub struct DayMarketStatusGenerator {
     #[allow(dead_code)]
@@ -50,42 +43,45 @@ impl DayMarketStatusGenerator {
     /// 检测市场状态
     pub fn detect(&self, input: &DayMarketStatusInput) -> DayMarketStatusOutput {
         // 1. 判断波动率等级
-        let volatility_level = self.determine_volatility_level(input);
+        let volatility_tier = self.determine_volatility_level(input);
 
         // 2. 判断市场状态
-        let status = self.determine_status(input, &volatility_level);
+        let status = self.determine_status(input, &volatility_tier);
 
         DayMarketStatusOutput {
             status,
-            volatility_level,
+            volatility_tier,
         }
     }
 
-    /// 判断波动率等级（基于 tr_ratio_5d_20d 和 tr_ratio_20d_60d）
-    pub fn determine_volatility_level(&self, input: &DayMarketStatusInput) -> VolatilityLevel {
-        // 日线级使用更大的阈值
-        if input.tr_ratio_5d_20d > dec!(1.5) || input.tr_ratio_20d_60d > dec!(1.5) {
-            VolatilityLevel::HIGH
-        } else if input.tr_ratio_5d_20d < dec!(0.5) && input.tr_ratio_20d_60d < dec!(0.5) {
-            VolatilityLevel::LOW
+    /// 判断波动率等级（基于 tr_ratio_5d_20d 和 tr_ratio_20d_60d，使用全局阈值）
+    pub fn determine_volatility_level(&self, input: &DayMarketStatusInput) -> VolatilityTier {
+        let config = &*VOLATILITY_CONFIG;
+        let max_ratio = input.tr_ratio_5d_20d.max(input.tr_ratio_20d_60d);
+        if max_ratio >= config.high_vol_15m {
+            VolatilityTier::High
+        } else if max_ratio >= config.high_vol_1m {
+            VolatilityTier::Medium
         } else {
-            VolatilityLevel::NORMAL
+            VolatilityTier::Low
         }
     }
 
     /// 判断波动率等级（基于 DaySignalInput）
-    pub fn determine_volatility_level_from_signal(&self, input: &DaySignalInput) -> VolatilityLevel {
-        if input.tr_ratio_5d_20d > dec!(1.5) || input.tr_ratio_20d_60d > dec!(1.5) {
-            VolatilityLevel::HIGH
-        } else if input.tr_ratio_5d_20d < dec!(0.5) && input.tr_ratio_20d_60d < dec!(0.5) {
-            VolatilityLevel::LOW
+    pub fn determine_volatility_level_from_signal(&self, input: &DaySignalInput) -> VolatilityTier {
+        let config = &*VOLATILITY_CONFIG;
+        let max_ratio = input.tr_ratio_5d_20d.max(input.tr_ratio_20d_60d);
+        if max_ratio >= config.high_vol_15m {
+            VolatilityTier::High
+        } else if max_ratio >= config.high_vol_1m {
+            VolatilityTier::Medium
         } else {
-            VolatilityLevel::NORMAL
+            VolatilityTier::Low
         }
     }
 
     /// 判断市场状态
-    fn determine_status(&self, input: &DayMarketStatusInput, vol_level: &VolatilityLevel) -> MarketStatus {
+    fn determine_status(&self, input: &DayMarketStatusInput, vol_tier: &VolatilityTier) -> MarketStatus {
         // 基于 Pine 颜色和位置判断市场状态
         let pine_color_valid = !input.pine_color.is_empty();
 
@@ -97,7 +93,7 @@ impl DayMarketStatusGenerator {
         }
 
         // 低波动率时为震荡
-        if vol_level == &VolatilityLevel::LOW {
+        if *vol_tier == VolatilityTier::Low {
             return MarketStatus::RANGE;
         }
 

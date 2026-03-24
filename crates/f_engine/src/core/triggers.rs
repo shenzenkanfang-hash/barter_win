@@ -9,13 +9,15 @@
 #![forbid(unsafe_code)]
 
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 
 use crate::core::EngineStateHandle;
 
 /// 触发器配置
+/// 注意：阈值使用 0.01 = 1% 标准
 #[derive(Debug, Clone)]
 pub struct TriggerConfig {
-    /// 分钟级波动率阈值（百分比）
+    /// 分钟级波动率阈值（单位：0.01=1%，默认 5%=0.05）
     pub minute_volatility_threshold: Decimal,
     /// 日线入场低位阈值（百分比）
     pub daily_entry_low_threshold: Decimal,
@@ -32,9 +34,9 @@ pub struct TriggerConfig {
 impl Default for TriggerConfig {
     fn default() -> Self {
         Self {
-            minute_volatility_threshold: Decimal::from(13),
-            daily_entry_low_threshold: Decimal::from(30),
-            daily_entry_high_threshold: Decimal::from(70),
+            minute_volatility_threshold: dec!(0.05),  // 5%
+            daily_entry_low_threshold: dec!(30),
+            daily_entry_high_threshold: dec!(70),
             max_running_symbols: 10,
             minute_data_days: 1,
             daily_data_days: 250,
@@ -49,9 +51,9 @@ impl TriggerConfig {
 
     pub fn backtest() -> Self {
         Self {
-            minute_volatility_threshold: Decimal::from(10),
-            daily_entry_low_threshold: Decimal::from(25),
-            daily_entry_high_threshold: Decimal::from(75),
+            minute_volatility_threshold: dec!(0.05),  // 5%
+            daily_entry_low_threshold: dec!(25),
+            daily_entry_high_threshold: dec!(75),
             max_running_symbols: 50,
             minute_data_days: 1,
             daily_data_days: 250,

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use rust_decimal_macros::dec;
-use crate::types::{MinSignalInput, MinSignalOutput, VolatilityLevel};
+use crate::types::{MinSignalInput, MinSignalOutput, VolatilityTier};
 
 /// 分钟级信号生成器（纯指标判断）
 ///
@@ -43,7 +43,7 @@ impl MinSignalGenerator {
     }
 
     /// 生成交易信号
-    pub fn generate(&self, input: &MinSignalInput, _vol_level: &VolatilityLevel) -> MinSignalOutput {
+    pub fn generate(&self, input: &MinSignalInput, _vol_tier: &VolatilityTier) -> MinSignalOutput {
         // 检测插针条件
         let pin_satisfied = self.count_pin_conditions(input);
 
@@ -259,6 +259,6 @@ mod tests {
     #[test]
     fn test_new_generator() {
         let r#gen = MinSignalGenerator::new();
-        assert!(!r#gen.generate(&MinSignalInput::default(), &VolatilityLevel::NORMAL).long_entry);
+        assert!(!r#gen.generate(&MinSignalInput::default(), &VolatilityTier::Low).long_entry);
     }
 }

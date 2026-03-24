@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 
 // Re-export market data types from a_common
 pub use a_common::models::market_data::{
-    MarketKLine, MarketTick, VolatilityInfo, VolatilityLevel,
+    MarketKLine, MarketTick, VolatilityInfo, VolatilityTier,
     OrderBookLevel, OrderBookSnapshot,
 };
 

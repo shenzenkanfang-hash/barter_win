@@ -117,6 +117,8 @@ pub struct VolatilityManager {
     summary_path: std::path::PathBuf,
     /// 15min rolling window 文件目录
     rolling_15m_dir: std::path::PathBuf,
+    /// 波动率排名文件目录
+    vol_rank_dir: std::path::PathBuf,
 }
 
 impl VolatilityManager {
@@ -124,6 +126,7 @@ impl VolatilityManager {
         let paths = Paths::new();
         let summary_path = std::path::PathBuf::from(format!("{}/volatility/summary.json", paths.memory_backup_dir));
         let rolling_15m_dir = std::path::PathBuf::from(format!("{}/rolling_15m", paths.memory_backup_dir));
+        let vol_rank_dir = std::path::PathBuf::from(format!("{}/volatility", paths.memory_backup_dir));
         Self {
             detectors: RwLock::new(HashMap::new()),
             rank: RwLock::new(VolatilityRank::new()),
@@ -131,6 +134,7 @@ impl VolatilityManager {
             summary_interval: Duration::from_secs(60),
             summary_path,
             rolling_15m_dir,
+            vol_rank_dir,
         }
     }
 
@@ -291,7 +295,65 @@ impl VolatilityManager {
         if last_time.elapsed() >= self.summary_interval {
             self.log_summary();
             self.save_summary();
+            self.save_volatility_ranking();
             *last_time = Instant::now();
+        }
+    }
+
+    /// 保存波动率排名文件 (vol_15min.json, vol_1min.json)
+    /// 格式: {"时间":"可阅读时间","排序":[[品种名,波动率*1000整数],[品种名,波动率*1000整数]]}
+    pub fn save_volatility_ranking(&self) {
+        use rust_decimal::prelude::ToPrimitive;
+
+        let rank = self.rank.read();
+        let now = chrono::Utc::now();
+        let time_str = now.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        // 按15m波动率排序
+        let vol_15m_entries: Vec<(String, i64)> = rank
+            .rank_by_15m()
+            .iter()
+            .filter(|e| e.vol_15m > dec!(0))
+            .map(|e| {
+                let vol_i64 = (e.vol_15m * dec!(1000)).round().to_i64().unwrap_or(0);
+                (e.symbol.clone(), vol_i64)
+            })
+            .collect();
+
+        // 按1m波动率排序
+        let vol_1m_entries: Vec<(String, i64)> = rank
+            .rank_by_1m()
+            .iter()
+            .filter(|e| e.vol_1m > dec!(0))
+            .map(|e| {
+                let vol_i64 = (e.vol_1m * dec!(1000)).round().to_i64().unwrap_or(0);
+                (e.symbol.clone(), vol_i64)
+            })
+            .collect();
+
+        drop(rank);
+
+        // 确保目录存在
+        let _ = std::fs::create_dir_all(&self.vol_rank_dir);
+
+        // 保存 vol_15min.json
+        let vol_15m_data = serde_json::json!({
+            "时间": time_str,
+            "排序": vol_15m_entries
+        });
+        let vol_15m_path = self.vol_rank_dir.join("vol_15min.json");
+        if let Ok(json) = serde_json::to_string_pretty(&vol_15m_data) {
+            let _ = std::fs::write(&vol_15m_path, json);
+        }
+
+        // 保存 vol_1min.json
+        let vol_1m_data = serde_json::json!({
+            "时间": time_str,
+            "排序": vol_1m_entries
+        });
+        let vol_1m_path = self.vol_rank_dir.join("vol_1min.json");
+        if let Ok(json) = serde_json::to_string_pretty(&vol_1m_data) {
+            let _ = std::fs::write(&vol_1m_path, json);
         }
     }
 

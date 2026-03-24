@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use rust_decimal_macros::dec;
-use crate::types::{DaySignalInput, DaySignalOutput, VolatilityLevel};
+use crate::types::{DaySignalInput, DaySignalOutput, VolatilityTier};
 
 /// 日线级信号生成器（纯指标判断）
 ///
@@ -53,7 +53,7 @@ impl DaySignalGenerator {
     }
 
     /// 生成交易信号
-    pub fn generate(&self, input: &DaySignalInput, _vol_level: &VolatilityLevel) -> DaySignalOutput {
+    pub fn generate(&self, input: &DaySignalInput, _vol_tier: &VolatilityTier) -> DaySignalOutput {
         // 检测 Pine 颜色条件
         let all_green = self.check_all_pine_green(input);
         let all_red_purple = self.check_all_pine_red_purple(input);

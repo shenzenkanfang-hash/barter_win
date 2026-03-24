@@ -6,6 +6,7 @@ pub mod executor;
 
 pub use executor::{SignalAggregator, StrategyExecutor};
 
+use a_common::models::market_data::VolatilityTier;
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
@@ -256,7 +257,7 @@ impl From<b_data_source::KLine> for StrategyKLine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketStatus {
     pub status: MarketStatusType,
-    pub volatility: VolatilityLevel,
+    pub volatility: VolatilityTier,
     pub volatility_value: f64,
 }
 
@@ -265,13 +266,6 @@ pub enum MarketStatusType {
     Pin,
     Trend,
     Range,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum VolatilityLevel {
-    High,
-    Normal,
-    Low,
 }
 
 /// 策略接口

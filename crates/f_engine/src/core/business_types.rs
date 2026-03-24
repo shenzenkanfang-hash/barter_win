@@ -7,43 +7,9 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-// Re-export PositionSide from a_common
+// Re-export types from a_common
 pub use a_common::models::types::PositionSide;
-// 波动率等级
-// ============================================================================
-
-/// 波动率等级（业务层定义）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VolatilityTier {
-    /// 低波动
-    Low,
-    /// 中波动
-    Medium,
-    /// 高波动
-    High,
-    /// 极端波动
-    Extreme,
-}
-
-impl Default for VolatilityTier {
-    fn default() -> Self {
-        VolatilityTier::Low
-    }
-}
-
-impl VolatilityTier {
-    pub fn from_ratio(ratio: Decimal) -> Self {
-        if ratio < Decimal::from(5) {
-            VolatilityTier::Low
-        } else if ratio < Decimal::from(10) {
-            VolatilityTier::Medium
-        } else if ratio < Decimal::from(20) {
-            VolatilityTier::High
-        } else {
-            VolatilityTier::Extreme
-        }
-    }
-}
+pub use a_common::models::market_data::VolatilityTier;
 
 // ============================================================================
 // 账户风险状态

@@ -27,7 +27,7 @@ pub use api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
 pub use api::{FuturesAccountResponse, FuturesAsset, FuturesPositionResponse};
 
 // Re-exports - Config
-pub use config::{Platform, Paths};
+pub use config::{Platform, Paths, VolatilityConfig, VOLATILITY_CONFIG};
 
 // Re-exports - Logs
 pub use logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};

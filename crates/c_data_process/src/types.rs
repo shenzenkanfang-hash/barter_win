@@ -19,19 +19,8 @@ impl Default for MarketStatus {
     }
 }
 
-/// 波动率等级
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VolatilityLevel {
-    HIGH,    // 高波动 (15min TR > 13%)
-    NORMAL,  // 正常波动
-    LOW,     // 低波动
-}
-
-impl Default for VolatilityLevel {
-    fn default() -> Self {
-        VolatilityLevel::NORMAL
-    }
-}
+/// 波动率等级（从 a_common 统一导入）
+pub use a_common::models::market_data::VolatilityTier;
 
 /// 策略层级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,7 +110,7 @@ pub struct MinMarketStatusInput {
 #[derive(Debug, Clone, Default)]
 pub struct MinMarketStatusOutput {
     pub status: MarketStatus,
-    pub volatility_level: VolatilityLevel,
+    pub volatility_tier: VolatilityTier,
     pub high_volatility_reason: Option<String>,
 }
 
@@ -203,7 +192,7 @@ impl DayMarketStatusInput {
 #[derive(Debug, Clone, Default)]
 pub struct DayMarketStatusOutput {
     pub status: MarketStatus,
-    pub volatility_level: VolatilityLevel,
+    pub volatility_tier: VolatilityTier,
 }
 
 /// 日线级信号输入

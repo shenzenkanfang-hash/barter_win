@@ -11,7 +11,8 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use d_checktable::types::MinSignalInput;
+#[allow(unused_imports)]
+use d_checktable::types::{MinSignalInput, VolatilityTier};
 
 
 // ============================================================================
@@ -109,7 +110,7 @@ fn test_signal_generator_long_entry() {
     let generator = MinSignalGenerator::new();
     let input = create_pinbar_long_entry_input();
 
-    let output = generator.generate(&input, &VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityTier::High);
 
     assert!(output.long_entry, "应该触发 LongEntry 信号");
     assert!(!output.short_entry, "不应该触发 ShortEntry 信号");
@@ -121,7 +122,7 @@ fn test_signal_generator_short_entry() {
     let generator = MinSignalGenerator::new();
     let input = create_pinbar_short_entry_input();
 
-    let output = generator.generate(&input, &VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityTier::High);
 
     assert!(!output.long_entry, "不应该触发 LongEntry 信号");
     assert!(output.short_entry, "应该触发 ShortEntry 信号");
@@ -132,7 +133,7 @@ fn test_signal_generator_neutral_no_signal() {
     let generator = MinSignalGenerator::new();
     let input = create_neutral_input();
 
-    let output = generator.generate(&input, &VolatilityLevel::NORMAL);
+    let output = generator.generate(&input, &VolatilityTier::Medium);
 
     assert!(!output.long_entry, "不应该触发 LongEntry 信号");
     assert!(!output.short_entry, "不应该触发 ShortEntry 信号");
@@ -150,7 +151,7 @@ fn test_signal_generator_7_pin_conditions() {
         dec!(0.5), dec!(0.5), dec!(50),
         "中性", "中性", dec!(0), dec!(0)
     );
-    let output1 = generator.generate(&input1, &VolatilityLevel::NORMAL);
+    let output1 = generator.generate(&input1, &VolatilityTier::Medium);
     assert!(!output1.long_entry && !output1.short_entry, "条件不满足不应该触发");
 
     // 测试所有条件都满足 (应该触发)
@@ -159,7 +160,7 @@ fn test_signal_generator_7_pin_conditions() {
         dec!(3.0), dec!(3.0), dec!(10),
         "纯绿", "纯绿", dec!(-0.1), dec!(100)
     );
-    let output2 = generator.generate(&input2, &VolatilityLevel::HIGH);
+    let output2 = generator.generate(&input2, &VolatilityTier::High);
     assert!(output2.long_entry || output2.short_entry, "条件满足应该触发信号");
 }
 
@@ -425,7 +426,7 @@ fn test_end_to_end_signal_to_decision() {
 
     // 1. 生成做多信号
     let long_input = create_pinbar_long_entry_input();
-    let long_output = generator.generate(&long_input, &VolatilityLevel::HIGH);
+    let long_output = generator.generate(&long_input, &VolatilityTier::High);
 
     assert!(long_output.long_entry, "应该生成做多信号");
 
@@ -481,7 +482,7 @@ fn test_end_to_end_short_entry_flow() {
 
     // 生成做空信号
     let short_input = create_pinbar_short_entry_input();
-    let short_output = generator.generate(&short_input, &VolatilityLevel::HIGH);
+    let short_output = generator.generate(&short_input, &VolatilityTier::High);
 
     assert!(short_output.short_entry, "应该生成做空信号");
 
@@ -575,7 +576,7 @@ fn test_boundary_tr_ratio_threshold() {
         "纯绿", "纯绿", dec!(-0.05), dec!(100)
     );
 
-    let output = generator.generate(&input, &VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityTier::High);
     // tr_base_60min <= 15% 时不应该触发 entry
     assert!(!output.long_entry, "tr_base=0.15 时不应该触发 LongEntry");
 }
@@ -593,7 +594,7 @@ fn test_boundary_zscore_threshold() {
         "纯绿", "纯绿", dec!(-0.05), dec!(100)
     );
 
-    let output = generator.generate(&input, &VolatilityLevel::HIGH);
+    let output = generator.generate(&input, &VolatilityTier::High);
     // zscore = 2 时，极端条件检查是 |zscore| > 2，不满足
     // 但因为有多个条件满足，仍然可能触发
     println!("Long entry: {}, Short entry: {}", output.long_entry, output.short_entry);

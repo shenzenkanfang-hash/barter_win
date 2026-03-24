@@ -5,6 +5,7 @@
 //! - 15m Close-Close 变化率
 //! - 高波动判断
 
+use crate::config::VOLATILITY_CONFIG;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -47,9 +48,9 @@ pub struct VolatilityCalc {
     kline_15m_window: Vec<KLineInput>,
     /// 1m K线计数（当前累积到第几根）
     kline_1m_count: u32,
-    /// 阈值: 1m 3%
+    /// 阈值: 1m (从全局配置读取)
     threshold_1m: Decimal,
-    /// 阈值: 15m 13%
+    /// 阈值: 15m (从全局配置读取)
     threshold_15m: Decimal,
     /// 上次更新时间
     last_update: DateTime<Utc>,
@@ -57,22 +58,24 @@ pub struct VolatilityCalc {
 
 impl VolatilityCalc {
     pub fn new() -> Self {
+        let config = &*VOLATILITY_CONFIG;
         Self {
             kline_15m_window: Vec::with_capacity(2),
             kline_1m_count: 0,
-            threshold_1m: dec!(0.03),
-            threshold_15m: dec!(0.13),
+            threshold_1m: config.high_vol_1m,
+            threshold_15m: config.high_vol_15m,
             last_update: Utc::now(),
         }
     }
 
     /// 从状态恢复
     pub fn restore(state: VolatilityState) -> Self {
+        let config = &*VOLATILITY_CONFIG;
         Self {
             kline_15m_window: state.kline_15m_window,
             kline_1m_count: state.kline_1m_count,
-            threshold_1m: dec!(0.03),
-            threshold_15m: dec!(0.13),
+            threshold_1m: config.high_vol_1m,
+            threshold_15m: config.high_vol_15m,
             last_update: Utc::now(),
         }
     }
@@ -246,14 +249,16 @@ impl VolatilityRank {
             .collect()
     }
 
-    /// 获取1m高波动品种（>= 3%）
+    /// 获取1m高波动品种（使用全局阈值）
     pub fn high_vol_1m(&self) -> Vec<&VolatilityEntry> {
-        self.above_1m_threshold(dec!(0.03))
+        let config = &*VOLATILITY_CONFIG;
+        self.above_1m_threshold(config.high_vol_1m)
     }
 
-    /// 获取15m高波动品种（>= 13%）
+    /// 获取15m高波动品种（使用全局阈值）
     pub fn high_vol_15m(&self) -> Vec<&VolatilityEntry> {
-        self.above_15m_threshold(dec!(0.13))
+        let config = &*VOLATILITY_CONFIG;
+        self.above_15m_threshold(config.high_vol_15m)
     }
 }
 
@@ -271,8 +276,8 @@ mod tests {
     fn test_volatility_calc_default() {
         let calc = VolatilityCalc::new();
         let (th1m, th15m) = calc.thresholds();
-        assert_eq!(th1m, dec!(0.03));
-        assert_eq!(th15m, dec!(0.13));
+        assert_eq!(th1m, dec!(0.005));
+        assert_eq!(th15m, dec!(0.05));
     }
 
     #[test]
@@ -297,7 +302,7 @@ mod tests {
         };
         let stats = calc.update(k2);
 
-        assert!(stats.vol_1m >= dec!(0.03));
+        assert!(stats.vol_1m >= dec!(0.005));
     }
 
     #[test]

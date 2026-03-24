@@ -17,7 +17,7 @@ pub mod interfaces;
 // Re-exports - Interfaces
 pub use interfaces::{
     // 市场数据接口
-    MarketDataProvider, MarketKLine, MarketTick, VolatilityInfo, VolatilityLevel,
+    MarketDataProvider, MarketKLine, MarketTick, VolatilityInfo,
     // 策略接口
     StrategyExecutor, StrategyInstance, TradingSignal, SignalDirection, SignalType,
     StrategyState, SignalAggregator, StrategyFactory,
