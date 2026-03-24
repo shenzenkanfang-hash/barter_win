@@ -122,6 +122,10 @@ impl MinuteTrigger {
         Self { config }
     }
 
+    pub fn config(&self) -> &TriggerConfig {
+        &self.config
+    }
+
     /// 检查品种是否满足分钟级触发条件
     ///
     /// # 参数
@@ -184,6 +188,10 @@ pub struct DailyTrigger {
 impl DailyTrigger {
     pub fn new(config: TriggerConfig) -> Self {
         Self { config }
+    }
+
+    pub fn config(&self) -> &TriggerConfig {
+        &self.config
     }
 
     /// 检查品种是否满足日线级触发条件
@@ -267,6 +275,10 @@ impl TriggerManager {
 
     pub fn daily_trigger(&self) -> &DailyTrigger {
         &self.daily_trigger
+    }
+
+    pub fn config(&self) -> &TriggerConfig {
+        self.minute_trigger.config()
     }
 }
 
