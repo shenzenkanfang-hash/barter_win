@@ -1,13 +1,16 @@
 //! f_engine 核心状态管理
 //!
 //! # 模块说明
-//! - `SymbolState`: 品种交易状态
+//! - `SymbolState`: 品种交易状态（含指标）
+//! - `SymbolMetrics`: 品种级运行指标
 //! - `TradeLock`: 交易锁，防止重复执行
+//! - `SignalCache`: 信号缓存
 //! - `StartupState`: 启动状态（正常/灾备恢复）
 //! - `CheckConfig`: 检查配置（时间窗口）
 
 #![forbid(unsafe_code)]
 
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -89,6 +92,79 @@ impl TradeLock {
 }
 
 // ============================================================================
+// 品种指标
+// ============================================================================
+
+/// 品种级运行指标
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SymbolMetrics {
+    /// 累计处理 tick 数
+    pub tick_processed: u64,
+    /// 累计生成信号数
+    pub signal_generated: u64,
+    /// 累计下单数
+    pub order_sent: u64,
+    /// 累计成交数
+    pub order_filled: u64,
+    /// 累计失败数
+    pub order_failed: u64,
+    /// 最后信号时间
+    pub last_signal_time: Option<DateTime<Utc>>,
+    /// 最后下单时间
+    pub last_order_time: Option<DateTime<Utc>>,
+}
+
+impl SymbolMetrics {
+    /// 创建新的品种指标
+    pub fn new(symbol: &str) -> Self {
+        Self {
+            tick_processed: 0,
+            signal_generated: 0,
+            order_sent: 0,
+            order_filled: 0,
+            order_failed: 0,
+            last_signal_time: None,
+            last_order_time: None,
+        }
+    }
+
+    /// 记录 tick 处理
+    pub fn record_tick(&mut self) {
+        self.tick_processed += 1;
+    }
+
+    /// 记录信号生成
+    pub fn record_signal(&mut self) {
+        self.signal_generated += 1;
+        self.last_signal_time = Some(Utc::now());
+    }
+
+    /// 记录订单发送
+    pub fn record_order_sent(&mut self) {
+        self.order_sent += 1;
+        self.last_order_time = Some(Utc::now());
+    }
+
+    /// 记录订单成交
+    pub fn record_order_filled(&mut self) {
+        self.order_filled += 1;
+    }
+
+    /// 记录订单失败
+    pub fn record_order_failed(&mut self) {
+        self.order_failed += 1;
+    }
+
+    /// 获取成交率
+    pub fn fill_rate(&self) -> f64 {
+        if self.order_sent == 0 {
+            return 0.0;
+        }
+        self.order_filled as f64 / self.order_sent as f64
+    }
+}
+
+// ============================================================================
 // 品种状态
 // ============================================================================
 
@@ -99,6 +175,7 @@ impl TradeLock {
 /// - 指标请求/成功时间戳
 /// - 缓存的信号
 /// - 启动状态
+/// - 运行指标
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolState {
     /// 品种符号
@@ -130,13 +207,17 @@ pub struct SymbolState {
 
     /// 超时阈值（秒）
     pub timeout_secs: i64,
+
+    // --- 运行指标 ---
+    /// 品种级指标
+    pub metrics: SymbolMetrics,
 }
 
 impl SymbolState {
     /// 创建新的品种状态
     pub fn new(symbol: String) -> Self {
         Self {
-            symbol,
+            symbol: symbol.clone(),
             trade_lock: TradeLock::new(),
             startup_state: StartupState::Fresh,
             last_1m_request_ts: 0,
@@ -147,6 +228,7 @@ impl SymbolState {
             last_daily_ok_ts: 0,
             last_daily_signal: None,
             timeout_secs: 60, // 默认1分钟超时
+            metrics: SymbolMetrics::new(&symbol),
         }
     }
 
@@ -193,6 +275,7 @@ impl SymbolState {
     /// 记录分钟级请求
     pub fn record_1m_request(&mut self, ts: i64) {
         self.last_1m_request_ts = ts;
+        self.metrics.record_tick();
     }
 
     /// 记录分钟级成功
@@ -200,6 +283,7 @@ impl SymbolState {
         self.last_1m_ok_ts = ts;
         self.last_1m_signal_ts = signal_ts;
         self.last_1m_signal = Some(signal);
+        self.metrics.record_signal();
     }
 
     /// 记录日线级请求
@@ -211,6 +295,21 @@ impl SymbolState {
     pub fn record_daily_ok(&mut self, ts: i64, signal: TradingDecision) {
         self.last_daily_ok_ts = ts;
         self.last_daily_signal = Some(signal);
+    }
+
+    /// 记录订单发送
+    pub fn record_order_sent(&mut self) {
+        self.metrics.record_order_sent();
+    }
+
+    /// 记录订单成交
+    pub fn record_order_filled(&mut self) {
+        self.metrics.record_order_filled();
+    }
+
+    /// 记录订单失败
+    pub fn record_order_failed(&mut self) {
+        self.metrics.record_order_failed();
     }
 }
 
