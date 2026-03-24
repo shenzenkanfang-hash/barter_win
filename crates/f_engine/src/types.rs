@@ -4,7 +4,7 @@
 //! - `StrategyId` - 策略标识符
 //! - `TradingDecision` - 交易决策
 //! - `OrderRequest` - 订单请求
-//! - `Side`, `OrderType` - 来自 a_common 的类型重导出
+//! - `Side`, `OrderType`, `TradingAction` - 来自 a_common 的类型重导出
 //! - `Mode`, `ModeSwitcher` - 移至 `channel` 模块
 
 #![forbid(unsafe_code)]
@@ -13,11 +13,11 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
-// 从 c_data_process 导入
+// 从 a_common 导入（权威类型位置）
 // ============================================================================
 
 /// TradingAction 交易动作
-pub use c_data_process::types::TradingAction;
+pub use a_common::models::types::TradingAction;
 
 // ============================================================================
 // 策略标识符

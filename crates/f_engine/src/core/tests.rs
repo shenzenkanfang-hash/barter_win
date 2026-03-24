@@ -39,7 +39,7 @@ use crate::core::rollback::{RollbackManager, OrderRollbackHelper};
 use crate::core::engine_state::{EngineMode, EngineStateHandle};
 
 // 导入 TradingAction
-pub use c_data_process::types::TradingAction;
+pub use crate::types::TradingAction;
 
 #[cfg(test)]
 mod business_types_tests {

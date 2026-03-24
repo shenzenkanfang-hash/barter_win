@@ -99,23 +99,11 @@ impl PricePosition {
     }
 }
 
-/// 交易动作
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TradingAction {
-    Long,      // 做多
-    Short,     // 做空
-    Flat,      // 平仓
-    Hedge,     // 对冲
-    Wait,      // 等待
-}
+/// 交易动作（从 a_common 导入，禁止本地定义）
+pub use a_common::models::types::TradingAction;
 
-/// 持仓方向
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PositionSide {
-    LONG,
-    SHORT,
-    NONE,
-}
+/// 持仓方向（从 a_common 导入，禁止本地定义）
+pub use a_common::models::types::PositionSide;
 
 // ==================== min/ 输入输出类型 ====================
 

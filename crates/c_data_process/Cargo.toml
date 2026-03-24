@@ -10,6 +10,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+a_common = { path = "../a_common" }
 b_data_source = { path = "../b_data_source" }
 parking_lot = { workspace = true }
 tracing = { workspace = true }

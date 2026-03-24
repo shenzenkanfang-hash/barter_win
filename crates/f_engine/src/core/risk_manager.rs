@@ -120,7 +120,7 @@ impl RiskManager {
 
         let is_opening = !matches!(
             response.action,
-            c_data_process::types::TradingAction::Flat
+            crate::types::TradingAction::Flat
         );
         if is_opening && usage_rate >= self.config.pool_usage_threshold {
             return RiskCheckResult::new(false, false);
@@ -161,7 +161,7 @@ impl RiskManager {
         // 3. 检查实时持仓状态
         let is_opening = !matches!(
             response.action,
-            c_data_process::types::TradingAction::Flat
+            crate::types::TradingAction::Flat
         );
 
         // 开仓时检查是否已有反向持仓

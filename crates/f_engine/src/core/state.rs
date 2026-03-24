@@ -19,6 +19,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::types::TradingDecision;
+
 // ============================================================================
 // 启动状态
 // ============================================================================
@@ -651,9 +653,3 @@ impl CheckConfig {
         self.daily_check_interval_ms
     }
 }
-
-// ============================================================================
-// 交易决策 (从 c_data_process 导入)
-// ============================================================================
-
-pub use c_data_process::types::TradingDecision;

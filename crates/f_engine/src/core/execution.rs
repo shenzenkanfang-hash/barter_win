@@ -11,7 +11,7 @@ use crate::core::{
     ChannelType, OrderLifecycle, OrderInfo,
     VolatilityTier, RiskState, PositionSide,
 };
-pub use c_data_process::types::TradingAction;
+pub use crate::types::TradingAction;
 
 /// 执行配置
 #[derive(Debug, Clone)]

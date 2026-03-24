@@ -45,3 +45,23 @@ pub struct FundPool {
     pub available: Decimal,
     pub positions_value: Decimal,
 }
+
+/// 交易动作
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradingAction {
+    Long,      // 做多
+    Short,     // 做空
+    Flat,      // 平仓
+    Add,       // 加仓
+    Reduce,    // 减仓
+    Hedge,     // 对冲
+    Wait,      // 等待
+}
+
+/// 持仓方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PositionSide {
+    LONG,
+    SHORT,
+    NONE,
+}

@@ -28,7 +28,6 @@ pub mod rollback;  // 回滚管理
 #[cfg(test)]
 mod tests;  // 测试模块
 
-pub use d_checktable::h_15m::pipeline_form::PipelineForm;
 pub use strategy_pool::{StrategyAllocation, StrategyPool};
 pub use state::{SymbolState, SymbolMetrics, TradeLock, CheckConfig, StartupState};
 pub use crate::types::{StrategyId, TradingDecision, OrderRequest, Side, OrderType};

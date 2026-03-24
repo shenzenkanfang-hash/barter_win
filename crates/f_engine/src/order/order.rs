@@ -145,6 +145,18 @@ impl OrderExecutor {
                     message: "Wait".to_string(),
                 })
             }
+            TradingAction::Add | TradingAction::Reduce => {
+                // 加仓/减仓暂不支持
+                Ok(OrderResult {
+                    order_id: String::new(),
+                    status: OrderStatus::Cancelled,
+                    filled_qty: Decimal::ZERO,
+                    filled_price: Decimal::ZERO,
+                    commission: Decimal::ZERO,
+                    reject_reason: None,
+                    message: "Add/Reduce action - not implemented".to_string(),
+                })
+            }
         }
     }
 }

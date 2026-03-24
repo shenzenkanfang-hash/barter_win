@@ -44,10 +44,12 @@ pub use interfaces::{
     SignalDirection, SignalType as InterfaceSignalType, StrategyState as InterfaceStrategyState,
     SignalAggregator as SignalAggregatorTrait, StrategyFactory as StrategyFactoryTrait,
     // 风控接口
-    RiskChecker, RiskLevel, OrderRequest as RiskOrderRequest,
-    AccountInfo, PositionInfo, OrderSide, OrderType as RiskOrderType,
+    RiskChecker, RiskLevel, OrderRequest as RiskOrderRequest, ExtendedOrderType,
+    AccountInfo, PositionInfo,
     // 执行接口
     ExchangeGateway, OrderResult, OrderStatus,
+    // CheckTable 接口
+    CheckTableProvider, CheckTable, CheckTableResult, CheckTableConfig,
 };
 
 pub use core::engine_v2::{

@@ -65,6 +65,13 @@ impl Default for TradingEngineConfig {
     }
 }
 
+impl TradingEngineV2 {
+    /// 创建默认配置
+    pub fn default_config() -> TradingEngineConfig {
+        TradingEngineConfig::default()
+    }
+}
+
 /// TradingEngine v2 - V1.4 完整实现
 ///
 /// # 严格遵守 V1.4 文档：

@@ -9,7 +9,7 @@
 
 use a_common::BinanceApiGateway;
 use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}, MockMarketStream};
-use f_engine::core::TradingEngine;
+use f_engine::core::{TradingEngineV2, TradingEngineConfig};
 use f_engine::order::mock_binance_gateway::{MockBinanceGateway, MockGatewayConfig};
 use rust_decimal_macros::dec;
 use std::sync::Arc;
@@ -49,21 +49,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gateway = Arc::new(MockBinanceGateway::with_config(config));
 
     // 创建 Mock 市场数据流
-    let market_stream = Box::new(MockMarketStream::new(
+    let _market_stream = Box::new(MockMarketStream::new(
         "BTCUSDT".to_string(),
         dec!(50000.0),
     ));
 
-    // 创建 TradingEngine 实例
-    let engine = TradingEngine::new(
-        market_stream,
-        "BTCUSDT".to_string(),
-        dec!(10000.0),  // 初始资金 10000 USDT
-        gateway,
-    );
-
-    // 检查引擎状态
-    tracing::info!("Engine running: {}", engine.is_running());
+    // 创建 TradingEngineV2 实例
+    let _engine = TradingEngineV2::new(TradingEngineV2::default_config());
+    tracing::info!("TradingEngineV2 created successfully");
 
     // 获取网关信息
     tracing::info!("Gateway configured");

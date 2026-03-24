@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use a_common::models::types::{Side, OrderType as CommonOrderType};
 use crate::core::RiskCheckResult;
 
 /// 风控等级
@@ -22,26 +23,32 @@ pub enum RiskLevel {
 #[derive(Debug, Clone)]
 pub struct OrderRequest {
     pub symbol: String,
-    pub side: OrderSide,
-    pub order_type: OrderType,
+    pub side: Side,
+    pub order_type: ExtendedOrderType,
     pub quantity: Decimal,
     pub price: Option<Decimal>,
     pub stop_loss: Option<Decimal>,
     pub take_profit: Option<Decimal>,
 }
 
+/// 扩展订单类型（包含 a_common 的基础类型）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderSide {
-    Buy,
-    Sell,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderType {
+pub enum ExtendedOrderType {
     Market,
     Limit,
     StopLoss,
     TakeProfit,
+}
+
+impl From<ExtendedOrderType> for CommonOrderType {
+    fn from(ext: ExtendedOrderType) -> Self {
+        match ext {
+            ExtendedOrderType::Market => CommonOrderType::Market,
+            ExtendedOrderType::Limit => CommonOrderType::Limit,
+            ExtendedOrderType::StopLoss => CommonOrderType::Limit, // 映射为 Limit
+            ExtendedOrderType::TakeProfit => CommonOrderType::Limit, // 映射为 Limit
+        }
+    }
 }
 
 /// 风控检查器接口
@@ -107,7 +114,7 @@ pub enum PositionDirection {
 pub struct ExecutedOrder {
     pub order_id: String,
     pub symbol: String,
-    pub side: OrderSide,
+    pub side: Side,
     pub quantity: Decimal,
     pub price: Decimal,
     pub commission: Decimal,
