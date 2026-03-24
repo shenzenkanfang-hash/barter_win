@@ -9,5 +9,7 @@
 //! - FundPool: 资金池
 
 pub mod types;
+pub mod market_data;
 
 pub use types::*;
+pub use market_data::*;

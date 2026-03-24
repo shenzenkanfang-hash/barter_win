@@ -86,6 +86,7 @@ impl FuturesAccountData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_futures_account_creation() {

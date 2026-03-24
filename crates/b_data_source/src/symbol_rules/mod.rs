@@ -375,8 +375,13 @@ mod tests {
             update_ts: 0,
         };
 
-        // 有效订单
-        assert!(rules.validate_order(dec!(68000), dec!(0.001)));
+        // 有效订单：qty >= effective_min_qty (500) and notional >= 7
+        // order_notional = 68000 * 500 = 34,000,000 >= 7
+        assert!(rules.validate_order(dec!(68000), dec!(500)));
+
+        // 无效订单（名义价值太小）
+        // order_notional = 0.01 * 500 = 5 < 7
+        assert!(!rules.validate_order(dec!(0.01), dec!(500)));
 
         // 无效订单（数量太小）
         assert!(!rules.validate_order(dec!(68000), dec!(0.00001)));

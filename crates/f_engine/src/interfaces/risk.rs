@@ -1,14 +1,13 @@
 //! 风控接口
 //!
 //! 定义风控检查的统一接口。
-//! 注意：RiskCheckResult 已移至 core::business_types::RiskCheckResult
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use a_common::models::types::{OrderType as CommonOrderType, Side};
+use a_common::models::types::Side;
 use a_common::ExchangeAccount;
 use crate::core::RiskCheckResult;
-use crate::types::{OrderRequest, OrderType};
+use crate::types::OrderRequest;
 
 /// 风控等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,66 +18,17 @@ pub enum RiskLevel {
     High,
 }
 
-/// 扩展订单类型（包含 a_common 的基础类型）
+/// 持仓方向
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExtendedOrderType {
-    Market,
-    Limit,
-    StopLoss,
-    TakeProfit,
+pub enum PositionDirection {
+    Long,
+    Short,
+    NetLong,
+    NetShort,
+    Flat,
 }
 
-impl From<ExtendedOrderType> for CommonOrderType {
-    fn from(ext: ExtendedOrderType) -> Self {
-        match ext {
-            ExtendedOrderType::Market => CommonOrderType::Market,
-            ExtendedOrderType::Limit => CommonOrderType::Limit,
-            ExtendedOrderType::StopLoss => CommonOrderType::Limit, // 映射为 Limit
-            ExtendedOrderType::TakeProfit => CommonOrderType::Limit, // 映射为 Limit
-        }
-    }
-}
-
-impl From<OrderType> for ExtendedOrderType {
-    fn from(ot: OrderType) -> Self {
-        match ot {
-            OrderType::Market => ExtendedOrderType::Market,
-            OrderType::Limit => ExtendedOrderType::Limit,
-        }
-    }
-}
-
-/// 风控检查器接口
-///
-/// 封装所有风控检查逻辑。
-///
-/// # 封装理由
-/// 1. 风控是核心业务逻辑，必须独立封装
-/// 2. 引擎下单前必须通过风控检查
-/// 3. 不能直接在引擎中硬编码风控规则
-///
-/// # 检查类型
-/// - 仓位限制检查
-/// - 风险敞口检查
-/// - 订单价值检查
-/// - 余额检查
-pub trait RiskChecker: Send + Sync {
-    /// 预下单检查
-    fn pre_check(&self, order: &OrderRequest, account: &ExchangeAccount) -> RiskCheckResult;
-
-    /// 订单成交后检查
-    fn post_check(&self, order: &ExecutedOrder, account: &ExchangeAccount) -> RiskCheckResult;
-
-    /// 定期风险扫描
-    fn scan(&self, positions: &[PositionInfo], account: &ExchangeAccount) -> Vec<RiskWarning>;
-
-    /// 获取风控阈值
-    fn thresholds(&self) -> RiskThresholds;
-}
-
-// AccountInfo 已改为使用 a_common::ExchangeAccount
-
-/// 持仓信息（接口契约）
+/// 持仓信息
 #[derive(Debug, Clone)]
 pub struct PositionInfo {
     pub symbol: String,
@@ -87,15 +37,6 @@ pub struct PositionInfo {
     pub entry_price: Decimal,
     pub unrealized_pnl: Decimal,
     pub margin_used: Decimal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PositionDirection {
-    Long,
-    Short,
-    NetLong,
-    NetShort,
-    Flat,
 }
 
 /// 已执行订单信息
@@ -123,17 +64,11 @@ pub struct RiskWarning {
 /// 风控阈值
 #[derive(Debug, Clone)]
 pub struct RiskThresholds {
-    /// 最大账户风险敞口比例 (0.0 ~ 1.0)
     pub max_exposure_ratio: Decimal,
-    /// 单笔订单最大价值
     pub max_order_value: Decimal,
-    /// 单币种最大持仓比例
     pub max_position_ratio: Decimal,
-    /// 最大杠杆倍数
     pub max_leverage: u8,
-    /// 最小订单价值
     pub min_order_value: Decimal,
-    /// 止损比例
     pub stop_loss_ratio: Decimal,
 }
 
@@ -165,4 +100,21 @@ impl RiskThresholds {
             stop_loss_ratio: Decimal::from(3) / Decimal::from(100),
         }
     }
+}
+
+/// 风控检查器接口
+///
+/// 封装所有风控检查逻辑。
+pub trait RiskChecker: Send + Sync {
+    /// 预下单检查
+    fn pre_check(&self, order: &OrderRequest, account: &ExchangeAccount) -> RiskCheckResult;
+
+    /// 订单成交后检查
+    fn post_check(&self, order: &ExecutedOrder, account: &ExchangeAccount) -> RiskCheckResult;
+
+    /// 定期风险扫描
+    fn scan(&self, positions: &[PositionInfo], account: &ExchangeAccount) -> Vec<RiskWarning>;
+
+    /// 获取风控阈值
+    fn thresholds(&self) -> RiskThresholds;
 }

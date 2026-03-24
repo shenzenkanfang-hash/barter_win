@@ -49,7 +49,7 @@ impl std::fmt::Display for StrategyId {
 // 交易决策
 // ============================================================================
 
-/// 交易决策 (来自 c_data_process::types::TradingDecision)
+/// 交易决策
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingDecision {
     pub action: TradingAction,

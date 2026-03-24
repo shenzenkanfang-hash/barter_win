@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 a_common = { path = "../a_common" }
 b_data_source = { path = "../b_data_source" }
-e_risk_monitor = { path = "../e_risk_monitor" }
 
 chrono = { workspace = true }
 futures = { workspace = true }

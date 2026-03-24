@@ -150,6 +150,7 @@ pub struct FuturesSyncResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_futures_data_syncer_creation() {

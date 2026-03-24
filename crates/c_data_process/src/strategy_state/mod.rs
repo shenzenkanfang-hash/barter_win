@@ -274,6 +274,7 @@ impl Clone for StrategyStateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_manager_get_or_create() {

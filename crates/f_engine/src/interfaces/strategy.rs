@@ -1,12 +1,38 @@
 //! 策略接口
-//!
-//! 定义策略执行和信号生成的统一接口。
-//! 确保策略模块与其他模块通过接口交互。
 
-use crate::interfaces::market_data::{MarketKLine, MarketTick, VolatilityInfo};
+use a_common::models::market_data::{MarketKLine, MarketTick, VolatilityInfo};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use std::sync::Arc;
+
+/// 交易信号方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalDirection {
+    Long,
+    Short,
+    Flat,
+}
+
+impl Default for SignalDirection {
+    fn default() -> Self {
+        Self::Flat
+    }
+}
+
+/// 交易信号类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalType {
+    Open,
+    Add,
+    Reduce,
+    Close,
+}
+
+impl Default for SignalType {
+    fn default() -> Self {
+        Self::Close
+    }
+}
 
 /// 交易信号
 #[derive(Debug, Clone)]
@@ -22,33 +48,6 @@ pub struct TradingSignal {
     pub priority: u8,
     pub confidence: u8,
     pub timestamp: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignalDirection {
-    Long,
-    Short,
-    Flat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignalType {
-    Open,
-    Add,
-    Reduce,
-    Close,
-}
-
-impl Default for SignalDirection {
-    fn default() -> Self {
-        Self::Flat
-    }
-}
-
-impl Default for SignalType {
-    fn default() -> Self {
-        Self::Close
-    }
 }
 
 /// 策略状态
@@ -69,6 +68,13 @@ pub enum StrategyStatus {
     Running,
     Waiting,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketStatusType {
+    Pin,
+    Trend,
+    Range,
 }
 
 /// 策略实例接口
@@ -100,8 +106,6 @@ pub trait StrategyInstance: Send + Sync {
     fn state(&self) -> StrategyState;
 
     /// 处理 K 线数据
-    ///
-    /// 注意：使用接口契约类型，不依赖具体实现
     fn on_bar(&self, bar: &MarketKLine) -> Option<TradingSignal>;
 
     /// 处理 Tick 数据（可选）
@@ -121,13 +125,6 @@ pub trait StrategyInstance: Send + Sync {
 
     /// 获取市场状态
     fn market_status(&self) -> Option<MarketStatusType>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarketStatusType {
-    Pin,
-    Trend,
-    Range,
 }
 
 /// 策略工厂接口

@@ -242,6 +242,7 @@ impl Default for MinSignalGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_default_output() {

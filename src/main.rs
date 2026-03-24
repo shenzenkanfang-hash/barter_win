@@ -1,23 +1,14 @@
 //! Trading System Rust Version - Main Entry
-//!
-//! 初始化流程:
-//! 1. 从交易所拉取交易规则
-//! 2. 订阅 1m K线 WS (分片: 50个/批, 500ms间隔)
-//! 3. 订阅 1d K线 WS (分片: 50个/批, 500ms间隔)
-//! 4. 订阅 Depth 订单簿 WS (仅 BTC 维护连接)
-//! 5. 定时打印账户余额
 
 use a_common::{BinanceApiGateway, ExchangeAccount};
 use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}, MockMarketStream};
 use f_engine::core::TradingEngineV2;
-use f_engine::interfaces::{RiskChecker, RiskThresholds, PositionInfo, ExecutedOrder, RiskWarning};
-use f_engine::{RiskCheckResult, OrderRequest};
+use f_engine::{RiskChecker, RiskThresholds, PositionInfo, ExecutedOrder, RiskWarning, RiskCheckResult, OrderRequest};
 use f_engine::order::mock_binance_gateway::{MockBinanceGateway, MockGatewayConfig};
 use rust_decimal_macros::dec;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 
-// Mock RiskChecker 实现
 struct MockRiskChecker;
 
 impl RiskChecker for MockRiskChecker {

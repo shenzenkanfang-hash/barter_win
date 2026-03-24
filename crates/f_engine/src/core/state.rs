@@ -142,6 +142,11 @@ impl TradeLock {
         tick_ts <= self.timestamp
     }
 
+    /// 获取锁持有时间戳
+    pub fn timestamp(&self) -> i64 {
+        self.timestamp
+    }
+
     /// 更新锁状态
     pub fn update(&mut self, tick_ts: i64, qty: Decimal, price: Decimal) {
         self.timestamp = tick_ts;
@@ -153,11 +158,6 @@ impl TradeLock {
     /// 获取持仓值
     pub fn position_value(&self) -> Decimal {
         self.position_qty * self.position_price
-    }
-
-    /// 获取时间戳
-    pub fn timestamp(&self) -> i64 {
-        self.timestamp
     }
 
     /// 获取持仓数量

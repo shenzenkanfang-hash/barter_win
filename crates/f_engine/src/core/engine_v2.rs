@@ -222,7 +222,7 @@ impl TradingEngineV2 {
             current_position_price,
         );
 
-        // 4. 执行策略（模拟，实际会调用 c_data_process）
+        // 4. 执行策略
         // V1.4: StrategyQuery 2s 超时
         let query_timeout_ms = self.pipeline.config().strategy_query_timeout_secs * 1000;
         let strategy_start = now_ms;

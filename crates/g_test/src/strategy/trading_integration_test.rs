@@ -4,7 +4,7 @@
 //! 1. 数据流: Tick -> K线合成 -> 指标计算
 //! 2. 信号生成: MinSignalGenerator 生成交易信号
 //! 3. 风控检查: RiskPreChecker 预检
-//! 4. 引擎执行: TradingEngine 处理信号
+//! 4. 引擎执行: TradingEngineV2 处理信号
 
 #![forbid(unsafe_code)]
 
@@ -19,7 +19,7 @@ use c_data_process::SignalProcessor;
 use d_checktable::h_15m::signal_generator::MinSignalGenerator;
 use d_checktable::types::{MinSignalInput, MinSignalOutput, VolatilityLevel};
 use e_risk_monitor::risk::RiskPreChecker;
-use f_engine::core::{TradingEngine, SymbolState};
+use f_engine::core::{TradingEngineV2, SymbolState};
 use f_engine::order::ExchangeGateway;
 use f_engine::types::{Mode, ModeSwitcher, Side};
 
@@ -407,18 +407,17 @@ fn test_symbol_state_timeout() {
 #[test]
 fn test_symbol_state_trade_lock() {
     let mut state = SymbolState::new("BTCUSDT".to_string());
-    let lock = &mut state.trade_lock;
 
     // 初始状态
-    assert!(lock.timestamp == 0);
+    assert!(state.trade_lock().timestamp() == 0);
 
     // 更新锁
-    lock.update(1000, dec!(0.1), dec!(50000));
+    state.trade_lock_mut().update(1000, dec!(0.1), dec!(50000));
 
     // 检查过期
-    assert!(lock.is_stale(999));   // tick时间早于锁时间
-    assert!(!lock.is_stale(1001)); // tick时间晚于锁时间
-    assert!(lock.is_stale(1000)); // 同一时间也算过期（防止重复处理）
+    assert!(state.trade_lock().is_stale(999));   // tick时间早于锁时间
+    assert!(!state.trade_lock().is_stale(1001)); // tick时间晚于锁时间
+    assert!(state.trade_lock().is_stale(1000)); // 同一时间也算过期（防止重复处理）
 }
 
 // ============================================================================

@@ -208,6 +208,7 @@ impl PipelineForm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_pipeline_form_creation() {

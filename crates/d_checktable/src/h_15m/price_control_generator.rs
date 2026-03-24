@@ -104,6 +104,7 @@ impl MinPriceControlGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_profit_distance_long() {
