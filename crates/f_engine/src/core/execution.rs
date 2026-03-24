@@ -26,6 +26,8 @@ pub struct ExecutionConfig {
     pub max_retry_count: u8,
     /// 重试间隔（毫秒）
     pub retry_interval_ms: u64,
+    /// 下单间隔时间（毫秒）
+    pub order_interval_ms: u64,
 }
 
 impl Default for ExecutionConfig {
@@ -36,6 +38,7 @@ impl Default for ExecutionConfig {
             order_timeout_secs: 10,
             max_retry_count: 2,
             retry_interval_ms: 100,
+            order_interval_ms: 1000, // 默认 1 秒
         }
     }
 }
@@ -52,6 +55,7 @@ impl ExecutionConfig {
             order_timeout_secs: 30,
             max_retry_count: 0,
             retry_interval_ms: 0,
+            order_interval_ms: 1000, // 回测也默认 1 秒
         }
     }
 }
@@ -116,6 +120,11 @@ impl OrderExecutor {
     /// 获取配置
     pub fn config(&self) -> &ExecutionConfig {
         &self.config
+    }
+
+    /// 获取下单间隔时间（毫秒）
+    pub fn order_interval_ms(&self) -> u64 {
+        self.config.order_interval_ms
     }
 }
 

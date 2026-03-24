@@ -298,6 +298,7 @@ mod execution_tests {
         assert_eq!(config.lock_timeout_secs, 1);
         assert_eq!(config.order_timeout_secs, 10);
         assert_eq!(config.max_retry_count, 2);
+        assert_eq!(config.order_interval_ms, 1000); // 下单间隔 1 秒
     }
 
     #[test]
