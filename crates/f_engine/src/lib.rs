@@ -51,7 +51,7 @@ pub use interfaces::{
 };
 
 pub use core::engine_v2::{
-    TradingEngine, TradingMode, EngineState as EngineStateV2, EngineError,
+    TradingEngineV2, TradingEngineConfig,
 };
 
 // Re-exports - Engine State (生产级)
