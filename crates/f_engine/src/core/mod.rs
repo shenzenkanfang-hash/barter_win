@@ -6,6 +6,7 @@
 //! - `engine_state`: 引擎全局状态管理（生产级）
 //! - `strategy_pool`: 策略资金池
 //! - `state`: 品种状态和交易锁
+//! - `business_types`: 业务数据类型（V1.4 文档定义）
 //!
 //! # 架构说明
 //! 推荐使用 `engine_v2`，它遵循：
@@ -20,6 +21,13 @@ pub mod engine_state;
 pub mod state;
 pub mod strategy_pool;
 pub mod engine_v2;  // 基于接口的解耦架构
+pub mod business_types;  // 业务数据类型
+pub mod triggers;  // 触发器模块
+pub mod execution;  // 执行流程模块
+pub mod fund_pool;  // 资金池管理
+pub mod risk_manager;  // 风控管理
+pub mod monitoring;  // 监控与超时
+pub mod rollback;  // 回滚管理
 
 pub use engine::TradingEngine;
 pub use d_checktable::h_15m::pipeline_form::PipelineForm;
@@ -32,5 +40,16 @@ pub use engine_state::{
     EngineState, EngineStateHandle, EngineStatus, EngineMode, Environment,
     EngineMetricsSnapshot, HealthStatus, CircuitBreaker, CircuitBreakerConfig,
     CircuitBreakerAction, EngineStateError, Result as EngineStateResult,
+};
+
+// business_types 导出（V1.4 文档定义）
+pub use business_types::{
+    // 枚举类型
+    PositionSide, VolatilityTier, RiskState, ChannelType, OrderLifecycle,
+    // 结构体
+    StrategyQuery, StrategyResponse, RiskCheckResult, PriceControlOutput,
+    OrderInfo, FundPool,
+    // 错误码
+    EngineErrorCode,
 };
 // ModeSwitcher 和 Mode 从 channel 模块重导出 via types.rs

@@ -248,6 +248,7 @@ impl SymbolMetrics {
 /// - 缓存的信号
 /// - 启动状态
 /// - 运行指标
+/// - 策略绑定
 ///
 /// # 模块间调用规则
 /// ⚠️ 禁止直接访问字段，必须使用方法
@@ -255,10 +256,16 @@ impl SymbolMetrics {
 pub struct SymbolState {
     /// 品种符号
     symbol: String,
-    /// 交易锁
+    /// 交易锁（品种级独立锁 = 原 TradeLock）
     trade_lock: TradeLock,
     /// 启动状态
     startup_state: StartupState,
+
+    // --- 策略绑定 ---
+    /// 绑定的策略ID（用于品种互斥检查）
+    bound_strategy_id: Option<String>,
+    /// 绑定时间戳
+    bound_at: Option<i64>,
 
     // --- 分钟级状态 ---
     /// 上次分钟级指标请求时间戳
@@ -293,6 +300,8 @@ impl SymbolState {
             symbol: symbol.clone(),
             trade_lock: TradeLock::new(),
             startup_state: StartupState::Fresh,
+            bound_strategy_id: None,
+            bound_at: None,
             last_1m_request_ts: 0,
             last_1m_ok_ts: 0,
             last_1m_signal_ts: 0,
@@ -312,6 +321,50 @@ impl SymbolState {
             startup_state: StartupState::Recovery,
             ..Self::new(symbol)
         }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 策略绑定方法
+    // ─────────────────────────────────────────────────────────
+
+    /// 绑定策略
+    ///
+    /// # 返回
+    /// - `true` 绑定成功
+    /// - `false` 已被其他策略绑定
+    pub fn bind_strategy(&mut self, strategy_id: &str) -> bool {
+        if let Some(ref bound) = self.bound_strategy_id {
+            if bound != strategy_id {
+                return false; // 已被其他策略绑定
+            }
+            return true; // 已绑定到同一策略
+        }
+        self.bound_strategy_id = Some(strategy_id.to_string());
+        self.bound_at = Some(chrono::Utc::now().timestamp());
+        true
+    }
+
+    /// 解绑策略
+    ///
+    /// 解绑后可重新被其他策略触发
+    pub fn unbind_strategy(&mut self) {
+        self.bound_strategy_id = None;
+        self.bound_at = None;
+    }
+
+    /// 获取绑定的策略ID
+    pub fn bound_strategy(&self) -> Option<&str> {
+        self.bound_strategy_id.as_deref()
+    }
+
+    /// 检查是否已绑定策略
+    pub fn is_bound(&self) -> bool {
+        self.bound_strategy_id.is_some()
+    }
+
+    /// 检查是否被指定策略绑定
+    pub fn is_bound_by(&self, strategy_id: &str) -> bool {
+        self.bound_strategy_id.as_deref() == Some(strategy_id)
     }
 
     // ─────────────────────────────────────────────────────────
@@ -407,6 +460,11 @@ impl SymbolState {
     /// 上次日线级成功时间戳
     pub fn last_daily_ok_ts(&self) -> i64 {
         self.last_daily_ok_ts
+    }
+
+    /// 获取绑定时间戳
+    pub fn bound_at(&self) -> Option<i64> {
+        self.bound_at
     }
 
     // ─────────────────────────────────────────────────────────

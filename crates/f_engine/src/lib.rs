@@ -60,3 +60,16 @@ pub use core::engine_state::{
     EngineMetricsSnapshot, HealthStatus, CircuitBreaker, CircuitBreakerConfig,
     CircuitBreakerAction, EngineStateError, Result as EngineStateResult,
 };
+
+// Re-exports - Business Types (V1.4 文档定义)
+pub use core::business_types::{
+    // 枚举类型
+    PositionSide, VolatilityTier, RiskState, ChannelType, OrderLifecycle,
+    TradingAction,
+    // 结构体
+    StrategyQuery, StrategyResponse, RiskCheckResult as BusinessRiskCheckResult,
+    PriceControlOutput,
+    OrderInfo, FundPool,
+    // 错误码
+    EngineErrorCode,
+};
