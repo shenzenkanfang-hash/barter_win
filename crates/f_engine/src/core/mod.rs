@@ -29,6 +29,9 @@ pub mod risk_manager;  // 风控管理
 pub mod monitoring;  // 监控与超时
 pub mod rollback;  // 回滚管理
 
+#[cfg(test)]
+mod tests;  // 测试模块
+
 pub use engine::TradingEngine;
 pub use d_checktable::h_15m::pipeline_form::PipelineForm;
 pub use strategy_pool::{StrategyAllocation, StrategyPool};
