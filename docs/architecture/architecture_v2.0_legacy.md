@@ -1,8 +1,8 @@
 # Rust 量化交易引擎 - 架构文档
 
 > 本文档是项目的**唯一权威架构文档**，整合了接口化解耦设计与 V1.4 业务流程。
->
-> **文档版本: 3.0** | 更新日期: 2026-03-24 | 评分: **100/100** ✅
+> 
+> **文档版本: 3.0** | 更新日期: 2026-03-24 | 评分: **100/100**
 
 ---
 
@@ -37,7 +37,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ L6: f_engine (引擎运行时层)                                       │
-│   ├── interfaces/    # 100% 纯 Trait 接口契约                   │
+│   ├── interfaces/    # 统一接口契约                               │
 │   └── core/          # TradingEngineV2 (V1.4)                   │
 ├─────────────────────────────────────────────────────────────────┤
 │ L5: e_risk_monitor (合规约束层)                                   │
@@ -49,7 +49,6 @@
 │ L2: b_data_source (数据源层)                                      │
 ├─────────────────────────────────────────────────────────────────┤
 │ L1: a_common (基础设施层)                                         │
-│   └── models/dto  # 接口层 DTO 统一收敛                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,16 +57,12 @@
 ```
 crates/
 ├── a_common/           # L1 基础设施：API、WS、配置、日志、类型
-│   └── src/models/
-│       ├── types.rs    # Side, OrderType, OrderStatus, PositionSide
-│       ├── market_data.rs # MarketKLine, MarketTick, OrderBook
-│       └── dto.rs      # 接口层 DTO (Signal, Risk, CheckTable)
 ├── b_data_source/      # L2 数据源：数据获取、K线、品种池
 ├── c_data_process/     # L3 信号生成：指标计算、信号
 ├── d_checktable/       # L4 检查层：高频/低频检查
 ├── e_risk_monitor/     # L5 风控：风控、持仓、持久化
-└── f_engine/           # L6 引擎：100% 纯 Trait 接口 + TradingEngineV2
-    ├── interfaces/     # 100% 纯 Trait 定义
+└── f_engine/           # L6 引擎：接口 + TradingEngineV2
+    ├── interfaces/     # 统一接口契约层
     └── core/           # 核心引擎实现
 ```
 
@@ -82,9 +77,9 @@ a_common/src/
 ├── api/            # Binance API 网关、限流器
 ├── ws/             # WebSocket 连接器
 ├── models/         # 公共数据类型
-│   ├── types.rs    # Side, OrderType, OrderStatus, PositionSide
-│   ├── market_data.rs # MarketKLine, MarketTick, OrderBook
-│   └── dto.rs      # 接口层 DTO (Signal, Risk, CheckTable)
+│   ├── types.rs    # 核心枚举 (Side, OrderType, OrderStatus, PositionSide)
+│   ├── market_data.rs # 市场数据 (MarketKLine, MarketTick, OrderBook)
+│   └── dto.rs      # 接口层 DTO (TradingSignal, RiskLevel, CheckTableResult)
 ├── config/         # 平台配置、路径
 ├── logs/           # 检查点日志
 ├── backup/         # 内存备份
@@ -96,15 +91,13 @@ a_common/src/
 
 | 类型 | 位置 | 说明 |
 |------|------|------|
-| `Side` | models/types | 订单方向 (Buy/Sell) |
-| `OrderType` | models/types | 订单类型 (Market/Limit) |
-| `OrderStatus` | models/types | 订单状态 |
-| `PositionSide` | models/types | 持仓方向 (Long/Short/NONE) |
-| `TradingSignal` | models/dto | 交易信号 |
-| `RiskLevel` | models/dto | 风控等级 |
-| `CheckTableResult` | models/dto | 检查结果 |
-| `ExchangeAccount` | exchange | 账户信息 |
-| `OrderResult` | exchange | 订单结果 |
+| `Side` | models::types | 订单方向 (Buy/Sell) |
+| `OrderType` | models::types | 订单类型 (Market/Limit) |
+| `PositionSide` | models::types | 持仓方向 (Long/Short/NONE) |
+| `OrderStatus` | models::types | 订单状态 |
+| `TradingSignal` | models::dto | 交易信号 |
+| `RiskLevel` | models::dto | 风控等级 |
+| `CheckTableResult` | models::dto | 检查结果 |
 
 ### 2.2 L2: b_data_source (数据源层)
 
@@ -130,6 +123,7 @@ c_data_process/src/
 ├── strategy_state/ # 策略状态
 ├── processor.rs    # 信号处理器
 ├── types.rs        # 类型定义
+│   └── TradingAction # 交易动作 (Long/Short/Flat)
 └── pine_indicator_full.rs # Pine 指标实现
 ```
 
@@ -174,17 +168,17 @@ e_risk_monitor/src/
 
 ```
 f_engine/src/
-├── interfaces/     # 100% 纯 Trait 接口契约 ⭐
-│   ├── market_data.rs  # MarketDataProvider (#[async_trait])
+├── interfaces/     # 统一接口契约 ⭐
+│   ├── market_data.rs  # MarketDataProvider
 │   ├── strategy.rs    # StrategyExecutor, StrategyInstance
 │   ├── risk.rs        # RiskChecker, RiskCheckResult
 │   ├── execution.rs   # ExchangeGateway
-│   └── check_table.rs # CheckTableProvider (#[async_trait])
+│   └── adapters.rs     # 适配器
 ├── core/           # 核心引擎 ⭐
 │   ├── engine_v2.rs       # TradingEngineV2 (V1.4)
 │   ├── engine_state.rs     # 引擎状态管理
 │   ├── state.rs           # 品种状态、TradeLock
-│   ├── business_types.rs   # 业务类型 (V1.4) - re-export PositionSide
+│   ├── business_types.rs   # 业务类型 (V1.4)
 │   ├── triggers.rs        # 触发器
 │   ├── execution.rs       # 执行流程
 │   ├── fund_pool.rs       # 资金池
@@ -210,25 +204,19 @@ f_engine/src/
 ### 3.1 接口契约概览
 
 ```
-f_engine/src/interfaces/   (100% 纯 Trait)
+f_engine/src/interfaces/
 ├── market_data.rs   # 市场数据接口
 ├── strategy.rs      # 策略接口
 ├── risk.rs          # 风控接口
-├── execution.rs     # 执行接口
-└── check_table.rs   # CheckTable 接口
+└── execution.rs     # 执行接口
 ```
-
-> **重要**: interfaces 层所有 DTO 已迁移至 `a_common::models::dto`，本目录只包含纯 Trait 定义和 re-export。
 
 ### 3.2 MarketDataProvider
 
 ```rust
-#[async_trait]
 pub trait MarketDataProvider: Send + Sync {
-    async fn next_tick(&self) -> Option<MarketTick>;
-    async fn next_completed_kline(&self) -> Option<MarketTick>;
     fn current_price(&self, symbol: &str) -> Option<Decimal>;
-    async fn get_klines(&self, symbol: &str, period: &str) -> Vec<MarketKLine>;
+    fn get_klines(&self, symbol: &str, period: &str) -> Vec<MarketKLine>;
     fn symbols(&self) -> Vec<String>;
 }
 ```
@@ -268,22 +256,6 @@ pub trait ExchangeGateway: Send + Sync {
     fn cancel_order(&self, order_id: &str) -> Result<(), ExecutionError>;
     fn get_account(&self) -> Result<ExchangeAccount, ExecutionError>;
     fn get_position(&self, symbol: &str) -> Result<Option<PositionInfo>, ExecutionError>;
-}
-```
-
-### 3.6 CheckTableProvider
-
-```rust
-#[async_trait]
-pub trait CheckTableProvider: Send + Sync {
-    async fn get_minute_check_table(&self, symbol: &str) -> Option<Box<dyn CheckTable + '_>>;
-    async fn get_daily_check_table(&self, symbol: &str) -> Option<Box<dyn CheckTable + '_>>;
-}
-
-#[async_trait]
-pub trait CheckTable: Send + Sync {
-    fn config(&self) -> &CheckTableConfig;
-    async fn check(&self, price: Decimal, position: Decimal) -> CheckTableResult;
 }
 ```
 
@@ -347,24 +319,23 @@ pub struct SymbolState {
 
 ## 5. 模块详细说明
 
-### 5.1 interfaces/ 详细 (100% 纯 Trait)
+### 5.1 interfaces/ 详细
 
-| 文件 | Trait 数 | DTO Re-export | 状态 |
-|------|----------|---------------|------|
-| `market_data.rs` | 3 | ✅ from a_common::models::market_data | ✅ 纯 Trait |
-| `strategy.rs` | 4 | ✅ from a_common::models::dto | ✅ 纯 Trait |
-| `risk.rs` | 1 | ✅ from a_common::models::dto | ✅ 纯 Trait |
-| `execution.rs` | 1 | ✅ from a_common::models::dto | ✅ 纯 Trait |
-| `check_table.rs` | 2 | ✅ from a_common::models::dto | ✅ 纯 Trait |
+| 文件 | 类型数 | Trait 数 | 说明 |
+|------|--------|---------|------|
+| `market_data.rs` | 5 | 3 | 市场数据接口 |
+| `strategy.rs` | 6 | 4 | 策略接口 |
+| `risk.rs` | 11 | 1 | 风控接口 |
+| `execution.rs` | 3 | 2 | 执行接口 |
 
 ### 5.2 core/ 详细
 
 | 文件 | 职责 |
 |------|------|
-| `engine_v2.rs` | TradingEngineV2 主实现，依赖注入 |
+| `engine_v2.rs` | TradingEngineV2 主实现 |
 | `engine_state.rs` | 引擎状态管理 |
 | `state.rs` | 品种状态、TradeLock |
-| `business_types.rs` | V1.4 业务类型 (re-export PositionSide) |
+| `business_types.rs` | V1.4 业务类型 |
 | `triggers.rs` | 触发器管理 |
 | `execution.rs` | 交易流程 |
 | `fund_pool.rs` | 资金池 |
@@ -488,43 +459,36 @@ pub struct CircuitBreaker {
 
 ## 7. 依赖关系
 
-### 7.1 Crate 依赖图 (V3.0 - 单向无环)
+### 7.1 Crate 依赖图
 
 ```
-a_common (基础层 - 零依赖)
-    ↑
-b_data_source ──────► a_common
-    ↑
-c_data_process ─────► a_common
-                    ──────► b_data_source
-    ↑
-d_checktable ───────► a_common
-                   ──────► b_data_source
-                   ──────► c_data_process
-                   ──────► e_risk_monitor
-    ↑
-e_risk_monitor ─────► a_common
-                   ──────► b_data_source
-    ↑
-f_engine ───────────► a_common
-                   ──────► b_data_source
-```
+f_engine ─────┬──► a_common
+              ├──► b_data_source
+              ├──► c_data_process
+              ├──► d_checktable
+              └──► e_risk_monitor
 
-**依赖关系原则:**
-- ✅ 单向依赖，无环
-- ✅ 无穿透依赖 (f_engine 不直引 c_data_process/e_risk_monitor)
-- ✅ 无违规直引
-- ✅ 通过 Trait 接口解耦
+d_checktable ─┼──► a_common
+              ├──► b_data_source
+              ├──► c_data_process
+              └──► e_risk_monitor
+
+e_risk_monitor ──► a_common
+               └──► b_data_source
+
+c_data_process ──► b_data_source
+
+b_data_source ───► a_common
+```
 
 ### 7.2 接口实现关系
 
 | Trait | 定义位置 | 实现状态 |
 |-------|----------|----------|
-| `MarketDataProvider` | f_engine/interfaces | ⚠️ 待实现 (b_data_source) |
-| `StrategyExecutor` | f_engine/interfaces | ⚠️ 待实现 (c_data_process) |
-| `CheckTableProvider` | f_engine/interfaces | ⚠️ 待实现 (d_checktable) |
-| `RiskChecker` | f_engine/interfaces | ⚠️ 待实现 (e_risk_monitor) |
-| `ExchangeGateway` | f_engine/interfaces | ✅ MockBinanceGateway |
+| `MarketDataProvider` | f_engine/interfaces | ❌ 待实现 |
+| `StrategyExecutor` | f_engine/interfaces | ✅ f_engine/strategy |
+| `RiskChecker` | f_engine/interfaces | ⚠️ 内部实现 |
+| `ExchangeGateway` | f_engine/interfaces | ⚠️ 仅 Mock |
 
 ### 7.3 数据流向
 
@@ -557,7 +521,6 @@ a_common (持久化)
 |------|------|------|
 | `#![forbid(unsafe_code)]` | ✅ | 所有 crate 启用 |
 | `Send + Sync` | ✅ | 所有 Trait 约束 |
-| `#[async_trait]` | ✅ | 异步 Trait 统一标注 |
 | `#[derive(...)` 顺序 | ✅ | Debug, Clone, Eq, PartialEq, Serialize, Deserialize |
 | 错误处理 | ✅ | thiserror + Result |
 | 同步原语 | ✅ | parking_lot RwLock |
@@ -587,48 +550,36 @@ if state.can_trade() { ... }
 
 ## 9. 审计评分
 
-### 9.1 架构审计结果 (V3.0 - 满分版)
+### 9.1 架构审计结果 (2026-03-24)
 
-| # | 检查项 | 得分 | 状态 |
-|---|--------|------|------|
-| 1 | 全局类型唯一性 | 15/15 | ✅ |
-| 2 | 依赖关系正确 | 20/20 | ✅ |
-| 3 | interfaces 层纯 trait | 20/20 | ✅ |
-| 4 | Trait 异步规范 | 15/15 | ✅ |
-| 5 | TradingEngineV2 泛型化 | 10/10 | ✅ |
-| 6 | 旧代码残留 | 10/10 | ✅ |
-| 7 | cargo build | 10/10 | ✅ |
-| 8 | cargo test | 10/10 | ✅ |
-| **总分** | **100/100** | **100/100** | ✅ |
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 模块划分 | 85/100 | 大结构合理，细节需优化 |
+| 依赖关系 | 75/100 | 存在跨层直接依赖 |
+| 接口标准化 | 70/100 | 接口定义存在，实现不完整 |
+| V1.4 合规 | 95/100 | 核心流程已完整实现 |
+| 架构文档 | 90/100 | 文档齐全 |
+| **总体** | **83/100** | 良好，接近生产级 |
 
-### 9.2 编译与测试状态
+### 9.2 待办事项
 
-| 项目 | 状态 |
-|------|------|
-| cargo build --all | ✅ 0 error, 0 warning |
-| cargo test | ✅ 272 tests passed, 0 failed |
+| 优先级 | 事项 | 说明 |
+|--------|------|------|
+| P1 | 统一类型系统 | 消除 TradingAction 等跨 crate 冲突 |
+| P2 | 实现 MarketDataProvider | 在 b_data_source 实现 |
+| P2 | 实现 RiskChecker | 在 e_risk_monitor 实现 |
+| P3 | 泛化 engine_v2 | `TradingEngine<M, S, R, G, C>` |
+| P3 | 建立 CheckTableProvider | 在 d_checktable 实现 |
 
-### 9.3 V3.0 优化要点
-
-| 优化项 | 说明 |
-|--------|------|
-| DTO 统一收敛 | 所有接口 DTO 迁移至 a_common::models::dto |
-| interfaces 层纯化 | 100% 纯 Trait，无业务 struct |
-| 异步 Trait 标准化 | #[async_trait] + Send + Sync |
-| PositionSide 去重 | 统一从 a_common re-export |
-| 依赖关系清理 | 移除 f_engine → e_risk_monitor 直引 |
-
-### 9.4 生产可用状态
-
-**答案**: ✅ **是 - 满分达标**
+### 9.3 合规检查
 
 | 检查项 | 状态 |
 |--------|------|
-| 架构核心完整 | ✅ |
-| 类型系统统一 | ✅ |
-| 接口设计合理 | ✅ |
-| 编译零错误 | ✅ |
-| 测试全部通过 | ✅ |
+| 编译通过 | ✅ |
+| 单元测试 53 通过 | ✅ |
+| V1.4 流程 9/9 实现 | ✅ |
+| P1-001 RiskCheckResult 修复 | ✅ |
+| 接口层存在 | ✅ |
 
 ---
 
@@ -639,8 +590,8 @@ if state.can_trade() { ... }
 | 文档 | 说明 |
 |------|------|
 | `trading_business_flow.md` | V1.4 业务流程详细文档 |
-| `architecture/` | 架构文档归档 |
-| `architecture/架构终审合规报告_2026-03-24_V3.md` | V3.0 满分合规报告 |
+| `architecture/` | 历史架构文档归档 |
+| `architecture/全项目架构优化方案_2026-03-24.md` | 纯架构优化方案（P1-P3 任务清单） |
 
 ### 版本历史
 
@@ -649,34 +600,6 @@ if state.can_trade() { ... }
 | 1.0 | 2026-03-24 | 初始架构文档 |
 | 2.0 | 2026-03-24 | 整合全项目审计，V1.4 合规 |
 | 2.1 | 2026-03-24 | 新增全项目架构优化方案 |
-| 3.0 | 2026-03-24 | **满分架构优化 - 100/100** |
-
----
-
-## 架构合规证书
-
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║           架构终审合规报告 - 满分达标证书                       ║
-║                                                               ║
-║   项目: Barter-rs 量化交易系统                                 ║
-║   日期: 2026-03-24                                            ║
-║   版本: V3.0                                                   ║
-║                                                               ║
-║   ═══════════════════════════════════════════════════════   ║
-║                                                               ║
-║   合规状态:    ✅ PASS                                         ║
-║   最终评分:    100/100                                        ║
-║   测试状态:    272 tests passed, 0 failed                      ║
-║   编译状态:    0 error, 0 warning                            ║
-║                                                               ║
-║   ═══════════════════════════════════════════════════════   ║
-║                                                               ║
-║   生产可用:    ✅ 是                                           ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
-```
 
 ---
 
