@@ -44,7 +44,7 @@ pub use interfaces::{
     SignalDirection, SignalType as InterfaceSignalType, StrategyState as InterfaceStrategyState,
     SignalAggregator as SignalAggregatorTrait, StrategyFactory as StrategyFactoryTrait,
     // 风控接口
-    RiskChecker, RiskCheckResult, RiskLevel, OrderRequest as RiskOrderRequest,
+    RiskChecker, RiskLevel, OrderRequest as RiskOrderRequest,
     AccountInfo, PositionInfo, OrderSide, OrderType as RiskOrderType,
     // 执行接口
     ExchangeGateway, OrderResult, OrderStatus,
@@ -66,8 +66,8 @@ pub use core::business_types::{
     // 枚举类型
     PositionSide, VolatilityTier, RiskState, ChannelType, OrderLifecycle,
     TradingAction,
-    // 结构体
-    StrategyQuery, StrategyResponse, RiskCheckResult as BusinessRiskCheckResult,
+    // 结构体（统一使用 V1.4 版本）
+    StrategyQuery, StrategyResponse, RiskCheckResult,
     PriceControlOutput,
     OrderInfo, FundPool,
     // 错误码

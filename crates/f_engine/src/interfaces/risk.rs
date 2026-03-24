@@ -1,40 +1,13 @@
 //! 风控接口
 //!
 //! 定义风控检查的统一接口。
-//! 确保风控逻辑独立封装，其他模块不能直接访问风控内部。
+//! 注意：RiskCheckResult 已移至 core::business_types::RiskCheckResult
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use crate::core::RiskCheckResult;
 
-/// 风控检查结果
-#[derive(Debug, Clone)]
-pub struct RiskCheckResult {
-    pub allowed: bool,
-    pub reason: Option<String>,
-    pub risk_level: RiskLevel,
-    pub timestamp: DateTime<Utc>,
-}
-
-impl RiskCheckResult {
-    pub fn allowed() -> Self {
-        Self {
-            allowed: true,
-            reason: None,
-            risk_level: RiskLevel::Low,
-            timestamp: Utc::now(),
-        }
-    }
-
-    pub fn rejected(reason: impl Into<String>) -> Self {
-        Self {
-            allowed: false,
-            reason: Some(reason.into()),
-            risk_level: RiskLevel::High,
-            timestamp: Utc::now(),
-        }
-    }
-}
-
+/// 风控等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RiskLevel {
     #[default]
