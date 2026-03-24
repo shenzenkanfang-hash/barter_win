@@ -7,13 +7,36 @@
 //! 4. 订阅 Depth 订单簿 WS (仅 BTC 维护连接)
 //! 5. 定时打印账户余额
 
-use a_common::BinanceApiGateway;
+use a_common::{BinanceApiGateway, ExchangeAccount};
 use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}, MockMarketStream};
 use f_engine::core::TradingEngineV2;
+use f_engine::interfaces::{RiskChecker, RiskThresholds, PositionInfo, ExecutedOrder, RiskWarning};
+use f_engine::{RiskCheckResult, OrderRequest};
 use f_engine::order::mock_binance_gateway::{MockBinanceGateway, MockGatewayConfig};
 use rust_decimal_macros::dec;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
+
+// Mock RiskChecker 实现
+struct MockRiskChecker;
+
+impl RiskChecker for MockRiskChecker {
+    fn pre_check(&self, _order: &OrderRequest, _account: &ExchangeAccount) -> RiskCheckResult {
+        RiskCheckResult::new(true, false)
+    }
+
+    fn post_check(&self, _order: &ExecutedOrder, _account: &ExchangeAccount) -> RiskCheckResult {
+        RiskCheckResult::new(true, false)
+    }
+
+    fn scan(&self, _positions: &[PositionInfo], _account: &ExchangeAccount) -> Vec<RiskWarning> {
+        vec![]
+    }
+
+    fn thresholds(&self) -> RiskThresholds {
+        RiskThresholds::default()
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,7 +69,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         simulate_fill: true,
         fill_delay_ms: 100,
     };
-    let _gateway = Arc::new(MockBinanceGateway::with_config(_gateway_config.clone()));
+    let gateway: Arc<dyn f_engine::interfaces::ExchangeGateway> = 
+        Arc::new(MockBinanceGateway::with_config(_gateway_config.clone()));
+
+    // 创建 Mock 风控检查器
+    let risk_checker: Arc<dyn RiskChecker> = Arc::new(MockRiskChecker);
 
     // 创建 Mock 市场数据流
     let _market_stream = Box::new(MockMarketStream::new(
@@ -55,7 +82,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     // 创建 TradingEngineV2 实例
-    let _engine = TradingEngineV2::new(TradingEngineV2::default_config());
+    let mut config = TradingEngineV2::default_config();
+    config.gateway = Some(gateway);
+    config.risk_checker = Some(risk_checker);
+    let _engine = TradingEngineV2::new(config);
     tracing::info!("TradingEngineV2 created successfully");
 
     // 获取网关信息

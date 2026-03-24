@@ -4,6 +4,7 @@
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use crate::models::types::OrderStatus;
 
 /// 交易所账户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,14 +88,7 @@ impl ExchangePosition {
     }
 }
 
-/// 订单状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OrderStatus {
-    Pending,
-    Filled,
-    Cancelled,
-    Rejected,
-}
+// OrderStatus 已改为使用 crate::models::types::OrderStatus
 
 /// 订单拒绝原因
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]

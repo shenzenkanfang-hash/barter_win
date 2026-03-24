@@ -15,9 +15,12 @@ pub enum OrderType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
-    Pending,
-    Filled,
-    Cancelled,
+    Pending,          // 待处理
+    Submitted,        // 已提交
+    PartiallyFilled,  // 部分成交
+    Filled,           // 完全成交
+    Cancelled,        // 已取消
+    Rejected,         // 已拒绝
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

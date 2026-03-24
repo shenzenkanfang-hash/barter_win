@@ -60,5 +60,8 @@ pub use backup::{
 
 // Re-exports - Exchange Gateway Types
 pub use exchange::{
-    ExchangeAccount, ExchangePosition, OrderResult, OrderStatus, PositionDirection, RejectReason,
+    ExchangeAccount, ExchangePosition, OrderResult, PositionDirection, RejectReason,
 };
+
+// Re-export OrderStatus from models::types
+pub use models::types::OrderStatus;

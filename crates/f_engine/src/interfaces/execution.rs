@@ -3,9 +3,13 @@
 //! 定义订单执行的统一接口。
 //! 确保交易所网关封装，其他模块不能直接访问网关内部。
 
-use crate::interfaces::risk::{AccountInfo, OrderRequest, PositionInfo};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use a_common::models::types::OrderStatus;
+use a_common::{OrderResult as CommonOrderResult, EngineError};
+
+// Re-export ExchangeGateway from order module to keep interface consistent
+pub use crate::order::ExchangeGateway;
 
 /// 订单执行结果
 #[derive(Debug, Clone)]
@@ -20,47 +24,19 @@ pub struct OrderResult {
     pub timestamp: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderStatus {
-    Pending,
-    Submitted,
-    PartiallyFilled,
-    Filled,
-    Canceled,
-    Rejected,
-}
-
-/// 交易所网关接口
-///
-/// 封装所有交易所交互逻辑。
-///
-/// # 封装理由
-/// 1. 解耦：引擎不依赖具体交易所实现
-/// 2. 测试：可以注入 Mock 网关
-/// 3. 切换：可以随时切换实盘/模拟/回测环境
-///
-/// # 接口契约
-/// - 所有方法必须是线程安全的 (Send + Sync)
-/// - 返回结果必须包含完整的状态信息
-/// - 错误信息必须清晰可追溯
-pub trait ExchangeGateway: Send + Sync {
-    /// 下单
-    fn place_order(&self, order: OrderRequest) -> Result<OrderResult, ExecutionError>;
-
-    /// 取消订单
-    fn cancel_order(&self, order_id: &str, symbol: &str) -> Result<(), ExecutionError>;
-
-    /// 查询订单状态
-    fn query_order(&self, order_id: &str, symbol: &str) -> Result<Option<OrderResult>, ExecutionError>;
-
-    /// 获取账户信息
-    fn get_account(&self) -> Result<AccountInfo, ExecutionError>;
-
-    /// 获取持仓
-    fn get_position(&self, symbol: &str) -> Result<Option<PositionInfo>, ExecutionError>;
-
-    /// 获取所有持仓
-    fn get_all_positions(&self) -> Result<Vec<PositionInfo>, ExecutionError>;
+impl From<CommonOrderResult> for OrderResult {
+    fn from(common: CommonOrderResult) -> Self {
+        Self {
+            order_id: common.order_id,
+            status: common.status,
+            executed_quantity: common.filled_qty,
+            executed_price: common.filled_price,
+            commission: common.commission,
+            message: common.message,
+            reject_reason: common.reject_reason.map(|r| r.to_string()),
+            timestamp: Utc::now(),
+        }
+    }
 }
 
 /// 执行错误类型
@@ -86,6 +62,12 @@ pub enum ExecutionError {
 
     #[error("Gateway error: {0}")]
     Gateway(String),
+}
+
+impl From<EngineError> for ExecutionError {
+    fn from(e: EngineError) -> Self {
+        ExecutionError::Gateway(e.to_string())
+    }
 }
 
 /// 订单簿提供者接口

@@ -5,8 +5,10 @@
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use a_common::models::types::{Side, OrderType as CommonOrderType};
+use a_common::models::types::{OrderType as CommonOrderType, Side};
+use a_common::ExchangeAccount;
 use crate::core::RiskCheckResult;
+use crate::types::{OrderRequest, OrderType};
 
 /// 风控等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -15,20 +17,6 @@ pub enum RiskLevel {
     Low,
     Medium,
     High,
-}
-
-/// 订单请求（风控接口契约）
-///
-/// 注意：这是风控层的接口契约，不是内部实现。
-#[derive(Debug, Clone)]
-pub struct OrderRequest {
-    pub symbol: String,
-    pub side: Side,
-    pub order_type: ExtendedOrderType,
-    pub quantity: Decimal,
-    pub price: Option<Decimal>,
-    pub stop_loss: Option<Decimal>,
-    pub take_profit: Option<Decimal>,
 }
 
 /// 扩展订单类型（包含 a_common 的基础类型）
@@ -51,6 +39,15 @@ impl From<ExtendedOrderType> for CommonOrderType {
     }
 }
 
+impl From<OrderType> for ExtendedOrderType {
+    fn from(ot: OrderType) -> Self {
+        match ot {
+            OrderType::Market => ExtendedOrderType::Market,
+            OrderType::Limit => ExtendedOrderType::Limit,
+        }
+    }
+}
+
 /// 风控检查器接口
 ///
 /// 封装所有风控检查逻辑。
@@ -67,27 +64,19 @@ impl From<ExtendedOrderType> for CommonOrderType {
 /// - 余额检查
 pub trait RiskChecker: Send + Sync {
     /// 预下单检查
-    fn pre_check(&self, order: &OrderRequest, account: &AccountInfo) -> RiskCheckResult;
+    fn pre_check(&self, order: &OrderRequest, account: &ExchangeAccount) -> RiskCheckResult;
 
     /// 订单成交后检查
-    fn post_check(&self, order: &ExecutedOrder, account: &AccountInfo) -> RiskCheckResult;
+    fn post_check(&self, order: &ExecutedOrder, account: &ExchangeAccount) -> RiskCheckResult;
 
     /// 定期风险扫描
-    fn scan(&self, positions: &[PositionInfo], account: &AccountInfo) -> Vec<RiskWarning>;
+    fn scan(&self, positions: &[PositionInfo], account: &ExchangeAccount) -> Vec<RiskWarning>;
 
     /// 获取风控阈值
     fn thresholds(&self) -> RiskThresholds;
 }
 
-/// 账户信息（接口契约）
-#[derive(Debug, Clone)]
-pub struct AccountInfo {
-    pub account_id: String,
-    pub total_equity: Decimal,
-    pub available: Decimal,
-    pub frozen_margin: Decimal,
-    pub unrealized_pnl: Decimal,
-}
+// AccountInfo 已改为使用 a_common::ExchangeAccount
 
 /// 持仓信息（接口契约）
 #[derive(Debug, Clone)]

@@ -44,13 +44,19 @@ pub use interfaces::{
     SignalDirection, SignalType as InterfaceSignalType, StrategyState as InterfaceStrategyState,
     SignalAggregator as SignalAggregatorTrait, StrategyFactory as StrategyFactoryTrait,
     // 风控接口
-    RiskChecker, RiskLevel, OrderRequest as RiskOrderRequest, ExtendedOrderType,
-    AccountInfo, PositionInfo,
+    RiskChecker, RiskLevel, ExtendedOrderType,
+    PositionInfo, ExecutedOrder,
     // 执行接口
-    ExchangeGateway, OrderResult, OrderStatus,
+    ExchangeGateway,
     // CheckTable 接口
     CheckTableProvider, CheckTable, CheckTableResult, CheckTableConfig,
 };
+
+// Re-exports - OrderRequest from types
+pub use crate::types::OrderRequest;
+
+// Re-exports - OrderStatus from a_common
+pub use a_common::models::types::OrderStatus;
 
 pub use core::engine_v2::{
     TradingEngineV2, TradingEngineConfig,

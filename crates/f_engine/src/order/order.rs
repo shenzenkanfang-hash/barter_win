@@ -1,7 +1,7 @@
-use a_common::{EngineError, OrderResult, OrderStatus};
-use crate::order::gateway::ExchangeGateway;
-use crate::types::{OrderRequest, OrderType, Side, TradingDecision, TradingAction};
-use e_risk_monitor::risk::RiskPreChecker;
+use a_common::models::types::OrderStatus;
+use a_common::{EngineError, OrderResult};
+use crate::interfaces::{ExchangeGateway, RiskChecker};
+use crate::types::{Side, TradingDecision, TradingAction, OrderRequest};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
@@ -16,19 +16,19 @@ use std::sync::Arc;
 /// 线程安全: gateway 和 risk_checker 都是线程安全的
 pub struct OrderExecutor {
     gateway: Arc<dyn ExchangeGateway>,
-    risk_checker: Arc<RiskPreChecker>,
+    risk_checker: Arc<dyn RiskChecker>,
 }
 
 impl OrderExecutor {
     /// 创建新的订单执行器
-    pub fn new(gateway: Arc<dyn ExchangeGateway>, risk_checker: Arc<RiskPreChecker>) -> Self {
+    pub fn new(gateway: Arc<dyn ExchangeGateway>, risk_checker: Arc<dyn RiskChecker>) -> Self {
         Self { gateway, risk_checker }
     }
 
     /// 执行交易决策
     ///
     /// 流程:
-    /// 1. RiskPreChecker 锁外预检
+    /// 1. RiskChecker 锁外预检
     /// 2. 构造 OrderRequest
     /// 3. 调用 gateway.place_order()
     /// 4. 返回订单结果
@@ -38,31 +38,29 @@ impl OrderExecutor {
         side: Side,
         qty: Decimal,
         price: Decimal,
-        order_type: OrderType,
-    ) -> Result<OrderResult, EngineError> {
-        // 1. 构造订单请求
-        let req = OrderRequest {
+    ) -> Result<a_common::OrderResult, EngineError> {
+        // 1. 获取账户信息用于风控预检
+        let account = self.gateway.get_account()
+            .map_err(|e| EngineError::OrderExecutionFailed(e.to_string()))?;
+
+        // 2. 构造风控请求
+        let risk_req = OrderRequest {
             symbol: symbol.to_string(),
             side,
-            order_type,
+            order_type: a_common::models::types::OrderType::Market,
             qty,
             price: Some(price),
         };
 
-        // 2. 获取账户信息用于风控预检
-        let account = self.gateway.get_account()?;
-        let order_value = qty * price;
-
         // 3. 风控预检 (锁外执行)
-        self.risk_checker.pre_check(
-            symbol,
-            account.available,
-            order_value,
-            account.total_equity,
-        )?;
+        let risk_result = self.risk_checker.pre_check(&risk_req, &account);
+        if !risk_result.pre_check_passed {
+            return Err(EngineError::RiskCheckFailed("Pre-check failed".to_string()));
+        }
 
         // 4. 调用网关执行订单
-        self.gateway.place_order(req)
+        self.gateway.place_order(risk_req)
+            .map_err(|e| EngineError::OrderExecutionFailed(e.to_string()))
     }
 
     /// 执行市价单
@@ -73,7 +71,7 @@ impl OrderExecutor {
         qty: Decimal,
         price: Decimal,
     ) -> Result<OrderResult, EngineError> {
-        self.execute(symbol, side, qty, price, OrderType::Market)
+        self.execute(symbol, side, qty, price)
     }
 
     /// 执行限价单
@@ -84,7 +82,7 @@ impl OrderExecutor {
         qty: Decimal,
         price: Decimal,
     ) -> Result<OrderResult, EngineError> {
-        self.execute(symbol, side, qty, price, OrderType::Limit)
+        self.execute(symbol, side, qty, price)
     }
 
     /// 从交易决策执行订单

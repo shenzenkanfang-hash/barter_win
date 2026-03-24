@@ -27,7 +27,7 @@ use crate::core::{
     // 触发器
     triggers::TriggerManager,
     // 执行流程
-    execution::{ExecutionConfig, TradingPipeline, OrderExecutor},
+    execution::{ExecutionConfig, TradingPipeline, OrderExecutor as OrderExecutorTrait},
     // 资金池
     fund_pool::FundPoolManager,
     // 风控
@@ -37,9 +37,9 @@ use crate::core::{
     // 回滚
     rollback::RollbackManager,
 };
+use crate::order::OrderExecutor;
 
 /// TradingEngine v2 配置
-#[derive(Debug, Clone)]
 pub struct TradingEngineConfig {
     /// 执行配置
     pub execution: ExecutionConfig,
@@ -51,6 +51,24 @@ pub struct TradingEngineConfig {
     pub minute_fund: Decimal,
     /// 日线级初始资金
     pub daily_fund: Decimal,
+    /// 交易所网关（延迟注入）
+    pub gateway: Option<std::sync::Arc<dyn crate::interfaces::ExchangeGateway>>,
+    /// 风控检查器（延迟注入）
+    pub risk_checker: Option<std::sync::Arc<dyn crate::interfaces::RiskChecker>>,
+}
+
+impl std::fmt::Debug for TradingEngineConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TradingEngineConfig")
+            .field("execution", &self.execution)
+            .field("risk", &self.risk)
+            .field("mode", &self.mode)
+            .field("minute_fund", &self.minute_fund)
+            .field("daily_fund", &self.daily_fund)
+            .field("gateway", &"<Arc<dyn ExchangeGateway>>")
+            .field("risk_checker", &"<Arc<dyn RiskChecker>>")
+            .finish()
+    }
 }
 
 impl Default for TradingEngineConfig {
@@ -61,6 +79,8 @@ impl Default for TradingEngineConfig {
             mode: EngineMode::Simulation,
             minute_fund: Decimal::from(10000),
             daily_fund: Decimal::from(20000),
+            gateway: None,
+            risk_checker: None,
         }
     }
 }
@@ -87,8 +107,10 @@ pub struct TradingEngineV2 {
     trigger_manager: TriggerManager,
     /// 交易流程
     pipeline: TradingPipeline,
-    /// 订单执行器
-    order_executor: OrderExecutor,
+    /// 订单执行器（配置，用于创建订单和管理状态）
+    order_executor: OrderExecutorTrait,
+    /// 实际订单执行器（用于发送到交易所）
+    order_sender: OrderExecutor,
     /// 资金池管理器
     fund_pool: FundPoolManager,
     /// 风控管理器
@@ -112,11 +134,22 @@ impl TradingEngineV2 {
         let fund_pool_for_risk = fund_pool.clone();
         let fund_pool_for_rollback = fund_pool.clone();
 
+        // 创建订单配置执行器
+        let order_executor = OrderExecutorTrait::new(config.execution.clone());
+
+        // 创建实际订单执行器（使用配置中的 gateway 和 risk_checker）
+        let gateway = config.gateway.clone()
+            .expect("TradingEngineV2 requires a gateway to be configured");
+        let risk_checker = config.risk_checker.clone()
+            .expect("TradingEngineV2 requires a risk_checker to be configured");
+        let order_sender = OrderExecutor::new(gateway, risk_checker);
+
         Self {
             engine_state: EngineStateHandle::new(config.mode),
             trigger_manager: TriggerManager::default(),
             pipeline: TradingPipeline::new(config.execution.clone()),
-            order_executor: OrderExecutor::new(config.execution),
+            order_executor,
+            order_sender,
             fund_pool: fund_pool.clone(),
             risk_manager: RiskManager::new(config.risk, fund_pool_for_risk),
             timeout_monitor: TimeoutMonitor::new(180),
