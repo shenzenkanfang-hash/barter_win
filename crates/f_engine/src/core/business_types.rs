@@ -1,53 +1,14 @@
 //! f_engine 业务数据类型
 //!
 //! 本模块定义引擎与策略、风控之间的接口数据类型。
-//!
-//! # 设计原则
-//! - 层内直接调用，使用具体结构体
-//! - 层间通过 pub 函数传递数据
-//! - 字段私有化，对外暴露方法
 
 #![forbid(unsafe_code)]
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-// ============================================================================
-// 持仓方向
-// ============================================================================
-
-/// 持仓方向
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PositionSide {
-    /// 无持仓
-    NONE,
-    /// 多头
-    LONG,
-    /// 空头
-    SHORT,
-}
-
-impl Default for PositionSide {
-    fn default() -> Self {
-        PositionSide::NONE
-    }
-}
-
-impl PositionSide {
-    pub fn is_long(&self) -> bool {
-        matches!(self, PositionSide::LONG)
-    }
-
-    pub fn is_short(&self) -> bool {
-        matches!(self, PositionSide::SHORT)
-    }
-
-    pub fn is_flat(&self) -> bool {
-        matches!(self, PositionSide::NONE)
-    }
-}
-
-// ============================================================================
+// Re-export PositionSide from a_common
+pub use a_common::models::types::PositionSide;
 // 波动率等级
 // ============================================================================
 

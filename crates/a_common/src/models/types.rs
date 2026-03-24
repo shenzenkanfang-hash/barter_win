@@ -68,3 +68,23 @@ pub enum PositionSide {
     SHORT,
     NONE,
 }
+
+impl Default for PositionSide {
+    fn default() -> Self {
+        PositionSide::NONE
+    }
+}
+
+impl PositionSide {
+    pub fn is_long(&self) -> bool {
+        matches!(self, PositionSide::LONG)
+    }
+
+    pub fn is_short(&self) -> bool {
+        matches!(self, PositionSide::SHORT)
+    }
+
+    pub fn is_flat(&self) -> bool {
+        matches!(self, PositionSide::NONE)
+    }
+}
