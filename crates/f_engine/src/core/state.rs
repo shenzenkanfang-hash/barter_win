@@ -17,6 +17,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // ============================================================================
 // 启动状态
@@ -125,33 +126,54 @@ impl TradeLock {
 /// 品种级运行指标
 ///
 /// 所有字段私有化，通过方法访问
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// 计数器使用 AtomicU64 保证线程安全
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SymbolMetrics {
     /// 累计处理 tick 数
-    tick_processed: u64,
+    tick_processed: AtomicU64,
     /// 累计生成信号数
-    signal_generated: u64,
+    signal_generated: AtomicU64,
     /// 累计下单数
-    order_sent: u64,
+    order_sent: AtomicU64,
     /// 累计成交数
-    order_filled: u64,
+    order_filled: AtomicU64,
     /// 累计失败数
-    order_failed: u64,
+    order_failed: AtomicU64,
     /// 最后信号时间
     last_signal_time: Option<DateTime<Utc>>,
     /// 最后下单时间
     last_order_time: Option<DateTime<Utc>>,
 }
 
+impl Clone for SymbolMetrics {
+    fn clone(&self) -> Self {
+        Self {
+            tick_processed: AtomicU64::new(self.tick_processed.load(Ordering::SeqCst)),
+            signal_generated: AtomicU64::new(self.signal_generated.load(Ordering::SeqCst)),
+            order_sent: AtomicU64::new(self.order_sent.load(Ordering::SeqCst)),
+            order_filled: AtomicU64::new(self.order_filled.load(Ordering::SeqCst)),
+            order_failed: AtomicU64::new(self.order_failed.load(Ordering::SeqCst)),
+            last_signal_time: self.last_signal_time,
+            last_order_time: self.last_order_time,
+        }
+    }
+}
+
+impl Default for SymbolMetrics {
+    fn default() -> Self {
+        Self::new("")
+    }
+}
+
 impl SymbolMetrics {
     /// 创建新的品种指标
     pub fn new(_symbol: &str) -> Self {
         Self {
-            tick_processed: 0,
-            signal_generated: 0,
-            order_sent: 0,
-            order_filled: 0,
-            order_failed: 0,
+            tick_processed: AtomicU64::new(0),
+            signal_generated: AtomicU64::new(0),
+            order_sent: AtomicU64::new(0),
+            order_filled: AtomicU64::new(0),
+            order_failed: AtomicU64::new(0),
             last_signal_time: None,
             last_order_time: None,
         }
@@ -163,27 +185,27 @@ impl SymbolMetrics {
 
     /// tick 处理数
     pub fn tick_processed(&self) -> u64 {
-        self.tick_processed
+        self.tick_processed.load(Ordering::SeqCst)
     }
 
     /// 信号生成数
     pub fn signal_generated(&self) -> u64 {
-        self.signal_generated
+        self.signal_generated.load(Ordering::SeqCst)
     }
 
     /// 订单发送数
     pub fn order_sent(&self) -> u64 {
-        self.order_sent
+        self.order_sent.load(Ordering::SeqCst)
     }
 
     /// 订单成交数
     pub fn order_filled(&self) -> u64 {
-        self.order_filled
+        self.order_filled.load(Ordering::SeqCst)
     }
 
     /// 订单失败数
     pub fn order_failed(&self) -> u64 {
-        self.order_failed
+        self.order_failed.load(Ordering::SeqCst)
     }
 
     /// 最后信号时间
@@ -198,41 +220,42 @@ impl SymbolMetrics {
 
     /// 获取成交率
     pub fn fill_rate(&self) -> f64 {
-        if self.order_sent == 0 {
+        let sent = self.order_sent();
+        if sent == 0 {
             return 0.0;
         }
-        self.order_filled as f64 / self.order_sent as f64
+        self.order_filled() as f64 / sent as f64
     }
 
     // ─────────────────────────────────────────────────────────
-    // 更新方法
+    // 更新方法（线程安全）
     // ─────────────────────────────────────────────────────────
 
     /// 记录 tick 处理
-    pub fn record_tick(&mut self) {
-        self.tick_processed += 1;
+    pub fn record_tick(&self) {
+        self.tick_processed.fetch_add(1, Ordering::SeqCst);
     }
 
     /// 记录信号生成
-    pub fn record_signal(&mut self) {
-        self.signal_generated += 1;
-        self.last_signal_time = Some(Utc::now());
+    pub fn record_signal(&self) {
+        self.signal_generated.fetch_add(1, Ordering::SeqCst);
+        // 注意：last_signal_time 更新仍需要外部同步
     }
 
     /// 记录订单发送
-    pub fn record_order_sent(&mut self) {
-        self.order_sent += 1;
-        self.last_order_time = Some(Utc::now());
+    pub fn record_order_sent(&self) {
+        self.order_sent.fetch_add(1, Ordering::SeqCst);
+        // 注意：last_order_time 更新仍需要外部同步
     }
 
     /// 记录订单成交
-    pub fn record_order_filled(&mut self) {
-        self.order_filled += 1;
+    pub fn record_order_filled(&self) {
+        self.order_filled.fetch_add(1, Ordering::SeqCst);
     }
 
     /// 记录订单失败
-    pub fn record_order_failed(&mut self) {
-        self.order_failed += 1;
+    pub fn record_order_failed(&self) {
+        self.order_failed.fetch_add(1, Ordering::SeqCst);
     }
 }
 

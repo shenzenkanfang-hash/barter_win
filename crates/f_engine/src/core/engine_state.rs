@@ -617,7 +617,7 @@ impl EngineState {
     pub fn can_trade(&self) -> bool {
         self.status == EngineStatus::Running
             && !self.is_shutting_down
-            && !self.circuit_breaker.is_triggered
+            && !self.circuit_breaker.is_triggered()  // 调用方法而非字段
     }
 
     /// 获取当前状态
