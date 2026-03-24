@@ -195,13 +195,13 @@ impl TradingEngine {
         };
 
         // 灾备重启检查
-        if matches!(state.startup_state, StartupState::Recovery) {
+        if matches!(state.startup_state(), StartupState::Recovery) {
             // Recovery 状态需要等待新鲜信号
             info!("Recovery in progress for {}", symbol);
         }
 
         // 首次请求时间记录
-        if state.last_1m_request_ts == 0 {
+        if state.last_1m_request_ts() == 0 {
             state.record_1m_request(now_ts);
         }
 
@@ -215,8 +215,8 @@ impl TradingEngine {
         if let Some((decision, signal_ts)) = signal_processor.get_min_signal(symbol) {
             let signal_age = now_ts - signal_ts;
 
-            if signal_age > state.timeout_secs {
-                warn!("Signal delay: age={}s > {}s", signal_age, state.timeout_secs);
+            if signal_age > state.timeout_secs() {
+                warn!("Signal delay: age={}s > {}s", signal_age, state.timeout_secs());
                 return false;
             }
 
@@ -276,7 +276,7 @@ impl TradingEngine {
                 // 更新交易锁
                 let mut states = self.symbol_states.write();
                 if let Some(state) = states.get_mut(symbol) {
-                    state.trade_lock.update(
+                    state.trade_lock_mut().update(
                         decision.timestamp,
                         decision.qty,
                         decision.price,

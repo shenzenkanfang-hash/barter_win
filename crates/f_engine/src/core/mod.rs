@@ -29,8 +29,8 @@ pub use crate::types::{StrategyId, TradingDecision, OrderRequest, Side, OrderTyp
 
 // engine_state 导出
 pub use engine_state::{
-    EngineState, EngineStateHandle, EngineStatus, EngineMode, EngineMetricsSnapshot,
-    HealthStatus, CircuitBreaker, CircuitBreakerConfig, CircuitBreakerAction,
-    EngineStateError, Result as EngineStateResult,
+    EngineState, EngineStateHandle, EngineStatus, EngineMode, Environment,
+    EngineMetricsSnapshot, HealthStatus, CircuitBreaker, CircuitBreakerConfig,
+    CircuitBreakerAction, EngineStateError, Result as EngineStateResult,
 };
 // ModeSwitcher 和 Mode 从 channel 模块重导出 via types.rs

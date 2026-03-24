@@ -56,7 +56,7 @@ pub use core::engine_v2::{
 
 // Re-exports - Engine State (生产级)
 pub use core::engine_state::{
-    EngineState, EngineStateHandle, EngineStatus, EngineMode, EngineMetricsSnapshot,
-    HealthStatus, CircuitBreaker, CircuitBreakerConfig, CircuitBreakerAction,
-    EngineStateError, Result as EngineStateResult,
+    EngineState, EngineStateHandle, EngineStatus, EngineMode, Environment,
+    EngineMetricsSnapshot, HealthStatus, CircuitBreaker, CircuitBreakerConfig,
+    CircuitBreakerAction, EngineStateError, Result as EngineStateResult,
 };

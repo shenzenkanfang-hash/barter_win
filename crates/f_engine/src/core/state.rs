@@ -1,10 +1,14 @@
 //! f_engine 核心状态管理
 //!
+//! # 设计原则
+//! - 所有字段**私有化**
+//! - 所有访问通过**方法**
+//! - 模块间调用必须走接口
+//!
 //! # 模块说明
 //! - `SymbolState`: 品种交易状态（含指标）
 //! - `SymbolMetrics`: 品种级运行指标
 //! - `TradeLock`: 交易锁，防止重复执行
-//! - `SignalCache`: 信号缓存
 //! - `StartupState`: 启动状态（正常/灾备恢复）
 //! - `CheckConfig`: 检查配置（时间窗口）
 
@@ -39,20 +43,23 @@ impl Default for StartupState {
 
 /// 交易锁 - 防止并发重复执行
 ///
-/// 机制：
+/// # 机制
 /// - 获取锁成功时核对时间戳
-/// - tick_ts <= lock_ts 说明已被处理过，丢弃
+/// - `tick_ts <= lock_ts` 说明已被处理过，丢弃
 /// - 执行成功后更新锁的时间戳和仓位
+///
+/// # 模块间调用规则
+/// ⚠️ 禁止直接访问字段，必须使用方法
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradeLock {
     /// 锁持有时间戳
-    pub timestamp: i64,
+    timestamp: i64,
     /// 当前持仓数量
-    pub position_qty: Decimal,
+    position_qty: Decimal,
     /// 持仓平均价格
-    pub position_price: Decimal,
+    position_price: Decimal,
     /// 持仓更新时间戳
-    pub position_ts: i64,
+    position_ts: i64,
 }
 
 impl Default for TradeLock {
@@ -89,6 +96,26 @@ impl TradeLock {
     pub fn position_value(&self) -> Decimal {
         self.position_qty * self.position_price
     }
+
+    /// 获取时间戳
+    pub fn timestamp(&self) -> i64 {
+        self.timestamp
+    }
+
+    /// 获取持仓数量
+    pub fn position_qty(&self) -> Decimal {
+        self.position_qty
+    }
+
+    /// 获取持仓价格
+    pub fn position_price(&self) -> Decimal {
+        self.position_price
+    }
+
+    /// 获取持仓更新时间戳
+    pub fn position_ts(&self) -> i64 {
+        self.position_ts
+    }
 }
 
 // ============================================================================
@@ -96,27 +123,29 @@ impl TradeLock {
 // ============================================================================
 
 /// 品种级运行指标
+///
+/// 所有字段私有化，通过方法访问
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SymbolMetrics {
     /// 累计处理 tick 数
-    pub tick_processed: u64,
+    tick_processed: u64,
     /// 累计生成信号数
-    pub signal_generated: u64,
+    signal_generated: u64,
     /// 累计下单数
-    pub order_sent: u64,
+    order_sent: u64,
     /// 累计成交数
-    pub order_filled: u64,
+    order_filled: u64,
     /// 累计失败数
-    pub order_failed: u64,
+    order_failed: u64,
     /// 最后信号时间
-    pub last_signal_time: Option<DateTime<Utc>>,
+    last_signal_time: Option<DateTime<Utc>>,
     /// 最后下单时间
-    pub last_order_time: Option<DateTime<Utc>>,
+    last_order_time: Option<DateTime<Utc>>,
 }
 
 impl SymbolMetrics {
     /// 创建新的品种指标
-    pub fn new(symbol: &str) -> Self {
+    pub fn new(_symbol: &str) -> Self {
         Self {
             tick_processed: 0,
             signal_generated: 0,
@@ -127,6 +156,57 @@ impl SymbolMetrics {
             last_order_time: None,
         }
     }
+
+    // ─────────────────────────────────────────────────────────
+    // 查询方法
+    // ─────────────────────────────────────────────────────────
+
+    /// tick 处理数
+    pub fn tick_processed(&self) -> u64 {
+        self.tick_processed
+    }
+
+    /// 信号生成数
+    pub fn signal_generated(&self) -> u64 {
+        self.signal_generated
+    }
+
+    /// 订单发送数
+    pub fn order_sent(&self) -> u64 {
+        self.order_sent
+    }
+
+    /// 订单成交数
+    pub fn order_filled(&self) -> u64 {
+        self.order_filled
+    }
+
+    /// 订单失败数
+    pub fn order_failed(&self) -> u64 {
+        self.order_failed
+    }
+
+    /// 最后信号时间
+    pub fn last_signal_time(&self) -> Option<DateTime<Utc>> {
+        self.last_signal_time
+    }
+
+    /// 最后下单时间
+    pub fn last_order_time(&self) -> Option<DateTime<Utc>> {
+        self.last_order_time
+    }
+
+    /// 获取成交率
+    pub fn fill_rate(&self) -> f64 {
+        if self.order_sent == 0 {
+            return 0.0;
+        }
+        self.order_filled as f64 / self.order_sent as f64
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 更新方法
+    // ─────────────────────────────────────────────────────────
 
     /// 记录 tick 处理
     pub fn record_tick(&mut self) {
@@ -154,14 +234,6 @@ impl SymbolMetrics {
     pub fn record_order_failed(&mut self) {
         self.order_failed += 1;
     }
-
-    /// 获取成交率
-    pub fn fill_rate(&self) -> f64 {
-        if self.order_sent == 0 {
-            return 0.0;
-        }
-        self.order_filled as f64 / self.order_sent as f64
-    }
 }
 
 // ============================================================================
@@ -170,47 +242,48 @@ impl SymbolMetrics {
 
 /// 品种交易状态
 ///
-/// 维护每个交易品种的状态信息：
+/// # 维护信息
 /// - 交易锁
 /// - 指标请求/成功时间戳
 /// - 缓存的信号
 /// - 启动状态
 /// - 运行指标
+///
+/// # 模块间调用规则
+/// ⚠️ 禁止直接访问字段，必须使用方法
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolState {
     /// 品种符号
-    pub symbol: String,
-
+    symbol: String,
     /// 交易锁
-    pub trade_lock: TradeLock,
-
+    trade_lock: TradeLock,
     /// 启动状态
-    pub startup_state: StartupState,
+    startup_state: StartupState,
 
     // --- 分钟级状态 ---
     /// 上次分钟级指标请求时间戳
-    pub last_1m_request_ts: i64,
+    last_1m_request_ts: i64,
     /// 上次分钟级指标成功获取时间戳
-    pub last_1m_ok_ts: i64,
+    last_1m_ok_ts: i64,
     /// 上次获取的分钟级信号时间戳
-    pub last_1m_signal_ts: i64,
+    last_1m_signal_ts: i64,
     /// 缓存的分钟级信号
-    pub last_1m_signal: Option<TradingDecision>,
+    last_1m_signal: Option<TradingDecision>,
 
     // --- 日线级状态 ---
     /// 上次日线级指标请求时间戳
-    pub last_daily_request_ts: i64,
+    last_daily_request_ts: i64,
     /// 上次日线级指标成功获取时间戳
-    pub last_daily_ok_ts: i64,
+    last_daily_ok_ts: i64,
     /// 缓存的日线级信号
-    pub last_daily_signal: Option<TradingDecision>,
+    last_daily_signal: Option<TradingDecision>,
 
     /// 超时阈值（秒）
-    pub timeout_secs: i64,
+    timeout_secs: i64,
 
     // --- 运行指标 ---
     /// 品种级指标
-    pub metrics: SymbolMetrics,
+    metrics: SymbolMetrics,
 }
 
 impl SymbolState {
@@ -227,7 +300,7 @@ impl SymbolState {
             last_daily_request_ts: 0,
             last_daily_ok_ts: 0,
             last_daily_signal: None,
-            timeout_secs: 60, // 默认1分钟超时
+            timeout_secs: 60,
             metrics: SymbolMetrics::new(&symbol),
         }
     }
@@ -241,10 +314,49 @@ impl SymbolState {
         }
     }
 
+    // ─────────────────────────────────────────────────────────
+    // 查询方法
+    // ─────────────────────────────────────────────────────────
+
+    /// 获取品种符号
+    pub fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    /// 获取启动状态
+    pub fn startup_state(&self) -> StartupState {
+        self.startup_state
+    }
+
+    /// 获取交易锁（只读）
+    pub fn trade_lock(&self) -> &TradeLock {
+        &self.trade_lock
+    }
+
+    /// 获取交易锁（可变）
+    pub fn trade_lock_mut(&mut self) -> &mut TradeLock {
+        &mut self.trade_lock
+    }
+
+    /// 获取品种指标
+    pub fn metrics(&self) -> &SymbolMetrics {
+        &self.metrics
+    }
+
+    /// 获取品种指标（可变）
+    pub fn metrics_mut(&mut self) -> &mut SymbolMetrics {
+        &mut self.metrics
+    }
+
+    /// 获取超时阈值
+    pub fn timeout_secs(&self) -> i64 {
+        self.timeout_secs
+    }
+
     /// 检查分钟级是否超时
     pub fn is_1m_timeout(&self, now_ts: i64) -> bool {
         if self.last_1m_request_ts == 0 {
-            return false; // 从未请求过，不算超时
+            return false;
         }
         now_ts - self.last_1m_request_ts > self.timeout_secs
     }
@@ -257,10 +369,49 @@ impl SymbolState {
         now_ts - self.last_daily_request_ts > self.timeout_secs
     }
 
-    /// 检查信号是否过期（age > timeout）
+    /// 检查信号是否过期
     pub fn is_signal_stale(&self, signal_ts: i64, now_ts: i64) -> bool {
         now_ts - signal_ts > self.timeout_secs
     }
+
+    /// 获取分钟级信号时间戳
+    pub fn last_1m_signal_ts(&self) -> i64 {
+        self.last_1m_signal_ts
+    }
+
+    /// 获取分钟级信号
+    pub fn last_1m_signal(&self) -> Option<&TradingDecision> {
+        self.last_1m_signal.as_ref()
+    }
+
+    /// 获取日线级信号
+    pub fn last_daily_signal(&self) -> Option<&TradingDecision> {
+        self.last_daily_signal.as_ref()
+    }
+
+    /// 上次分钟级请求时间戳
+    pub fn last_1m_request_ts(&self) -> i64 {
+        self.last_1m_request_ts
+    }
+
+    /// 上次分钟级成功时间戳
+    pub fn last_1m_ok_ts(&self) -> i64 {
+        self.last_1m_ok_ts
+    }
+
+    /// 上次日线级请求时间戳
+    pub fn last_daily_request_ts(&self) -> i64 {
+        self.last_daily_request_ts
+    }
+
+    /// 上次日线级成功时间戳
+    pub fn last_daily_ok_ts(&self) -> i64 {
+        self.last_daily_ok_ts
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 更新方法
+    // ─────────────────────────────────────────────────────────
 
     /// 设置超时阈值
     pub fn set_timeout(&mut self, secs: i64) {
@@ -318,19 +469,21 @@ impl SymbolState {
 // ============================================================================
 
 /// 检查配置 - 时间窗口控制
+///
+/// 所有字段私有化
 #[derive(Debug, Clone)]
 pub struct CheckConfig {
     /// 分钟级检查间隔（毫秒）
-    pub minute_check_interval_ms: u64,
+    minute_check_interval_ms: u64,
     /// 日线级检查间隔（毫秒）
-    pub daily_check_interval_ms: u64,
+    daily_check_interval_ms: u64,
 }
 
 impl Default for CheckConfig {
     fn default() -> Self {
         Self {
-            minute_check_interval_ms: 1000,  // 默认1秒
-            daily_check_interval_ms: 1000,   // 默认1秒
+            minute_check_interval_ms: 1000,
+            daily_check_interval_ms: 1000,
         }
     }
 }
@@ -350,6 +503,16 @@ impl CheckConfig {
             minute_check_interval_ms: 100,
             daily_check_interval_ms: 100,
         }
+    }
+
+    /// 获取分钟级检查间隔
+    pub fn minute_check_interval_ms(&self) -> u64 {
+        self.minute_check_interval_ms
+    }
+
+    /// 获取日线级检查间隔
+    pub fn daily_check_interval_ms(&self) -> u64 {
+        self.daily_check_interval_ms
     }
 }
 

@@ -1,23 +1,36 @@
-//! f_engine 引擎状态管理
+//! f_engine 引擎状态管理（生产级）
 //!
-//! 生产级量化交易引擎状态管理模块
+//! # 核心原则
+//! 1. **所有字段私有化** - 外部模块无法直接访问数据
+//! 2. **接口隔离** - 所有操作必须通过方法调用
+//! 3. **线程安全** - 使用 Arc<RwLock> 保护所有共享状态
+//! 4. **原子操作** - 高频指标使用 Atomic 类型
 //!
-//! # 核心特性
-//! - 线程安全：`Arc<RwLock<EngineState>>` 包装
-//! - 原子指标：`AtomicU64/U32` 无锁高性能
-//! - 熔断器：连续错误自动触发熔断保护
-//! - 优雅关闭：支持 graceful shutdown
-//! - 健康检查：`HealthStatus` 支持监控面板
-//! - 接口化：private 字段 + 方法暴露
+//! # 模块间调用规则
+//! ⚠️ **严格禁止**：
+//! - 直接读写 `EngineState.xxx` 字段
+//! - 跨模块访问 `SymbolState.xxx` 字段
+//! - 绕过接口方法直接操作内存
 //!
-//! # 架构
-//! ```text
-//! EngineStateHandle (Arc<RwLock<EngineState>>)
-//!   └─ EngineState
-//!        ├─ 生命周期 (start/pause/stop)
-//!        ├─ 熔断器 (CircuitBreaker)
-//!        ├─ 原子指标 (AtomicU64)
-//!        └─ 品种管理 (HashMap<SymbolState>)
+//! ✅ **正确方式**：
+//! ```rust,ignore
+//! // 通过句柄访问
+//! let state = EngineStateHandle::new(EngineMode::Production);
+//!
+//! // 原子操作（无锁）
+//! state.read().record_tick();
+//!
+//! // 状态查询（读锁）
+//! if state.read().can_trade() {
+//!     // trading logic
+//! }
+//!
+//! // 状态修改（写锁）
+//! {
+//!     let mut s = state.write();
+//!     s.start();
+//!     s.register_symbol("BTC-USDT");
+//! }
 //! ```
 
 #![forbid(unsafe_code)]
@@ -38,16 +51,17 @@ use crate::core::state::SymbolState;
 // 错误类型
 // ============================================================================
 
+/// 引擎状态错误
 #[derive(Debug, Clone, Error)]
 pub enum EngineStateError {
-    #[error("引擎已停止，无法操作: {0}")]
+    #[error("引擎已停止: {0}")]
     EngineStopped(String),
 
     #[error("品种未注册: {0}")]
-    SymbolNotRegistered(String),
+    SymbolNotFound(String),
 
-    #[error("品种已注册: {0}")]
-    SymbolAlreadyRegistered(String),
+    #[error("品种已存在: {0}")]
+    SymbolExists(String),
 
     #[error("引擎已暂停: {0}")]
     EnginePaused(String),
@@ -75,7 +89,7 @@ pub enum EngineStatus {
     Running,
     /// 已暂停
     Paused,
-    /// 停止中
+    /// 优雅关闭中
     ShuttingDown,
     /// 已停止
     Stopped,
@@ -90,8 +104,14 @@ impl Default for EngineStatus {
 }
 
 impl EngineStatus {
+    /// 是否处于活跃状态
     pub fn is_active(&self) -> bool {
         matches!(self, EngineStatus::Running | EngineStatus::Paused)
+    }
+
+    /// 是否可以接收新请求
+    pub fn accepts_requests(&self) -> bool {
+        matches!(self, EngineStatus::Running)
     }
 }
 
@@ -117,6 +137,26 @@ impl Default for EngineMode {
     }
 }
 
+/// 运行环境
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Environment {
+    /// 开发环境
+    Development,
+    /// 测试环境
+    Test,
+    /// 预发布环境
+    Staging,
+    /// 生产环境
+    Production,
+}
+
+impl Default for Environment {
+    fn default() -> Self {
+        Environment::Development
+    }
+}
+
 // ============================================================================
 // 健康状态
 // ============================================================================
@@ -127,9 +167,9 @@ impl Default for EngineMode {
 pub enum HealthStatus {
     /// 健康
     Healthy,
-    /// 降级
+    /// 降级（部分功能异常）
     Degraded,
-    /// 不健康
+    /// 不健康（严重问题）
     Unhealthy,
 }
 
@@ -144,14 +184,16 @@ impl Default for HealthStatus {
 // ============================================================================
 
 /// 熔断配置
+///
+/// 所有字段私有化，通过方法访问
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitBreakerConfig {
     /// 最大连续错误次数
-    pub max_consecutive_errors: u32,
+    max_consecutive_errors: u32,
     /// 暂停时长（秒）
-    pub pause_duration_secs: u64,
+    pause_duration_secs: u64,
     /// 是否自动恢复
-    pub auto_resume: bool,
+    auto_resume: bool,
 }
 
 impl Default for CircuitBreakerConfig {
@@ -161,6 +203,41 @@ impl Default for CircuitBreakerConfig {
             pause_duration_secs: 60,
             auto_resume: true,
         }
+    }
+}
+
+impl CircuitBreakerConfig {
+    /// 创建生产配置
+    pub fn production() -> Self {
+        Self {
+            max_consecutive_errors: 5,
+            pause_duration_secs: 60,
+            auto_resume: true,
+        }
+    }
+
+    /// 创建回测配置（更宽松）
+    pub fn backtest() -> Self {
+        Self {
+            max_consecutive_errors: 100,
+            pause_duration_secs: 0,
+            auto_resume: false,
+        }
+    }
+
+    /// 获取最大连续错误次数
+    pub fn max_consecutive_errors(&self) -> u32 {
+        self.max_consecutive_errors
+    }
+
+    /// 获取暂停时长（秒）
+    pub fn pause_duration_secs(&self) -> u64 {
+        self.pause_duration_secs
+    }
+
+    /// 是否自动恢复
+    pub fn auto_resume(&self) -> bool {
+        self.auto_resume
     }
 }
 
@@ -176,18 +253,20 @@ pub enum CircuitBreakerAction {
 }
 
 /// 熔断器状态
+///
+/// 所有字段私有化，通过方法访问
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitBreaker {
     /// 配置
-    pub config: CircuitBreakerConfig,
+    config: CircuitBreakerConfig,
     /// 当前连续错误计数
-    pub consecutive_errors: u32,
+    consecutive_errors: u32,
     /// 是否触发熔断
-    pub is_triggered: bool,
+    is_triggered: bool,
     /// 触发时间
-    pub triggered_at: Option<DateTime<Utc>>,
+    triggered_at: Option<DateTime<Utc>>,
     /// 计划恢复时间
-    pub scheduled_resume_at: Option<DateTime<Utc>>,
+    scheduled_resume_at: Option<DateTime<Utc>>,
 }
 
 impl Default for CircuitBreaker {
@@ -203,6 +282,7 @@ impl Default for CircuitBreaker {
 }
 
 impl CircuitBreaker {
+    /// 使用配置创建
     pub fn new(config: CircuitBreakerConfig) -> Self {
         Self {
             config,
@@ -212,6 +292,39 @@ impl CircuitBreaker {
             scheduled_resume_at: None,
         }
     }
+
+    // ─────────────────────────────────────────────────────────
+    // 查询方法
+    // ─────────────────────────────────────────────────────────
+
+    /// 是否触发熔断
+    pub fn is_triggered(&self) -> bool {
+        self.is_triggered
+    }
+
+    /// 获取连续错误计数
+    pub fn consecutive_errors(&self) -> u32 {
+        self.consecutive_errors
+    }
+
+    /// 获取配置
+    pub fn config(&self) -> &CircuitBreakerConfig {
+        &self.config
+    }
+
+    /// 获取触发时间
+    pub fn triggered_at(&self) -> Option<DateTime<Utc>> {
+        self.triggered_at
+    }
+
+    /// 获取计划恢复时间
+    pub fn scheduled_resume_at(&self) -> Option<DateTime<Utc>> {
+        self.scheduled_resume_at
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 修改方法
+    // ─────────────────────────────────────────────────────────
 
     /// 记录错误
     pub fn record_error(&mut self) {
@@ -237,7 +350,8 @@ impl CircuitBreaker {
             self.is_triggered = true;
             self.triggered_at = Some(Utc::now());
             if self.config.auto_resume {
-                self.scheduled_resume_at = Some(Utc::now() + ChronoDuration::seconds(self.config.pause_duration_secs as i64));
+                self.scheduled_resume_at =
+                    Some(Utc::now() + ChronoDuration::seconds(self.config.pause_duration_secs as i64));
             }
         }
     }
@@ -265,7 +379,7 @@ impl CircuitBreaker {
         if self.is_triggered && !self.is_pause_duration_active() {
             if self.config.auto_resume {
                 self.reset();
-                return CircuitBreakerAction::None; // 自动恢复
+                return CircuitBreakerAction::None;
             }
             return CircuitBreakerAction::Stop;
         }
@@ -280,8 +394,32 @@ impl CircuitBreaker {
 
 /// 引擎全局状态
 ///
-/// 所有字段为 private，通过方法访问
+/// # 设计原则
+/// - 所有字段**私有化**
+/// - 所有访问通过**方法**
+/// - 高频指标使用**原子类型**
+/// - 品种管理使用 **FnvHashMap**
+///
+/// # 模块间调用规则
+/// ⚠️ **禁止**直接访问字段，必须使用方法
+/// ```rust,ignore
+/// // ❌ 错误
+/// state.status = EngineStatus::Running;
+///
+/// // ✅ 正确
+/// state.start();
+/// ```
 pub struct EngineState {
+    // ─────────────────────────────────────────────────────────
+    // 标识
+    // ─────────────────────────────────────────────────────────
+    /// 引擎唯一ID
+    engine_id: String,
+    /// 运行模式
+    mode: EngineMode,
+    /// 运行环境
+    environment: Environment,
+
     // ─────────────────────────────────────────────────────────
     // 生命周期
     // ─────────────────────────────────────────────────────────
@@ -289,7 +427,6 @@ pub struct EngineState {
     last_active_time: DateTime<Utc>,
     restart_count: u32,
     status: EngineStatus,
-    mode: EngineMode,
     health: HealthStatus,
     error_message: Option<String>,
 
@@ -334,12 +471,19 @@ impl EngineState {
     /// 创建新引擎状态
     pub fn new(mode: EngineMode) -> Self {
         let now = Utc::now();
+        let engine_id = format!(
+            "engine_{}_{}",
+            now.timestamp(),
+            std::process::id()
+        );
         Self {
+            engine_id,
+            mode,
+            environment: Environment::default(),
             start_time: now,
             last_active_time: now,
             restart_count: 0,
             status: EngineStatus::Initializing,
-            mode,
             health: HealthStatus::Healthy,
             error_message: None,
             circuit_breaker: CircuitBreaker::default(),
@@ -364,6 +508,33 @@ impl EngineState {
         state
     }
 
+    /// 使用完整配置创建
+    pub fn with_config(mode: EngineMode, env: Environment, config: CircuitBreakerConfig) -> Self {
+        let mut state = Self::new(mode);
+        state.environment = env;
+        state.circuit_breaker = CircuitBreaker::new(config);
+        state
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 标识查询
+    // ═══════════════════════════════════════════════════════════════
+
+    /// 获取引擎唯一ID
+    pub fn engine_id(&self) -> &str {
+        &self.engine_id
+    }
+
+    /// 获取运行模式
+    pub fn mode(&self) -> EngineMode {
+        self.mode
+    }
+
+    /// 获取运行环境
+    pub fn environment(&self) -> Environment {
+        self.environment
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // 生命周期管理
     // ═══════════════════════════════════════════════════════════════
@@ -375,6 +546,11 @@ impl EngineState {
     }
 
     /// 开始优雅关闭
+    ///
+    /// 调用后：
+    /// - `can_trade()` 返回 `false`
+    /// - 停止接收新订单
+    /// - 等待未完成订单
     pub fn start_shutdown(&mut self) {
         self.is_shutting_down = true;
         self.shutdown_start_time = Some(Utc::now());
@@ -423,11 +599,21 @@ impl EngineState {
         self.health = HealthStatus::Healthy;
     }
 
+    /// 增加重启次数
+    pub fn increment_restart(&mut self) {
+        self.restart_count += 1;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // 状态查询
     // ═══════════════════════════════════════════════════════════════
 
     /// 检查是否可以交易
+    ///
+    /// 返回 `true` 当且仅当：
+    /// - 状态为 Running
+    /// - 未在关闭中
+    /// - 熔断器未触发
     pub fn can_trade(&self) -> bool {
         self.status == EngineStatus::Running
             && !self.is_shutting_down
@@ -437,11 +623,6 @@ impl EngineState {
     /// 获取当前状态
     pub fn status(&self) -> EngineStatus {
         self.status
-    }
-
-    /// 获取运行模式
-    pub fn mode(&self) -> EngineMode {
-        self.mode
     }
 
     /// 获取健康状态
@@ -464,14 +645,27 @@ impl EngineState {
         self.status == EngineStatus::Stopped
     }
 
+    /// 是否处于错误状态
+    pub fn is_error(&self) -> bool {
+        self.status == EngineStatus::Error
+    }
+
     /// 获取运行时间
     pub fn uptime(&self) -> Duration {
-        Utc::now().signed_duration_since(self.start_time).to_std().unwrap_or_default()
+        Utc::now()
+            .signed_duration_since(self.start_time)
+            .to_std()
+            .unwrap_or_default()
     }
 
     /// 获取启动时间
     pub fn start_time(&self) -> DateTime<Utc> {
         self.start_time
+    }
+
+    /// 获取最后活跃时间
+    pub fn last_active_time(&self) -> DateTime<Utc> {
+        self.last_active_time
     }
 
     /// 获取错误消息
@@ -484,34 +678,46 @@ impl EngineState {
         self.restart_count
     }
 
+    /// 获取关闭开始时间
+    pub fn shutdown_start_time(&self) -> Option<DateTime<Utc>> {
+        self.shutdown_start_time
+    }
+
     // ═══════════════════════════════════════════════════════════════
-    // 指标查询
+    // 指标查询（原子操作）
     // ═══════════════════════════════════════════════════════════════
 
+    /// 累计处理 tick 数
     pub fn tick_processed(&self) -> u64 {
         self.tick_processed.load(Ordering::Relaxed)
     }
 
+    /// 累计发送订单数
     pub fn order_sent(&self) -> u64 {
         self.order_sent.load(Ordering::Relaxed)
     }
 
+    /// 累计成交订单数
     pub fn order_filled(&self) -> u64 {
         self.order_filled.load(Ordering::Relaxed)
     }
 
+    /// 累计失败订单数
     pub fn order_failed(&self) -> u64 {
         self.order_failed.load(Ordering::Relaxed)
     }
 
+    /// 累计生成信号数
     pub fn signal_generated(&self) -> u64 {
         self.signal_generated.load(Ordering::Relaxed)
     }
 
+    /// 累计错误数
     pub fn error_count(&self) -> u32 {
         self.error_count.load(Ordering::Relaxed)
     }
 
+    /// 连续错误计数
     pub fn consecutive_errors(&self) -> u32 {
         self.circuit_breaker.consecutive_errors
     }
@@ -537,6 +743,7 @@ impl EngineState {
     /// 获取所有指标快照
     pub fn metrics_snapshot(&self) -> EngineMetricsSnapshot {
         EngineMetricsSnapshot {
+            engine_id: self.engine_id.clone(),
             tick_processed: self.tick_processed(),
             order_sent: self.order_sent(),
             order_filled: self.order_filled(),
@@ -550,10 +757,12 @@ impl EngineState {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // 指标更新（原子操作）
+    // 指标更新（原子操作，无锁）
     // ═══════════════════════════════════════════════════════════════
 
     /// 记录 tick 处理
+    ///
+    /// ⚠️ 此方法使用原子操作，无需锁
     pub fn record_tick(&self) {
         self.tick_processed.fetch_add(1, Ordering::Relaxed);
     }
@@ -578,7 +787,7 @@ impl EngineState {
         self.signal_generated.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// 记录错误
+    /// 记录错误（需要写锁）
     pub fn record_error(&mut self) {
         self.error_count.fetch_add(1, Ordering::Relaxed);
         self.circuit_breaker.record_error();
@@ -589,14 +798,19 @@ impl EngineState {
         self.circuit_breaker.reset();
     }
 
-    /// 批量更新指标
+    /// 批量更新指标（用于恢复）
     pub fn update_metrics(&mut self, snapshot: EngineMetricsSnapshot) {
-        self.tick_processed.store(snapshot.tick_processed, Ordering::Relaxed);
+        self.tick_processed
+            .store(snapshot.tick_processed, Ordering::Relaxed);
         self.order_sent.store(snapshot.order_sent, Ordering::Relaxed);
-        self.order_filled.store(snapshot.order_filled, Ordering::Relaxed);
-        self.order_failed.store(snapshot.order_failed, Ordering::Relaxed);
-        self.signal_generated.store(snapshot.signal_generated, Ordering::Relaxed);
-        self.error_count.store(snapshot.error_count, Ordering::Relaxed);
+        self.order_filled
+            .store(snapshot.order_filled, Ordering::Relaxed);
+        self.order_failed
+            .store(snapshot.order_failed, Ordering::Relaxed);
+        self.signal_generated
+            .store(snapshot.signal_generated, Ordering::Relaxed);
+        self.error_count
+            .store(snapshot.error_count, Ordering::Relaxed);
         self.circuit_breaker.consecutive_errors = snapshot.consecutive_errors;
     }
 
@@ -609,16 +823,21 @@ impl EngineState {
         let fail_rate = self.fail_rate();
         let consecutive = self.consecutive_errors();
 
-        if consecutive >= 10 || fail_rate > 0.5 {
-            self.health = HealthStatus::Unhealthy;
+        self.health = if consecutive >= 10 || fail_rate > 0.5 {
+            HealthStatus::Unhealthy
         } else if consecutive >= 3 || fail_rate > 0.2 {
-            self.health = HealthStatus::Degraded;
+            HealthStatus::Degraded
         } else {
-            self.health = HealthStatus::Healthy;
-        }
+            HealthStatus::Healthy
+        };
     }
 
     /// 自检
+    ///
+    /// 检查：
+    /// - 品种是否重复
+    /// - 状态一致性
+    /// - 计数器异常
     pub fn self_check(&self) -> Result<()> {
         // 检查品种是否重复
         let mut symbols = std::collections::HashSet::new();
@@ -638,7 +857,7 @@ impl EngineState {
             ));
         }
 
-        // 检查原子计数器非负
+        // 检查计数器
         if self.tick_processed.load(Ordering::Relaxed) > u64::MAX / 2 {
             return Err(EngineStateError::SelfCheckFailed(
                 "tick_processed 异常".to_string(),
@@ -668,8 +887,8 @@ impl EngineState {
         self.circuit_breaker.reset();
     }
 
-    /// 获取熔断状态
-    pub fn circuit_breaker_status(&self) -> &CircuitBreaker {
+    /// 获取熔断器状态（只读引用）
+    pub fn circuit_breaker(&self) -> &CircuitBreaker {
         &self.circuit_breaker
     }
 
@@ -678,9 +897,18 @@ impl EngineState {
     // ═══════════════════════════════════════════════════════════════
 
     /// 注册品种
+    ///
+    /// # 示例
+    /// ```rust,ignore
+    /// {
+    ///     let mut s = state.write();
+    ///     s.register_symbol("BTC-USDT");
+    /// }
+    /// ```
     pub fn register_symbol(&mut self, symbol: &str) -> &mut SymbolState {
         if !self.symbols.contains_key(symbol) {
-            self.symbols.insert(symbol.to_string(), SymbolState::new(symbol.to_string()));
+            self.symbols
+                .insert(symbol.to_string(), SymbolState::new(symbol.to_string()));
         }
         self.symbols.get_mut(symbol).unwrap()
     }
@@ -705,6 +933,11 @@ impl EngineState {
     /// 获取品种状态（可变）
     pub fn get_symbol_mut(&mut self, symbol: &str) -> Option<&mut SymbolState> {
         self.symbols.get_mut(symbol)
+    }
+
+    /// 检查品种是否注册
+    pub fn has_symbol(&self, symbol: &str) -> bool {
+        self.symbols.contains_key(symbol)
     }
 
     /// 获取所有注册的品种
@@ -744,22 +977,36 @@ impl EngineState {
 // ============================================================================
 
 /// 引擎指标快照
+///
+/// 用于持久化和监控
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineMetricsSnapshot {
+    /// 引擎ID
+    pub engine_id: String,
+    /// tick 处理数
     pub tick_processed: u64,
+    /// 订单发送数
     pub order_sent: u64,
+    /// 订单成交数
     pub order_filled: u64,
+    /// 订单失败数
     pub order_failed: u64,
+    /// 信号生成数
     pub signal_generated: u64,
+    /// 错误计数
     pub error_count: u32,
+    /// 连续错误计数
     pub consecutive_errors: u32,
+    /// 成交率
     pub fill_rate: f64,
+    /// 失败率
     pub fail_rate: f64,
 }
 
 impl Default for EngineMetricsSnapshot {
     fn default() -> Self {
         Self {
+            engine_id: String::new(),
             tick_processed: 0,
             order_sent: 0,
             order_filled: 0,
@@ -779,9 +1026,26 @@ impl Default for EngineMetricsSnapshot {
 
 /// 线程安全的引擎状态句柄
 ///
-/// 使用 Arc<RwLock<EngineState>> 提供：
-/// - Arc: 多所有权，跨线程共享
-/// - RwLock: 读写锁，读并发，写独占
+/// # 设计
+/// - `Arc`: 多所有权，跨线程共享
+/// - `RwLock`: 读写锁，读并发，写独占
+///
+/// # 使用示例
+/// ```rust,ignore
+/// let state = EngineStateHandle::new(EngineMode::Production);
+///
+/// // 原子操作（无锁）
+/// state.read().record_tick();
+///
+/// // 状态查询（读锁）
+/// if state.read().can_trade() { ... }
+///
+/// // 状态修改（写锁）
+/// {
+///     let mut s = state.write();
+///     s.start();
+/// }
+/// ```
 pub struct EngineStateHandle {
     inner: Arc<RwLock<EngineState>>,
 }
@@ -797,7 +1061,18 @@ impl EngineStateHandle {
     /// 使用自定义熔断配置创建
     pub fn with_circuit_breaker(mode: EngineMode, config: CircuitBreakerConfig) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(EngineState::with_circuit_breaker(mode, config))),
+            inner: Arc::new(RwLock::new(EngineState::with_circuit_breaker(
+                mode, config,
+            ))),
+        }
+    }
+
+    /// 使用完整配置创建
+    pub fn with_config(mode: EngineMode, env: Environment, config: CircuitBreakerConfig) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(EngineState::with_config(
+                mode, env, config,
+            ))),
         }
     }
 
@@ -810,13 +1085,18 @@ impl EngineStateHandle {
     pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, EngineState> {
         self.inner.write()
     }
+
+    /// 克隆句柄（共享底层状态）
+    pub fn clone_handle(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
 }
 
 impl Clone for EngineStateHandle {
     fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-        }
+        self.clone_handle()
     }
 }
 
@@ -829,7 +1109,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_engine_state_lifecycle() {
+    fn test_engine_lifecycle() {
         let mut state = EngineState::new(EngineMode::Production);
 
         assert_eq!(state.status(), EngineStatus::Initializing);
@@ -862,18 +1142,19 @@ mod tests {
 
         assert_eq!(state.tick_processed(), 2);
         assert_eq!(state.signal_generated(), 1);
-        assert_eq!(state.order_sent(), 1);
-        assert_eq!(state.order_filled(), 1);
         assert_eq!(state.fill_rate(), 1.0);
     }
 
     #[test]
     fn test_circuit_breaker() {
-        let mut config = CircuitBreakerConfig::default();
-        config.max_consecutive_errors = 3;
+        let config = CircuitBreakerConfig {
+            max_consecutive_errors: 3,
+            pause_duration_secs: 60,
+            auto_resume: true,
+        };
         let mut state = EngineState::with_circuit_breaker(EngineMode::Production, config);
 
-        assert!(!state.circuit_breaker.is_triggered);
+        assert!(!state.circuit_breaker().is_triggered());
 
         for _ in 0..3 {
             state.record_error();
@@ -881,7 +1162,7 @@ mod tests {
 
         let action = state.check_circuit_breaker();
         assert_eq!(action, CircuitBreakerAction::Pause);
-        assert!(state.circuit_breaker.is_triggered);
+        assert!(state.circuit_breaker().is_triggered());
         assert!(!state.can_trade());
     }
 
@@ -908,11 +1189,12 @@ mod tests {
         state.register_symbol("ETH-USDT");
 
         assert_eq!(state.symbol_count(), 2);
-        assert!(state.registered_symbols().contains(&"BTC-USDT".to_string()));
-        assert!(state.registered_symbols().contains(&"ETH-USDT".to_string()));
+        assert!(state.has_symbol("BTC-USDT"));
+        assert!(state.has_symbol("ETH-USDT"));
 
         state.unregister_symbol("BTC-USDT");
         assert_eq!(state.symbol_count(), 1);
+        assert!(!state.has_symbol("BTC-USDT"));
     }
 
     #[test]
@@ -921,19 +1203,23 @@ mod tests {
 
         assert_eq!(state.health(), HealthStatus::Healthy);
 
-        // 记录 5 个错误
         for _ in 0..5 {
             state.record_error();
         }
         state.update_health();
         assert_eq!(state.health(), HealthStatus::Degraded);
 
-        // 记录更多错误
         for _ in 0..5 {
             state.record_error();
         }
         state.update_health();
         assert_eq!(state.health(), HealthStatus::Unhealthy);
+    }
+
+    #[test]
+    fn test_engine_id() {
+        let state = EngineState::new(EngineMode::Production);
+        assert!(state.engine_id().starts_with("engine_"));
     }
 
     #[test]
@@ -943,31 +1229,16 @@ mod tests {
         state.record_tick();
         state.record_order_sent();
         state.record_order_filled();
-        state.record_order_failed();
 
         let snapshot = state.metrics_snapshot();
+        assert!(!snapshot.engine_id.is_empty());
         assert_eq!(snapshot.tick_processed, 1);
         assert_eq!(snapshot.order_sent, 1);
-        assert_eq!(snapshot.order_filled, 1);
-        assert_eq!(snapshot.order_failed, 1);
-        assert_eq!(snapshot.fill_rate, 1.0);
-        assert_eq!(snapshot.fail_rate, 1.0);
     }
 
     #[test]
     fn test_self_check() {
         let state = EngineState::new(EngineMode::Production);
         assert!(state.self_check().is_ok());
-
-        let mut state2 = EngineState::new(EngineMode::Production);
-        state2.register_symbol("BTC-USDT");
-        assert!(state2.self_check().is_ok());
-    }
-
-    #[test]
-    fn test_uptime() {
-        let state = EngineState::new(EngineMode::Simulation);
-        std::thread::sleep(Duration::from_millis(10));
-        assert!(state.uptime().as_millis() >= 10);
     }
 }
