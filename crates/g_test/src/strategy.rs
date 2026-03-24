@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod mock_gateway;
+pub mod strategy_executor_test;
 pub mod trading_integration_test;
 
 pub use mock_gateway::MockExchangeGateway;

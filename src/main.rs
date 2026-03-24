@@ -8,7 +8,11 @@
 //! 5. 定时打印账户余额
 
 use a_common::BinanceApiGateway;
-use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}};
+use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}, MockMarketStream};
+use f_engine::core::TradingEngine;
+use f_engine::order::mock_binance_gateway::{MockBinanceGateway, MockGatewayConfig};
+use rust_decimal_macros::dec;
+use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 
 #[tokio::main]
@@ -28,6 +32,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = Paths::new();
     tracing::info!("Platform: {:?}", paths.platform());
     tracing::info!("Memory backup: {}", paths.memory_backup_dir);
+
+    // ========================================
+    // TradingEngine 示例
+    // ========================================
+    tracing::info!("=== TradingEngine Example ===");
+
+    // 创建 Mock 网关（用于测试）
+    let config = MockGatewayConfig {
+        initial_balance: dec!(10000.0),
+        commission_rate: dec!(0.0004),
+        slippage_rate: dec!(0.0001),
+        simulate_fill: true,
+        fill_delay_ms: 100,
+    };
+    let gateway = Arc::new(MockBinanceGateway::with_config(config));
+
+    // 创建 Mock 市场数据流
+    let market_stream = Box::new(MockMarketStream::new(
+        "BTCUSDT".to_string(),
+        dec!(50000.0),
+    ));
+
+    // 创建 TradingEngine 实例
+    let mut engine = TradingEngine::new(
+        market_stream,
+        "BTCUSDT".to_string(),
+        dec!(10000.0),  // 初始资金 10000 USDT
+        gateway,
+    );
+
+    // 启动引擎
+    match engine.start().await {
+        Ok(()) => {
+            tracing::info!("Engine started successfully");
+        }
+        Err(e) => {
+            tracing::error!("Failed to start engine: {:?}", e);
+        }
+    }
+
+    // 检查引擎状态
+    tracing::info!("Engine running: {}", engine.is_running());
+
+    // 暂停引擎
+    engine.pause();
+    tracing::info!("Engine paused");
+
+    // 恢复引擎
+    engine.resume();
+    tracing::info!("Engine resumed");
+
+    // 优雅关闭
+    engine.shutdown().await;
+    tracing::info!("Engine shutdown complete");
+
+    // ========================================
+    // 数据源订阅示例
+    // ========================================
+    tracing::info!("=== Data Source Example ===");
 
     // 1. 从交易所拉取交易规则（同时保存原始 JSON 到 symbols_rules/）
     let mut gateway = BinanceApiGateway::new();

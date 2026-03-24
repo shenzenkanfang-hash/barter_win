@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![allow(dead_code)]
 
 //! b_data_source - 业务数据层
 //!
@@ -17,6 +18,8 @@ pub use a_common::logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleChe
 // Sub-modules
 pub mod recovery;
 pub mod models;
+pub mod trader_pool;     // 品种池
+pub mod replay_source;    // 历史数据回放
 
 // 统一数据接口层
 pub mod ws;      // WebSocket 数据接口
@@ -42,3 +45,9 @@ pub use api::DataFeeder;
 
 // Re-exports - SymbolRules (交易对规则服务)
 pub use symbol_rules::{SymbolRuleService, ParsedSymbolRules};
+
+// Re-exports - TraderPool (品种池)
+pub use trader_pool::{SymbolMeta, TradingStatus, TraderPool};
+
+// Re-exports - ReplaySource (历史数据回放)
+pub use replay_source::{KLineSource, ReplayError, ReplaySource};

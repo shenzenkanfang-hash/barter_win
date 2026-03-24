@@ -4,6 +4,7 @@
 //! 检查层异步并发执行，由引擎层统一调度
 
 #![forbid(unsafe_code)]
+#![allow(dead_code)]
 
 pub mod check_table;
 pub mod types;

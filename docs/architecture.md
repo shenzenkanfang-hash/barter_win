@@ -1,6 +1,310 @@
 # 交易系统架构文档
 
-## 一、数据层 (b_data_source) — 市场数据接收
+> **最后更新**: 2026-03-24
+> 
+> **核心原则**: Tick 输入，品种触发，策略解耦，接口统一
+
+---
+
+## 一、最终架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            main.rs                                      │
+│                       (程序入口/组件组装)                               │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         数据层 b_data_source                             │
+│                                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                 │
+│  │ BinanceWs    │  │ MockSource   │  │ ReplaySource │                 │
+│  │ (实时WS)     │  │ (模拟数据)   │  │ (历史回放)   │                 │
+│  └──────┬───────┘  └──────────────┘  └──────────────┘                 │
+│         │                                                           │
+│         ▼                                                           │
+│  ┌──────────────────────────────────────────────────────────┐         │
+│  │           MarketStream (统一 Tick 接口)                   │         │
+│  │           async fn next_tick() → Option<Tick>            │         │
+│  └──────────────────────────────────────────────────────────┘         │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         品种池 TraderPool                               │
+│                                                                          │
+│  • register(symbol) / unregister(symbol)                               │
+│  • 只处理激活品种的 Tick，非激活品种直接丢弃                           │
+│  • 引擎通过 TraderPool 过滤 Tick                                      │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    引擎层 f_engine (核心控制器)                         │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    K 线合成器                                     │   │
+│  │  Tick → 1m K 线 → 15m K 线 → 1d K 线                          │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                  │                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    策略调度器 (StrategyExecutor)                  │   │
+│  │                                                                  │   │
+│  │    策略是外部的！引擎只调用:                                     │   │
+│  │    async fn on_bar(bar: &KLine) → Option<TradingSignal>         │   │
+│  │                                                                  │   │
+│  │    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐        │   │
+│  │    │ Strategy A   │  │ Strategy B   │  │ Strategy C   │        │   │
+│  │    │ (趋势策略)   │  │ (突破策略)   │  │ (网格策略)   │        │   │
+│  │    └──────────────┘  └──────────────┘  └──────────────┘        │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                  │                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    CheckTable (并发检查)                         │   │
+│  │  • 多策略并发执行时共享资源竞争检测                             │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                  │                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    RiskPreChecker (风控预检)                      │   │
+│  │  • 资金检查 / 持仓限制 / 波动率检查                              │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                  │                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    OrderExecutor (订单执行)                       │   │
+│  │  • Action → Order → ExchangeGateway                              │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        账户层 a_common                                 │
+│                                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                 │
+│  │ RealGateway  │  │ TestGateway  │  │ MockGateway  │                 │
+│  │ (实盘)       │  │ (测试网)     │  │ (模拟账户)   │                 │
+│  └──────────────┘  └──────────────┘  └──────────────┘                 │
+│                                                                          │
+│  #[async_trait]                                                         │
+│  pub trait ExchangeGateway: Send + Sync {                              │
+│      async fn submit_order(order: Order) → OrderResult                  │
+│      async fn query_position(symbol: &str) → Position                  │
+│      async fn query_balance() → Balance                               │
+│  }                                                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 二、模块职责表
+
+| 模块 | crate | 职责 |
+|------|-------|------|
+| **数据源** | `b_data_source` | 统一价格输入（WS/模拟/回放） |
+| **品种池** | `b_data_source` | 管理激活品种，过滤 Tick |
+| **K线合成** | `c_data_process` | Tick → 1m/15m/1d K线 |
+| **策略接口** | `f_engine` | 定义 `Strategy::on_bar()` trait |
+| **策略调度** | `f_engine` | 分发 K线，收集信号，策略与引擎解耦 |
+| **并发检查** | `d_checktable` | 多策略资源竞争检测 |
+| **风控预检** | `e_risk_monitor` | 资金/持仓/波动率检查 |
+| **订单执行** | `f_engine` | 订单转换和发送 |
+| **账户网关** | `a_common` | 订单执行（实盘/测试/模拟） |
+
+---
+
+## 三、核心接口定义
+
+### 3.1 策略接口 (Strategy Trait)
+
+```rust
+#[async_trait]
+pub trait Strategy: Send + Sync {
+    fn id(&self) -> &str;
+    fn symbols(&self) -> Vec<String>;
+    async fn on_bar(&self, bar: &KLine) -> Option<TradingSignal>;
+    fn state(&self) -> &StrategyState;
+}
+
+pub struct TradingSignal {
+    pub symbol: String,
+    pub direction: Direction,      // Long / Short / Flat
+    pub quantity: Decimal,          // 仓位（策略决定）
+    pub price: Option<Decimal>,
+    pub stop_loss: Option<Decimal>,
+    pub take_profit: Option<Decimal>,
+    pub signal_type: SignalType,    // Open / Add / Close
+    pub timestamp: DateTime<Utc>,
+}
+```
+
+**引擎职责**: 接价格 → 分发 K线 → 收集信号 → 风控 → 执行
+**策略职责**: 算指标 → 定方向 → 定仓位
+
+### 3.2 数据源接口 (MarketStream Trait)
+
+```rust
+#[async_trait]
+pub trait MarketStream: Send + Sync {
+    async fn next_tick(&self) -> Option<Tick>;
+    fn reset(&self);
+}
+```
+
+### 3.3 账户网关接口 (ExchangeGateway Trait)
+
+```rust
+#[async_trait]
+pub trait ExchangeGateway: Send + Sync {
+    async fn submit_order(&self, order: Order) -> OrderResult;
+    async fn cancel_order(&self, order_id: &str) -> Result<()>;
+    async fn query_position(&self, symbol: &str) -> Position;
+    async fn query_balance(&self) -> Balance;
+}
+```
+
+---
+
+## 四、执行流程
+
+### 4.1 Tick 处理流程
+
+```
+MarketStream.next_tick() → Tick
+         │
+         ▼
+TraderPool.is_trading(tick.symbol)?
+         │
+    No → 丢弃
+    Yes → 继续
+         │
+         ▼
+TradingEngine.on_tick(tick)
+         │
+    ├─▶ KLineSynthesizer.update()  // 更新 K 线
+    │
+    ├─▶ if 1m K 线闭合:
+    │         │
+    │         ▼
+    │    策略调度器分发到各策略
+    │         │
+    │         ▼
+    │    Strategy::on_bar() → TradingSignal
+    │         │
+    │         ▼
+    │    CheckTable + RiskPreChecker
+    │         │
+    │         ▼
+    │    ExchangeGateway.submit_order()
+    │
+    └─▶ if 日 K 线闭合:
+              │
+              ▼
+         趋势判断 + 日线策略
+```
+
+### 4.2 品种触发机制
+
+```
+策略决定交易品种
+         │
+         ▼
+TraderPool.register("BTCUSDT")
+         │
+         ▼
+MarketStream.subscribe("BTCUSDT")  // 只订阅激活品种
+         │
+         ▼
+只接收 BTCUSDT 的 Tick
+         │
+         ▼
+其他品种数据丢弃
+```
+
+---
+
+## 五、数据格式
+
+### 5.1 OHLCVT 统一格式
+
+```csv
+symbol,period,open,high,low,close,volume,timestamp
+BTCUSDT,1m,50000.0,50100.0,49900.0,50050.0,12.5,2026-03-24T10:00:00Z
+BTCUSDT,1d,49500.0,51000.0,49000.0,50500.0,12500.0,2026-03-24T00:00:00Z
+```
+
+### 5.2 文件组织
+
+```
+data/
+├── kline_1m/{symbol}.csv
+├── kline_1d/{symbol}.csv
+├── indicators/{symbol}.csv
+└── trades/{symbol}.csv
+```
+
+---
+
+## 六、波动率通道（系统级属性）
+
+系统内置波动率检测，自动分流执行参数：
+
+```
+                    ┌──────────────────┐
+                    │   日线判断        │
+                    │  波动率级别       │
+                    └────────┬─────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+              ▼                             ▼
+     ┌────────────────┐            ┌────────────────┐
+     │  高波动通道     │            │  低波动通道     │
+     │  间隔周期: 短   │            │  间隔周期: 长   │
+     │  追涨杀跌      │            │  高抛低吸       │
+     └────────┬───────┘            └────────┬───────┘
+              │                             │
+              └──────────────┬──────────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │   统一交易执行   │
+                    │  (同一套逻辑)    │
+                    └─────────────────┘
+```
+
+**通道由系统决定，策略只负责响应价格信号**。
+
+---
+
+## 七、当前系统状态
+
+| 组件 | 状态 | 说明 |
+|------|------|------|
+| `MarketStream` | ✅ 已有 | WS/模拟/回放 |
+| `TraderPool` | ⚠️ 待实现 | 品种触发管理 |
+| `KLineSynthesizer` | ✅ 已有 | 1m/15m/1d 合成 |
+| `Strategy Trait` | ⚠️ 待定义 | 需独立 crate |
+| `StrategyExecutor` | ⚠️ 待实现 | 策略调度器 |
+| `CheckTable` | ✅ 已有 | 并发检查 |
+| `RiskPreChecker` | ✅ 已有 | 风控预检 |
+| `OrderExecutor` | ✅ 已有 | 订单执行 |
+| `ExchangeGateway` | ✅ 已有 | 实盘/测试/模拟 |
+
+---
+
+## 八、详细文档
+
+- [交易系统架构详细设计](./docs/architecture/TRADING_ARCHITECTURE.md)
+- [六层架构说明](./CLAUDE.md)
+- [Redo Keys](./REDIS_KEYS.md)
+
+---
+
+## 版本历史
+
+| 日期 | 版本 | 说明 |
+|------|------|------|
+| 2026-03-24 | v2.0 | 重构为策略解耦架构 |
+| 2026-03-20 | v1.0 | 初始架构 |
 
 ```
 交易所 WS/Kline1mStream/Kline1dStream/DepthStream
