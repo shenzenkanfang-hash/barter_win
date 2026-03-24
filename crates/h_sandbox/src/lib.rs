@@ -1,10 +1,9 @@
 #![forbid(unsafe_code)]
 
-// pub mod mock_binance_gateway; // TODO: 修复依赖问题
-pub mod shadow_config;
-pub mod shadow_account;
-pub mod shadow_gateway;
+pub mod config;
+pub mod simulator;
+pub mod gateway;
 
-pub use shadow_config::ShadowConfig;
-pub use shadow_account::{ShadowAccount, Side};
-pub use shadow_gateway::ShadowBinanceGateway;
+pub use config::ShadowConfig;
+pub use simulator::{Account, OrderEngine, Position, Side};
+pub use gateway::ShadowBinanceGateway;
