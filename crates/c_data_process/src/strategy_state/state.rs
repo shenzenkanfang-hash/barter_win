@@ -43,13 +43,33 @@ pub struct DailyPnl {
     pub pnl: Decimal,
 }
 
+/// 平仓记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClosedTrade {
+    pub trade_id: String,
+    pub timestamp: DateTime<Utc>,
+    pub symbol: String,
+    pub side: PositionSide,
+    pub entry_price: Decimal,
+    pub exit_price: Decimal,
+    pub qty: Decimal,
+    pub fee: Decimal,
+    pub pnl: Decimal,
+    pub pnl_pct: Decimal,
+    pub hold_duration_secs: i64,
+    pub signal_type: String,
+}
+
 /// 盈亏统计状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PnlState {
     pub cumulative_closed: Decimal,
     pub daily: Vec<DailyPnl>,
+    pub closed_trades: Vec<ClosedTrade>,
     pub max_drawdown: Decimal,
     pub max_drawdown_pct: Decimal,
+    pub max_single_trade_profit: Decimal,
+    pub max_single_trade_loss: Decimal,
 }
 
 impl Default for PnlState {
@@ -57,8 +77,11 @@ impl Default for PnlState {
         Self {
             cumulative_closed: Decimal::ZERO,
             daily: Vec::new(),
+            closed_trades: Vec::new(),
             max_drawdown: Decimal::ZERO,
             max_drawdown_pct: Decimal::ZERO,
+            max_single_trade_profit: Decimal::ZERO,
+            max_single_trade_loss: Decimal::ZERO,
         }
     }
 }
@@ -247,6 +270,57 @@ impl StrategyState {
         // 更新最大回撤
         if self.pnl.cumulative_closed < self.pnl.max_drawdown {
             self.pnl.max_drawdown = self.pnl.cumulative_closed;
+        }
+        
+        // 更新交易统计
+        self.trading_stats.total_trades += 1;
+        if pnl > Decimal::ZERO {
+            self.trading_stats.winning_trades += 1;
+            self.trading_stats.total_profit += pnl;
+        } else {
+            self.trading_stats.losing_trades += 1;
+            self.trading_stats.total_loss += pnl.abs();
+        }
+        
+        // 计算胜率
+        if self.trading_stats.total_trades > 0 {
+            self.trading_stats.win_rate = Decimal::from(self.trading_stats.winning_trades)
+                / Decimal::from(self.trading_stats.total_trades);
+        }
+        
+        // 计算利润因子
+        if self.trading_stats.total_loss > Decimal::ZERO {
+            self.trading_stats.profit_factor = self.trading_stats.total_profit / self.trading_stats.total_loss;
+        }
+    }
+
+    /// 记录完整平仓交易
+    pub fn record_closed_trade(&mut self, trade: ClosedTrade) {
+        self.last_update_time = Utc::now();
+        
+        let pnl = trade.pnl;
+        
+        // 更新累计盈亏
+        self.pnl.cumulative_closed += pnl;
+        
+        // 添加到平仓记录列表
+        self.pnl.closed_trades.push(trade);
+        
+        // 限制记录数量（保留最近 1000 条）
+        if self.pnl.closed_trades.len() > 1000 {
+            self.pnl.closed_trades.remove(0);
+        }
+        
+        // 更新最大回撤
+        if self.pnl.cumulative_closed < self.pnl.max_drawdown {
+            self.pnl.max_drawdown = self.pnl.cumulative_closed;
+        }
+        
+        // 更新最大单笔盈亏
+        if pnl > Decimal::ZERO && pnl > self.pnl.max_single_trade_profit {
+            self.pnl.max_single_trade_profit = pnl;
+        } else if pnl < Decimal::ZERO && pnl.abs() > self.pnl.max_single_trade_loss {
+            self.pnl.max_single_trade_loss = pnl.abs();
         }
         
         // 更新交易统计
