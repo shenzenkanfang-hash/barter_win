@@ -42,19 +42,27 @@ impl Default for StartupState {
 // 交易锁
 // ============================================================================
 
-/// 交易锁 - 防止并发重复执行
+/// 交易锁 - 品种级防止并发重复执行（V1.4）
 ///
 /// # 机制
-/// - 获取锁成功时核对时间戳
-/// - `tick_ts <= lock_ts` 说明已被处理过，丢弃
-/// - 执行成功后更新锁的时间戳和仓位
+/// - `try_lock(timeout_secs)`: 尝试获取锁，超时则失败
+/// - `is_locked()`: 检查锁是否有效
+/// - `unlock()`: 释放锁
+/// - 锁范围：只包住「状态比对 + 落地」，不包住下单
+///
+/// # V1.4 要求
+/// - 锁粒度：品种级独立锁
+/// - 锁超时：1s，拿不到直接拒单
+/// - 锁范围：只包住「状态比对 + 落地」，不包住下单
 ///
 /// # 模块间调用规则
 /// ⚠️ 禁止直接访问字段，必须使用方法
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradeLock {
-    /// 锁持有时间戳
+    /// 锁持有时间戳（最后更新时间）
     timestamp: i64,
+    /// 锁过期时间戳（0 表示未锁定）
+    lock_until: i64,
     /// 当前持仓数量
     position_qty: Decimal,
     /// 持仓平均价格
@@ -67,6 +75,7 @@ impl Default for TradeLock {
     fn default() -> Self {
         Self {
             timestamp: 0,
+            lock_until: 0,
             position_qty: Decimal::ZERO,
             position_price: Decimal::ZERO,
             position_ts: 0,
@@ -78,6 +87,52 @@ impl TradeLock {
     /// 创建新的交易锁
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 尝试获取锁（V1.4 核心）
+    ///
+    /// # 参数
+    /// - `timeout_secs`: 超时时间（默认 1 秒）
+    ///
+    /// # 返回
+    /// - `true`: 获取锁成功
+    /// - `false`: 获取锁失败（已被锁定或超时）
+    pub fn try_lock(&mut self, timeout_secs: i64) -> bool {
+        let now = chrono::Utc::now().timestamp();
+
+        // 如果锁已过期，自动解锁
+        if self.lock_until > 0 && now >= self.lock_until {
+            self.lock_until = 0;
+        }
+
+        // 如果未锁定，直接获取锁
+        if self.lock_until == 0 {
+            self.lock_until = now + timeout_secs;
+            return true;
+        }
+
+        // 如果已锁定，检查是否超时
+        if now >= self.lock_until {
+            self.lock_until = now + timeout_secs;
+            return true;
+        }
+
+        // 锁仍然有效，获取失败
+        false
+    }
+
+    /// 检查锁是否有效
+    pub fn is_locked(&self) -> bool {
+        if self.lock_until == 0 {
+            return false;
+        }
+        let now = chrono::Utc::now().timestamp();
+        now < self.lock_until
+    }
+
+    /// 释放锁
+    pub fn unlock(&mut self) {
+        self.lock_until = 0;
     }
 
     /// 检查 tick 是否过期（已被处理过）

@@ -266,6 +266,11 @@ impl TradingPipeline {
     pub fn config(&self) -> &ExecutionConfig {
         &self.execution_config
     }
+
+    /// 获取状态同步器
+    pub fn state_syncer(&self) -> StateSyncer {
+        StateSyncer::new()
+    }
 }
 
 impl Default for TradingPipeline {

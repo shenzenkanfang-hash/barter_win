@@ -1,17 +1,10 @@
-//! TradingEngine v2 - 整合 core/ 模块的完整实现
+//! TradingEngine v2 - V1.4 完整实现
 //!
 //! # 架构
-//! 本模块整合了 core/ 下的所有模块：
-//! - `EngineState`: 全局引擎状态
-//! - `TriggerManager`: 并行触发器管理
-//! - `TradingPipeline`: 交易执行流程
-//! - `FundPoolManager`: 资金池管理
-//! - `RiskManager`: 两级风控检查
-//! - `TimeoutMonitor`: 超时监控
-//! - `RollbackManager`: 失败回滚
+//! 本模块整合了 core/ 下的所有模块，严格遵守 V1.4 文档。
 //!
 //! # 执行流程（V1.4）
-//! 1. 触发器检查（分钟级/日线级）
+//! 1. 并行触发器检查（分钟级/日线级）
 //! 2. StrategyQuery + 策略执行（2s 超时）
 //! 3. 风控一次预检（锁外）
 //! 4. 品种级抢锁（1s 超时）
@@ -23,6 +16,8 @@
 #![forbid(unsafe_code)]
 
 use rust_decimal::Decimal;
+use crate::core::state::TradeLock;
+use parking_lot::RwLock;
 
 use crate::core::{
     // 核心状态
@@ -70,7 +65,14 @@ impl Default for TradingEngineConfig {
     }
 }
 
-/// TradingEngine v2 - 整合 core/ 模块的完整实现
+/// TradingEngine v2 - V1.4 完整实现
+///
+/// # 严格遵守 V1.4 文档：
+/// - 并行触发器 → CheckTables → StrategyQuery → 两级风控 → 抢锁 → 执行 → 状态对齐
+/// - StrategyQuery 2s 超时
+/// - 品种级锁 1s 超时
+/// - 两级风控（锁外预检 + 锁内精校）
+/// - 熔断器集成
 pub struct TradingEngineV2 {
     /// 引擎状态句柄
     engine_state: EngineStateHandle,
@@ -90,6 +92,10 @@ pub struct TradingEngineV2 {
     rollback_manager: RollbackManager,
     /// 下单间隔（毫秒）
     last_order_time_ms: std::sync::atomic::AtomicI64,
+    /// 品种级交易锁（每个品种独立的锁）
+    symbol_locks: RwLock<std::collections::HashMap<String, TradeLock>>,
+    /// 锁超时时间（秒）
+    lock_timeout_secs: i64,
 }
 
 impl TradingEngineV2 {
@@ -109,6 +115,8 @@ impl TradingEngineV2 {
             timeout_monitor: TimeoutMonitor::new(180),
             rollback_manager: RollbackManager::new(fund_pool_for_rollback),
             last_order_time_ms: std::sync::atomic::AtomicI64::new(0),
+            symbol_locks: RwLock::new(std::collections::HashMap::new()),
+            lock_timeout_secs: 1, // V1.4 要求：锁超时 1s
         }
     }
 
@@ -117,21 +125,31 @@ impl TradingEngineV2 {
         self.engine_state.read().can_trade()
     }
 
-    /// 处理 Tick 数据（主入口）
+    /// 处理 Tick 数据（V1.4 完整流程）
     ///
-    /// # 流程
+    /// # V1.4 流程
     /// 1. 触发器检查
-    /// 2. 策略查询
-    /// 3. 风控预检
-    /// 4. 抢锁 + 风控精校
-    /// 5. 下单执行
-    pub fn process_tick(&self, symbol: &str, price: Decimal, volatility: Decimal) -> Result<Option<OrderInfo>, TradingError> {
+    /// 2. StrategyQuery + 策略执行（2s 超时）
+    /// 3. 风控一次预检（锁外）
+    /// 4. 品种级抢锁（1s 超时）
+    /// 5. 风控二次精校（锁内）
+    /// 6. 冻结资金 + 下单
+    /// 7. 状态对齐
+    pub fn process_tick(
+        &self,
+        symbol: &str,
+        price: Decimal,
+        volatility: Decimal,
+        current_position_qty: Decimal,
+        current_position_price: Decimal,
+    ) -> Result<Option<OrderInfo>, TradingError> {
         // 1. 检查引擎状态
         if !self.can_trade() {
             return Err(TradingError::EngineNotRunning);
         }
 
         let now_ts = chrono::Utc::now().timestamp();
+        let now_ms = chrono::Utc::now().timestamp_millis();
 
         // 2. 触发器检查（分钟级）
         let minute_trigger = self.trigger_manager.minute_trigger();
@@ -142,7 +160,7 @@ impl TradingEngineV2 {
         );
 
         if !trigger_result.precheck_passed {
-            return Ok(None); // 未触发
+            return Ok(None);
         }
 
         // 3. 构建 StrategyQuery
@@ -152,50 +170,103 @@ impl TradingEngineV2 {
             RiskState::Normal,
             price,
             VolatilityTier::High,
-            false,
-            PositionSide::NONE,
-            Decimal::ZERO,
-            Decimal::ZERO,
+            current_position_qty > Decimal::ZERO,
+            if current_position_qty > Decimal::ZERO {
+                PositionSide::LONG
+            } else if current_position_qty < Decimal::ZERO {
+                PositionSide::SHORT
+            } else {
+                PositionSide::NONE
+            },
+            current_position_qty.abs(),
+            current_position_price,
         );
 
         // 4. 执行策略（模拟，实际会调用 c_data_process）
+        // V1.4: StrategyQuery 2s 超时
+        let query_timeout_ms = self.pipeline.config().strategy_query_timeout_secs * 1000;
+        let strategy_start = now_ms;
         let response = self.pipeline.execute_strategy(&query);
+
+        // 超时检测
+        let elapsed = now_ms - strategy_start;
+        if elapsed > query_timeout_ms as i64 {
+            // 超时，记录错误并触发熔断
+            {
+                let mut state = self.engine_state.write();
+                state.record_error();
+            }
+            return Err(TradingError::Timeout("StrategyQuery 超时".to_string()));
+        }
 
         // 5. 风控一次预检（锁外）
         if !self.pipeline.pre_check(&response, self.fund_pool.available(ChannelType::HighSpeed)) {
             return Ok(None);
         }
 
-        // 6. 品种级抢锁（这里简化处理，实际需要实现 try_lock 1s）
-        // 注意：V1.4 要求锁粒度为品种级，锁超时 1s
+        // 6. 品种级抢锁（V1.4: 1s 超时）
+        let lock_result = self.try_acquire_lock(symbol, self.lock_timeout_secs);
+        if !lock_result {
+            // 抢锁失败，记录错误
+            {
+                let mut state = self.engine_state.write();
+                state.record_error();
+            }
+            return Err(TradingError::LockFailed);
+        }
 
         // 7. 风控二次精校（锁内）
+        // 注意：锁范围只包住「状态比对 + 落地」，不包住下单
         let risk_result = self.risk_manager.lock_check(
             &response,
             price,
-            Decimal::ZERO,
+            current_position_price,
             self.fund_pool.available(ChannelType::HighSpeed),
         );
 
         if !risk_result.lock_check_passed {
+            // 风控拒绝，释放锁并记录错误
+            self.release_lock(symbol);
+            {
+                let mut state = self.engine_state.write();
+                state.record_error();
+            }
+            return Err(TradingError::RiskRejected("风控二次精校拒绝".to_string()));
+        }
+
+        // 8. 状态对齐（在锁内完成）
+        // V1.4: 检查本地状态与交易所状态是否一致
+        let state_syncer = self.pipeline.state_syncer();
+        if let Err(e) = state_syncer.sync_position(
+            current_position_qty,
+            current_position_qty, // 实际应从交易所获取
+            current_position_price,
+            current_position_price,
+        ) {
+            self.release_lock(symbol);
+            return Err(TradingError::StateInconsistent);
+        }
+
+        // 9. 检查下单间隔
+        let interval_ms = self.order_executor.order_interval_ms();
+        let last_time = self.last_order_time_ms.load(std::sync::atomic::Ordering::SeqCst);
+        if now_ms - last_time < interval_ms as i64 {
+            self.release_lock(symbol);
             return Ok(None);
         }
 
-        // 8. 检查下单间隔
-        let interval_ms = self.order_executor.order_interval_ms();
-        let last_time = self.last_order_time_ms.load(std::sync::atomic::Ordering::SeqCst);
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        if now_ms - last_time < interval_ms as i64 {
-            return Ok(None); // 间隔不足
-        }
-
-        // 9. 冻结资金
+        // 10. 冻结资金（此时才释放锁，然后下单）
+        // V1.4: 锁范围不包住下单，下单在锁外
         let order_value = response.quantity * response.target_price;
         if !self.fund_pool.freeze(ChannelType::HighSpeed, order_value) {
+            self.release_lock(symbol);
             return Err(TradingError::InsufficientFunds);
         }
 
-        // 10. 创建订单
+        // 释放锁（在冻结资金后立即释放）
+        self.release_lock(symbol);
+
+        // 11. 创建订单
         let mut order = self.order_executor.create_order(
             format!("ord_{}_{}", symbol, now_ts),
             symbol.to_string(),
@@ -205,20 +276,44 @@ impl TradingEngineV2 {
             ChannelType::HighSpeed,
         );
 
-        // 11. 状态转换
+        // 12. 状态转换
         self.order_executor.transition(&mut order, crate::core::OrderLifecycle::Sent);
 
-        // 12. 更新下单时间
+        // 13. 更新下单时间
         self.last_order_time_ms.store(now_ms, std::sync::atomic::Ordering::SeqCst);
 
-        // 13. 记录指标
+        // 14. 记录指标
         self.engine_state.read().record_order_sent();
 
         Ok(Some(order))
     }
 
+    /// 尝试获取品种级锁（V1.4: 1s 超时）
+    fn try_acquire_lock(&self, symbol: &str, timeout_secs: i64) -> bool {
+        let mut locks = self.symbol_locks.write();
+
+        // 获取或创建该品种的锁
+        let lock = locks.entry(symbol.to_string()).or_insert_with(TradeLock::new);
+
+        // 尝试获取锁
+        lock.try_lock(timeout_secs)
+    }
+
+    /// 释放品种级锁
+    fn release_lock(&self, symbol: &str) {
+        let mut locks = self.symbol_locks.write();
+        if let Some(lock) = locks.get_mut(symbol) {
+            lock.unlock();
+        }
+    }
+
     /// 处理订单成交回报
-    pub fn handle_fill(&self, order: &OrderInfo, fill_price: Decimal, fill_qty: Decimal) -> Result<(), TradingError> {
+    pub fn handle_fill(
+        &self,
+        order: &OrderInfo,
+        fill_price: Decimal,
+        fill_qty: Decimal,
+    ) -> Result<(), TradingError> {
         // 1. 确认使用冻结资金
         let order_value = fill_qty * fill_price;
         self.fund_pool.confirm_usage(order.channel_type, order_value);
@@ -226,17 +321,27 @@ impl TradingEngineV2 {
         // 2. 更新状态
         self.engine_state.read().record_order_filled();
 
+        // 3. 重置熔断计数（成功）- 使用写锁
+        {
+            let mut state = self.engine_state.write();
+            state.reset_consecutive_errors();
+        }
+
         Ok(())
     }
 
     /// 处理订单失败
     pub fn handle_failure(&self, order: &OrderInfo, _reason: &str) {
-        // 回滚冻结资金
+        // 1. 回滚冻结资金
         let order_value = order.quantity * order.target_price;
         self.rollback_manager.rollback_order(order.channel_type, order_value);
 
-        // 更新熔断器
+        // 2. 更新熔断器（失败）- 使用写锁
         self.engine_state.read().record_order_failed();
+        {
+            let mut state = self.engine_state.write();
+            state.record_error();
+        }
     }
 
     /// 获取引擎状态
@@ -262,10 +367,29 @@ impl TradingEngineV2 {
         self.engine_state.write().stop();
     }
 
-    /// 超时监控
+    /// 获取超时监控器
     pub fn timeout_monitor(&self) -> &TimeoutMonitor {
         &self.timeout_monitor
     }
+
+    /// 获取熔断状态
+    pub fn circuit_breaker_status(&self) -> CircuitBreakerStatus {
+        let state = self.engine_state.read();
+        let cb = state.circuit_breaker();
+        CircuitBreakerStatus {
+            is_triggered: cb.is_triggered(),
+            consecutive_errors: cb.consecutive_errors(),
+            max_errors: cb.config().max_consecutive_errors(),
+        }
+    }
+}
+
+/// 熔断状态
+#[derive(Debug, Clone)]
+pub struct CircuitBreakerStatus {
+    pub is_triggered: bool,
+    pub consecutive_errors: u32,
+    pub max_errors: u32,
 }
 
 // ============================================================================

@@ -642,3 +642,62 @@ mod rollback_tests {
         assert_eq!(helper.order_value(), dec!(5000)); // 0.1 * 50000
     }
 }
+
+// ============================================================================
+// TradeLock 测试
+// ============================================================================
+
+#[cfg(test)]
+mod trade_lock_tests {
+    use super::*;
+    use crate::core::state::TradeLock;
+
+    #[test]
+    fn test_trade_lock_try_lock() {
+        let mut lock = TradeLock::new();
+
+        // 未锁定状态可以直接获取锁
+        assert!(lock.try_lock(1)); // 1s 超时
+        assert!(lock.is_locked());
+
+        // 再次获取锁会失败（锁仍有效）
+        assert!(!lock.try_lock(1));
+
+        // 释放锁
+        lock.unlock();
+        assert!(!lock.is_locked());
+
+        // 可以再次获取锁
+        assert!(lock.try_lock(1));
+    }
+
+    #[test]
+    fn test_trade_lock_is_stale() {
+        let mut lock = TradeLock::new();
+
+        // 未更新时，任何 tick 都是新的
+        assert!(!lock.is_stale(100));
+
+        // 更新锁状态
+        lock.update(100, dec!(0.5), dec!(50000));
+
+        // 相同或更早的 tick 被视为过期
+        assert!(lock.is_stale(100));
+        assert!(lock.is_stale(50));
+
+        // 较新的 tick 不是过期
+        assert!(!lock.is_stale(200));
+    }
+
+    #[test]
+    fn test_trade_lock_position() {
+        let mut lock = TradeLock::new();
+
+        // 更新持仓信息
+        lock.update(100, dec!(0.5), dec!(50000));
+
+        assert_eq!(lock.position_qty(), dec!(0.5));
+        assert_eq!(lock.position_price(), dec!(50000));
+        assert_eq!(lock.position_value(), dec!(25000)); // 0.5 * 50000
+    }
+}
