@@ -26,6 +26,7 @@ b_data_source = { path = "crates/b_data_source" }
 c_data_process = { path = "crates/c_data_process" }
 d_checktable = { path = "crates/d_checktable" }
 e_risk_monitor = { path = "crates/e_risk_monitor" }
+f_engine = { path = "crates/f_engine" }
 tokio = { workspace = true }
 rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }

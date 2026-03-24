@@ -55,37 +55,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     // 创建 TradingEngine 实例
-    let mut engine = TradingEngine::new(
+    let engine = TradingEngine::new(
         market_stream,
         "BTCUSDT".to_string(),
         dec!(10000.0),  // 初始资金 10000 USDT
         gateway,
     );
 
-    // 启动引擎
-    match engine.start().await {
-        Ok(()) => {
-            tracing::info!("Engine started successfully");
-        }
-        Err(e) => {
-            tracing::error!("Failed to start engine: {:?}", e);
-        }
-    }
-
     // 检查引擎状态
     tracing::info!("Engine running: {}", engine.is_running());
 
-    // 暂停引擎
-    engine.pause();
-    tracing::info!("Engine paused");
-
-    // 恢复引擎
-    engine.resume();
-    tracing::info!("Engine resumed");
-
-    // 优雅关闭
-    engine.shutdown().await;
-    tracing::info!("Engine shutdown complete");
+    // 获取网关信息
+    tracing::info!("Gateway configured");
 
     // ========================================
     // 数据源订阅示例

@@ -4,16 +4,15 @@
 //!
 //! 用于测试和回测环境，提供简化的订单执行模拟。
 
-use crate::gateway::ExchangeGateway;
-use crate::types::{OrderRequest, Side, OrderType};
+use super::gateway::ExchangeGateway;
+use crate::types::{OrderRequest, Side};
 use a_common::{EngineError, ExchangeAccount, ExchangePosition, OrderResult, OrderStatus};
 use fnv::FnvHashMap;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Mock 账户
 #[derive(Debug, Clone)]
@@ -365,6 +364,7 @@ impl ExchangeGateway for MockBinanceGateway {
             available: mock.available,
             frozen_margin: mock.frozen_margin,
             unrealized_pnl: mock.unrealized_pnl,
+            update_ts: chrono::Utc::now().timestamp(),
         })
     }
 
