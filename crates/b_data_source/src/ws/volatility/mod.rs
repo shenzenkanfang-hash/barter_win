@@ -301,33 +301,35 @@ impl VolatilityManager {
     }
 
     /// 保存波动率排名文件 (vol_15min.json, vol_1min.json)
-    /// 格式: {"时间":"可阅读时间","排序":[[品种名,波动率*1000整数],[品种名,波动率*1000整数]]}
+    /// 格式: {"时间":"可阅读时间","排序":[{"symbol":"品种名","vol_15m":原始波动率},...]}
     pub fn save_volatility_ranking(&self) {
-        use rust_decimal::prelude::ToPrimitive;
-
         let rank = self.rank.read();
         let now = chrono::Utc::now();
         let time_str = now.format("%Y-%m-%d %H:%M:%S").to_string();
 
         // 按15m波动率排序
-        let vol_15m_entries: Vec<(String, i64)> = rank
+        let vol_15m_entries: Vec<serde_json::Value> = rank
             .rank_by_15m()
             .iter()
             .filter(|e| e.vol_15m > dec!(0))
             .map(|e| {
-                let vol_i64 = (e.vol_15m * dec!(1000)).round().to_i64().unwrap_or(0);
-                (e.symbol.clone(), vol_i64)
+                serde_json::json!({
+                    "symbol": e.symbol.clone(),
+                    "vol_15m": e.vol_15m
+                })
             })
             .collect();
 
         // 按1m波动率排序
-        let vol_1m_entries: Vec<(String, i64)> = rank
+        let vol_1m_entries: Vec<serde_json::Value> = rank
             .rank_by_1m()
             .iter()
             .filter(|e| e.vol_1m > dec!(0))
             .map(|e| {
-                let vol_i64 = (e.vol_1m * dec!(1000)).round().to_i64().unwrap_or(0);
-                (e.symbol.clone(), vol_i64)
+                serde_json::json!({
+                    "symbol": e.symbol.clone(),
+                    "vol_1m": e.vol_1m
+                })
             })
             .collect();
 
