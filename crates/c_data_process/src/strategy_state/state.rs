@@ -23,6 +23,7 @@ pub struct PositionState {
     pub side: PositionSide,
     pub avg_entry_price: Decimal,
     pub unrealized_pnl: Decimal,
+    pub cumulative_closed_pnl: Decimal,
 }
 
 impl Default for PositionState {
@@ -32,6 +33,7 @@ impl Default for PositionState {
             side: PositionSide::None,
             avg_entry_price: Decimal::ZERO,
             unrealized_pnl: Decimal::ZERO,
+            cumulative_closed_pnl: Decimal::ZERO,
         }
     }
 }
@@ -264,7 +266,10 @@ impl StrategyState {
     pub fn record_realized_pnl(&mut self, pnl: Decimal) {
         self.last_update_time = Utc::now();
         
-        // 更新累计盈亏
+        // 更新持仓累计平仓盈亏
+        self.position.cumulative_closed_pnl += pnl;
+        
+        // 更新全局累计盈亏
         self.pnl.cumulative_closed += pnl;
         
         // 更新最大回撤
@@ -300,7 +305,10 @@ impl StrategyState {
         
         let pnl = trade.pnl;
         
-        // 更新累计盈亏
+        // 更新持仓累计平仓盈亏
+        self.position.cumulative_closed_pnl += pnl;
+        
+        // 更新全局累计盈亏
         self.pnl.cumulative_closed += pnl;
         
         // 添加到平仓记录列表
