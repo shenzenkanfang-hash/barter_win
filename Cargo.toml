@@ -7,6 +7,7 @@ members = [
     "crates/e_risk_monitor",
     "crates/f_engine",
     "crates/g_test",
+    "crates/h_sandbox",
 ]
 resolver = "3"
 

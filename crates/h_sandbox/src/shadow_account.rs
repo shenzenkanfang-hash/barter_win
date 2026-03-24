@@ -5,7 +5,6 @@
 
 use fnv::FnvHashMap;
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use a_common::exchange::{ExchangeAccount, ExchangePosition, RejectReason};
@@ -268,12 +267,12 @@ impl ShadowAccount {
         qty: Decimal,
         price: Decimal,
     ) -> Result<(String, Decimal, Decimal, Decimal), RejectReason> {
+        let order_id = self.next_order_id();
+
         let position = match self.positions.get_mut(symbol) {
             Some(p) => p,
             None => return Err(RejectReason::SymbolNotTradable),
         };
-
-        let order_id = self.next_order_id();
         let fee = qty * price * self.fee_rate;
 
         match side {
@@ -337,7 +336,10 @@ impl ShadowAccount {
             available: self.available_balance(),
             frozen_margin: self.frozen_margin(),
             unrealized_pnl: self.total_unrealized_pnl(),
-            update_ts: chrono::Utc::now().timestamp(),
+            update_ts: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
         }
     }
 

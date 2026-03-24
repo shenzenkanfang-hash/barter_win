@@ -25,7 +25,8 @@ use rust_decimal::Decimal;
 
 use a_common::exchange::{ExchangeAccount, ExchangePosition, OrderResult, RejectReason};
 use a_common::EngineError;
-use f_engine::types::{OrderRequest, Side, OrderType, OrderStatus};
+use f_engine::types::{OrderRequest, Side};
+use a_common::models::types::OrderStatus;
 
 use crate::shadow_account::{ShadowAccount, Side as ShadowSide};
 use crate::shadow_config::ShadowConfig;
@@ -82,7 +83,8 @@ impl ShadowBinanceGateway {
         let leverage = 1; // 默认1倍杠杆，后续可配置
 
         // 检查是否为平仓
-        let position = self.account.read().get_position(&req.symbol);
+        let account_guard = self.account.read();
+        let position = account_guard.get_position(&req.symbol);
         let is_closing = position.map(|p| {
             match side {
                 ShadowSide::Buy => p.short_qty > Decimal::ZERO,
@@ -117,6 +119,7 @@ impl ShadowBinanceGateway {
                 })
             }
             Err(reason) => {
+                let reason_clone = reason.clone();
                 let status = match reason {
                     RejectReason::InsufficientBalance => OrderStatus::Rejected,
                     RejectReason::MarginInsufficient => OrderStatus::Rejected,
@@ -125,12 +128,15 @@ impl ShadowBinanceGateway {
                 };
 
                 Ok(OrderResult {
-                    order_id: format!("REJECT_{}", chrono::Utc::now().timestamp_millis()),
+                    order_id: format!("REJECT_{}", std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()),
                     status,
                     filled_qty: Decimal::ZERO,
                     filled_price: Decimal::ZERO,
                     commission: Decimal::ZERO,
-                    reject_reason: Some(reason),
+                    reject_reason: Some(reason_clone),
                     message: format!("模拟拒绝: {}", reason),
                 })
             }
