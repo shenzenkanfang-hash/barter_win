@@ -276,8 +276,8 @@ mod tests {
     fn test_volatility_calc_default() {
         let calc = VolatilityCalc::new();
         let (th1m, th15m) = calc.thresholds();
-        assert_eq!(th1m, dec!(0.005));
-        assert_eq!(th15m, dec!(0.05));
+        assert_eq!(th1m, dec!(0.03));
+        assert_eq!(th15m, dec!(0.13));
     }
 
     #[test]

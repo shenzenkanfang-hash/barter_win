@@ -9,17 +9,17 @@ use serde::{Deserialize, Serialize};
 /// 波动率阈值配置
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct VolatilityConfig {
-    /// 1分钟高波动阈值（默认 0.5% = 0.005）
+    /// 1分钟高波动阈值（默认 3% = 0.03）
     pub high_vol_1m: Decimal,
-    /// 15分钟高波动阈值（默认 5% = 0.05）
+    /// 15分钟高波动阈值（默认 13% = 0.13）
     pub high_vol_15m: Decimal,
 }
 
 impl Default for VolatilityConfig {
     fn default() -> Self {
         Self {
-            high_vol_1m: dec!(0.005),  // 0.5%
-            high_vol_15m: dec!(0.05),  // 5%
+            high_vol_1m: dec!(0.03),   // 3%
+            high_vol_15m: dec!(0.13),  // 13%
         }
     }
 }
@@ -57,8 +57,8 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = VolatilityConfig::default();
-        assert_eq!(config.high_vol_1m, dec!(0.005));
-        assert_eq!(config.high_vol_15m, dec!(0.05));
+        assert_eq!(config.high_vol_1m, dec!(0.03));
+        assert_eq!(config.high_vol_15m, dec!(0.13));
     }
 
     #[test]
