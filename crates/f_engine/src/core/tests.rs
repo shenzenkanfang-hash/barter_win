@@ -641,6 +641,40 @@ mod rollback_tests {
         assert_eq!(helper.channel_type(), ChannelType::HighSpeed);
         assert_eq!(helper.order_value(), dec!(5000)); // 0.1 * 50000
     }
+
+    #[test]
+    fn test_rollback_manager_concurrent() {
+        use std::sync::Arc;
+
+        // 创建资金池和回滚管理器
+        let fund_pool = Arc::new(FundPoolManager::new(dec!(100000), dec!(200000)));
+        let manager = Arc::new(RollbackManager::new(fund_pool.clone()));
+
+        // 初始冻结10000资金
+        fund_pool.freeze(ChannelType::HighSpeed, dec!(10000));
+        assert_eq!(fund_pool.available(ChannelType::HighSpeed), dec!(90000));
+
+        // 并发执行 10 次回滚
+        let mut handles = vec![];
+        for i in 0..10 {
+            let m = manager.clone();
+            let fp = fund_pool.clone();
+            let handle = std::thread::spawn(move || {
+                // 每次回滚1000
+                let result = m.rollback_order(ChannelType::HighSpeed, dec!(1000));
+                assert!(result.success, "并发回滚应该成功");
+            });
+            handles.push(handle);
+        }
+
+        // 等待所有回滚完成
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // 验证最终状态：初始90000 + 10次回滚各1000 = 100000
+        assert_eq!(fund_pool.available(ChannelType::HighSpeed), dec!(100000));
+    }
 }
 
 // ============================================================================
