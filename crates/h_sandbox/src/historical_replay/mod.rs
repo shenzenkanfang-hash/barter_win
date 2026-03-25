@@ -32,8 +32,10 @@ pub mod noise;
 pub mod memory_injector;
 pub mod replay_controller;
 pub mod tick_to_ws;
+pub mod shard_cache;
 
 pub use tick_generator::{StreamTickGenerator, SimulatedTick};
 pub use memory_injector::{MemoryInjector, MemoryInjectorConfig, SharedMarketData};
 pub use replay_controller::{ReplayController, ReplayConfig, ReplayState, ReplayStats, ReplayError};
 pub use tick_to_ws::TickToWsConverter;
+pub use shard_cache::{ShardCache, ShardFile, ShardReader, ShardReaderChain, ShardWriter, ShardCacheError, ShardReadError, ShardWriteError};
