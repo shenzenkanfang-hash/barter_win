@@ -17,7 +17,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use parking_lot::Mutex;
-use tracing::{info, warn};
+use tokio::sync::mpsc;
+use tracing::{info, warn, error};
 
 use a_common::EngineError;
 
@@ -162,6 +163,17 @@ pub struct SyncLogRecord {
 /// SQLite 记录服务
 pub struct SqliteRecordService {
     conn: Arc<Mutex<Connection>>,
+    /// 写入通道（用于异步写入）
+    write_tx: Option<mpsc::Sender<WriteTask>>,
+}
+
+/// 写入任务枚举
+#[derive(Debug)]
+pub enum WriteTask {
+    /// 订单写入任务
+    Order(OrderRecord),
+    /// 持仓写入任务
+    Position(LocalPositionRecord),
 }
 
 impl SqliteRecordService {
@@ -182,6 +194,7 @@ impl SqliteRecordService {
 
         let service = Self {
             conn: Arc::new(Mutex::new(conn)),
+            write_tx: None,
         };
 
         service.init_tables()?;
@@ -555,6 +568,72 @@ impl SqliteRecordService {
             ],
         ).map_err(|e| EngineError::Other(format!("保存订单失败: {}", e)))?;
         Ok(())
+    }
+
+    /// 异步保存订单（不阻塞主线程）
+    pub async fn save_order_async(&self, order: OrderRecord) -> Result<(), EngineError> {
+        let tx = self.write_tx.as_ref()
+            .ok_or_else(|| EngineError::Other("写入通道未初始化，请先调用 start_write_worker".to_string()))?;
+
+        tx.send(WriteTask::Order(order)).await
+            .map_err(|e| EngineError::Other(format!("发送写入任务失败: {}", e)))?;
+        Ok(())
+    }
+
+    /// 异步保存持仓（不阻塞主线程）
+    pub async fn save_position_async(&self, position: LocalPositionRecord) -> Result<(), EngineError> {
+        let tx = self.write_tx.as_ref()
+            .ok_or_else(|| EngineError::Other("写入通道未初始化，请先调用 start_write_worker".to_string()))?;
+
+        tx.send(WriteTask::Position(position)).await
+            .map_err(|e| EngineError::Other(format!("发送写入任务失败: {}", e)))?;
+        Ok(())
+    }
+
+    /// 启动写入工作线程
+    pub fn start_write_worker(&mut self) {
+        let conn = self.conn.clone();
+        let (tx, mut rx) = mpsc::channel::<WriteTask>(100);
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("创建 tokio runtime 失败");
+
+            rt.block_on(async {
+                while let Some(task) = rx.recv().await {
+                    match task {
+                        WriteTask::Order(order) => {
+                            let conn_guard = conn.lock();
+                            if let Err(e) = conn_guard.execute(
+                                "INSERT OR REPLACE INTO orders (order_id, symbol, side, qty, price, status, created_at, filled_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                params![
+                                    order.order_id, order.symbol, order.side, order.qty,
+                                    order.price, order.status, order.created_at, order.filled_at,
+                                ],
+                            ) {
+                                error!("异步写入订单失败: {}", e);
+                            }
+                        }
+                        WriteTask::Position(pos) => {
+                            let conn_guard = conn.lock();
+                            if let Err(e) = conn_guard.execute(
+                                "INSERT OR REPLACE INTO local_positions (id, ts, symbol, strategy_id, direction, qty, avg_price, entry_ts, remark) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                params![
+                                    pos.id, pos.ts, pos.symbol, pos.strategy_id, pos.direction,
+                                    pos.qty, pos.avg_price, pos.entry_ts, pos.remark,
+                                ],
+                            ) {
+                                error!("异步写入持仓失败: {}", e);
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
+        self.write_tx = Some(tx);
     }
 
     /// 获取所有订单
