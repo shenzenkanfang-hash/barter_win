@@ -37,6 +37,17 @@ fn new_http_client() -> Client {
 /// API 限速器 - 区分 REQUEST_WEIGHT 和 ORDERS 两个体系
 ///
 /// 限制值通过 set_limits() 设置一次（从 exchangeInfo 解析）
+/// API 请求优先级
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RequestPriority {
+    /// 高优先级：下单、撤单
+    High = 2,
+    /// 中优先级：账户查询
+    Medium = 1,
+    /// 低优先级：行情、历史的
+    Low = 0,
+}
+
 /// 已用权重从响应 Header 实时获取（只更新 > 0 的值）
 #[derive(Debug)]
 pub struct RateLimiter {
@@ -52,10 +63,12 @@ pub struct RateLimiter {
     used_weight: Mutex<u32>,
     /// 当前窗口内已用 ORDERS 计数
     used_orders: Mutex<u32>,
+    /// 优先级队列（高 -> 低）
+    priority_queues: [Vec<Instant>; 3],
 }
 
 impl RateLimiter {
-    /// 创建默认限速器（临时值，等待 set_limits）
+    /// 创建默认限速器
     pub fn new() -> Self {
         Self {
             request_weight_limit: Mutex::new(2400), // 默认合约值
@@ -64,6 +77,7 @@ impl RateLimiter {
             window_start: Mutex::new(Instant::now()),
             used_weight: Mutex::new(0),
             used_orders: Mutex::new(0),
+            priority_queues: [Vec::new(), Vec::new(), Vec::new()],
         }
     }
 
