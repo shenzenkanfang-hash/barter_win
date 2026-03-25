@@ -323,9 +323,9 @@ Status: ✅ Fixed (2026-03-25) - x_data架构重构完成
 
 待修复: 0 项（架构类问题已全部解决）
 
-可选优化项 (Phase 8-10):
-  🔧 业务层迁移到x_data直接依赖（替代a_common XData前缀类型）
-  🔧 StateManager trait 实际实现（LocalPositionManager/FundPoolManager）
+可选优化项 (Phase 9-10):
+  🔧 AccountPool 实现 StateManager trait
+  🔧 统一状态视图 UnifiedStateView 实际使用
 
 已修复: 18 项
   ... (保持原有列表)
