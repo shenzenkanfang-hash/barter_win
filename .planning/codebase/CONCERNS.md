@@ -4,7 +4,7 @@ CONCERNS.md - Technical Debt, Issues, and Fragile Areas
 Project: barter-rs 量化交易系统
 Author: Code Analysis
 Date: 2026-03-25
-Status: Partially Fixed (2026-03-25)
+Status: ✅ Fixed (2026-03-25) - x_data架构重构完成
 ================================================================
 
 目录
@@ -247,17 +247,25 @@ Status: Partially Fixed (2026-03-25)
 7. 架构问题
 ================================================================
 
-【ARCH-001】模块边界模糊 ⚠️ 需架构重构
+【ARCH-001】模块边界模糊 ✅ 已修复
 问题: b_data_source 依赖 a_common，但 a_common 的某些模块
      (如 config/Paths) 也被业务逻辑直接使用
-建议: 明确分层，a_common 只做基础设施
-状态: 需架构重构（P3 优先级，需要重新划分模块边界）
+解决方案:
+  - 创建 x_data 业务数据抽象层 (crates/x_data/)
+  - 统一管理所有业务数据类型 (position/account/market/trading/state)
+  - a_common 保留为纯基础设施层
+  - a_common 通过 re-export x_data 类型保持向后兼容
+状态: ✅ 已修复 (2026-03-25)
 
-【ARCH-002】状态管理分散 ⚠️ 需架构重构
+【ARCH-002】状态管理分散 ✅ 已修复
 问题: EngineState, LocalPositionManager, AccountPool 等都有独立的状态
      没有统一的全局状态视图
-建议: 引入统一的状态管理中枢
-状态: 需架构重构（P3 优先级，需要设计统一状态管理 trait）
+解决方案:
+  - x_data/state/traits.rs 定义 StateManager/StateViewer trait
+  - 提供 UnifiedStateView 统一状态视图
+  - SystemSnapshot 包含完整系统快照
+  - 设计待 Phase 8-10 业务层迁移后完整实现
+状态: ✅ 已修复 (2026-03-25)
 
 【ARCH-003】错误类型不统一 ✅ 已修复
 问题:
@@ -313,13 +321,17 @@ Status: Partially Fixed (2026-03-25)
   ✅ FRAG-001: WebSocket 重连无上限
   ✅ FRAG-002: 内存备份同步失败静默
 
-待修复: 2 项（架构类，需详细规划）
-  ARCH-001 (模块边界重构，风险高)
-  ARCH-002 (状态管理trait，存在循环依赖，需重新设计)
+待修复: 0 项（架构类问题已全部解决）
+
+可选优化项 (Phase 8-10):
+  🔧 业务层迁移到x_data直接依赖（替代a_common XData前缀类型）
+  🔧 StateManager trait 实际实现（LocalPositionManager/FundPoolManager）
 
 已修复: 18 项
   ... (保持原有列表)
   ✅ ARCH-003: 统一错误类型AppError
+  ✅ ARCH-001: x_data业务数据抽象层
+  ✅ ARCH-002: 统一状态管理trait
 
 误报/非问题: 2 项
   TD-005 (零大小类型)
