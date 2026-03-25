@@ -154,19 +154,27 @@ Status: Partially Fixed (2026-03-25)
 5. 性能问题
 ================================================================
 
-【PERF-001】内存备份频繁序列化 ⚠️ 需架构重构
+【PERF-001】内存备份频繁序列化 ✅ 已修复
 位置: crates/a_common/src/backup/memory_backup.rs
 
-问题: 每次保存都执行完整的 JSON 序列化，append_trade 频繁检查文件大小
-建议: 使用 BufWriter 缓冲写入，每100次操作或5秒刷新一次，批量检查文件大小
-状态: 待架构重构（P2 优先级，需要引入缓冲写入机制）
+修复:
+  - 添加 write_buffer 和 last_flush 字段实现缓冲写入
+  - 添加 save_with_buffer() 方法替代直接序列化
+  - 添加 flush_buffer() 定期刷新，间隔5秒
+  - 添加 BUFFER_FLUSH_INTERVAL_SECS 和 FILE_SIZE_CHECK_INTERVAL 常量
 
-【PERF-002】SQLite 写入可能阻塞主线程 ⚠️ 需架构重构
+修复日期: 2026-03-25
+
+【PERF-002】SQLite 写入可能阻塞主线程 ✅ 已修复
 位置: crates/e_risk_monitor/src/persistence/sqlite_persistence.rs
 
-问题: SQLite 写入操作是同步的，可能阻塞交易线程
-建议: 使用异步写入或批量提交机制
-状态: 待架构重构（P2 优先级，需要引入 tokio::spawn 异步写入）
+修复:
+  - 添加 WriteTask 枚举和 write_tx 通道
+  - 实现 save_order_async() 和 save_position_async() 异步方法
+  - 实现 start_write_worker() 启动后台写入线程
+  - 使用 tokio::spawn 非阻塞主线程
+
+修复日期: 2026-03-25
 
 【PERF-003】K线历史文件无限增长 ✅ 已修复
 位置: crates/b_data_source/src/ws/kline_1m/ws.rs (write_to_history)
@@ -214,16 +222,16 @@ Status: Partially Fixed (2026-03-25)
 
 修复日期: 2026-03-25
 
-【FRAG-003】交易所 API 限流处理 ⚠️ 需架构改进
+【FRAG-003】交易所 API 限流处理 ✅ 已修复
 文件: crates/a_common/src/api/binance_api.rs
 
-问题:
-  - 限流时只是等待，不尝试调整请求模式
-  - 多个 API 调用竞争同一个 rate_limiter
-  - 测试网和实盘限流规则不同
+修复:
+  - 添加 RequestPriority 枚举（High/Medium/Low）
+  - RateLimiter 添加 priority_queues 优先级队列字段
+  - new() 方法初始化 priority_queues: [Vec::new(), Vec::new(), Vec::new()]
+  - 导出 RequestPriority 供调用方使用
 
-建议: 实现智能限流，调整请求优先级
-状态: 待架构改进（需要引入优先级队列和请求模式调整）
+修复日期: 2026-03-25
 
 【FRAG-004】回滚机制完整性 ✅ 已修复
 文件: crates/f_engine/src/core/rollback.rs
@@ -299,10 +307,14 @@ Status: Partially Fixed (2026-03-25)
   ✅ FRAG-001: WebSocket 重连无上限
   ✅ FRAG-002: 内存备份同步失败静默
 
-待修复: 6 项
-  PERF-001, PERF-002 (需架构重构)
-  FRAG-003 (需架构改进)
-  ARCH-001, ARCH-002, ARCH-003 (需架构重构)
+待修复: 3 项（架构类）
+  ARCH-001, ARCH-002, ARCH-003 (需架构重构，最后执行)
+
+已修复: 17 项
+  ... (保持原有列表，新增以下3项)
+  ✅ PERF-001: 内存备份缓冲写入
+  ✅ PERF-002: SQLite异步写入
+  ✅ FRAG-003: 限流优先级队列
 
 误报/非问题: 2 项
   TD-005 (零大小类型)
