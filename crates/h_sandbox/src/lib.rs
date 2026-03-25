@@ -7,7 +7,7 @@ pub mod tick_generator;
 pub mod perf_test;
 
 pub use config::ShadowConfig;
-pub use simulator::{Account, OrderEngine, Position, Side};
+pub use simulator::{Account, OrderEngine, Position, Side, ShadowRiskChecker};
 pub use gateway::ShadowBinanceGateway;
 pub use tick_generator::{TickGenerator, TickDriver, SimulatedTick, KLineInput};
 pub use perf_test::{

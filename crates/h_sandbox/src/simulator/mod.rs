@@ -4,6 +4,8 @@
 
 pub mod account;
 pub mod order;
+pub mod risk_checker;
 
 pub use account::{Account, Position, Side};
 pub use order::{OrderEngine, OrderRequest};
+pub use risk_checker::ShadowRiskChecker;
