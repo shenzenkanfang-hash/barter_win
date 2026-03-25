@@ -649,6 +649,8 @@ mod tests {
         let path = Path::new("data/btc/usdt/1m/part_1742534400000.csv");
         let shard = ShardFile::from_path(path).unwrap();
         assert_eq!(shard.start_ms, 1742534400000);
+        // end_ms = start_ms + 50_000 * 60_000
+        assert_eq!(shard.end_ms, 1742534400000 + 50_000 * 60_000);
     }
 
     #[test]
@@ -656,5 +658,133 @@ mod tests {
         let path = Path::new("data/invalid.csv");
         let result = ShardFile::from_path(path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_shard_write_and_read() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        // Use temp dir with unique name
+        static CNT: AtomicU64 = AtomicU64::new(0);
+        let id = CNT.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("shard_cache_test_{}", id));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = dir.join("part_1000.csv");
+
+        // Write 100 klines
+        let mut writer = ShardWriter::new(path.clone()).unwrap();
+        for i in 0..100 {
+            let kline = KLine {
+                symbol: "BTCUSDT".to_string(),
+                period: Period::Minute(1),
+                open: dec!(50000),
+                high: dec!(50100),
+                low: dec!(49900),
+                close: dec!(50050),
+                volume: dec!(100),
+                timestamp: Utc.timestamp_millis_opt(1000 + i as i64 * 60_000).single(),
+            };
+            writer.write(&kline).unwrap();
+        }
+        writer.finish().unwrap();
+
+        // Read back
+        let reader = ShardReader::new(&path).unwrap();
+        let klines: Vec<_> = reader.filter_map(|r| r.ok()).collect();
+        assert_eq!(klines.len(), 100);
+        assert_eq!(klines[0].symbol, "BTCUSDT");
+        assert_eq!(klines[99].symbol, "BTCUSDT");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_find_shards_filters_correctly() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static CNT: AtomicU64 = AtomicU64::new(0);
+        let id = CNT.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("shard_cache_find_test_{}", id));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cache = ShardCache::new(dir.path().to_path_buf());
+
+        // Create some shard files
+        let shard_dir = dir.path().join("BTCUSDT").join("1m");
+        std::fs::create_dir_all(&shard_dir).unwrap();
+
+        // Create files with specific start_ms values
+        // part_1000.csv -> start_ms=1000, end_ms=1000+3000000000
+        // part_4000.csv -> start_ms=4000, end_ms=4000+3000000000
+        // part_7000.csv -> start_ms=7000, end_ms=7000+3000000000
+        std::fs::write(shard_dir.join("part_1000.csv"), "").unwrap();
+        std::fs::write(shard_dir.join("part_4000.csv"), "").unwrap();
+        std::fs::write(shard_dir.join("part_7000.csv"), "").unwrap();
+
+        // Query range [2000, 6000] should find part_4000.csv only
+        // part_4000: end_ms=4000+3000000000=3000004000 >= 2000 AND start_ms=4000 <= 6000 -> INCLUDED
+        // part_1000: end_ms=1000+3000000000=3000001000 >= 2000 BUT start_ms=1000 <= 6000 -> also included
+        // part_7000: end_ms=7000+3000000000=3000007000 >= 2000 BUT start_ms=7000 > 6000 -> excluded
+        let shards = cache.find_shards("BTCUSDT", "1m", 2000, 6000).unwrap();
+
+        // All three shards overlap with [2000, 6000] based on the overlap formula
+        // shard.end_ms >= start_query AND shard.start_ms <= end_query
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[0].start_ms, 1000);
+        assert_eq!(shards[1].start_ms, 4000);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_shards_cover_range_logic() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static CNT: AtomicU64 = AtomicU64::new(0);
+        let id = CNT.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("shard_cache_cover_test_{}", id));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cache = ShardCache::new(dir.path().to_path_buf());
+
+        // Create shards with proper end_ms calculation
+        // end_ms = start_ms + 50_000 * 60_000 = start_ms + 3_000_000_000
+        let shards = vec![
+            ShardFile {
+                path: PathBuf::from("part_0.csv"),
+                start_ms: 0,
+                end_ms: 0 + 50_000 * 60_000, // 3000000000
+            },
+            ShardFile {
+                path: PathBuf::from("part_3000000000.csv"),
+                start_ms: 0 + 50_000 * 60_000,
+                end_ms: 0 + 50_000 * 60_000 * 2, // 6000000000
+            },
+        ];
+
+        // Query [0, 4000000000] - should be covered by first 2 shards
+        // first.start_ms=0 <= 0 (OK), last.end_ms=6000000000 >= 4000000000 (OK)
+        // And they are continuous: shard[0].end_ms(3000000000) == shard[1].start_ms(3000000000)
+        let covered = cache.shards_cover_range(&shards, 0, 4_000_000_000);
+        assert!(covered);
+
+        // Query [1000, 4000000000] - should NOT be covered (first.start_ms > query start)
+        let covered2 = cache.shards_cover_range(&shards, 1000, 4_000_000_000);
+        assert!(!covered2);
+
+        // Query [0, 3000000000] - should NOT be covered (last.end_ms < query end)
+        let covered3 = cache.shards_cover_range(&shards, 0, 3_000_000_000);
+        assert!(!covered3);
+
+        // Empty shards should not cover anything
+        let empty: Vec<ShardFile> = vec![];
+        let covered4 = cache.shards_cover_range(&empty, 0, 1000);
+        assert!(!covered4);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
