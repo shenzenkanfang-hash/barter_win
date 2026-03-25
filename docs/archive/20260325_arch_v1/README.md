@@ -7,8 +7,9 @@
 本目录包含 barter-rs 量化交易系统 V4.0 (x_data 架构重构) 之前的
 所有架构文档、重构设计文档、旧计划文档。
 
-## 归档文件清单 (共14个)
+## 归档文件清单 (共30个)
 
+### docs/ 目录归档 (16个)
 | 文件名 | 原位置 | 说明 |
 |--------|--------|------|
 | architecture_v3.0_20260325.md | docs/architecture.md | V3.0 架构文档 |
@@ -25,6 +26,22 @@
 | 架构最终合规报告_2026-03-24.md | docs/architecture/ | 合规报告 |
 | 架构终审合规报告_2026-03-24_V2.md | docs/architecture/ | V2 合规报告 |
 | 豆包评审.md | docs/ | 外部评审 |
+
+### .planning/codebase/ 目录归档 (14个)
+| 文件名 | 说明 |
+|--------|------|
+| ARCHITECTURE.md | 架构分析 |
+| ARCHITECTURE_CN.md | 架构分析(中文) |
+| CONCERNS.md | 问题追踪 |
+| CONCERNS_CN.md | 问题追踪(中文) |
+| CONVENTIONS.md | 代码规范 |
+| FIX_PLAN.md | 修复计划 |
+| FIX_PLAN_CN.md | 修复计划(中文) |
+| INTEGRATIONS.md | 集成说明 |
+| REMAINING_FIX_PLAN.md | 剩余修复计划 |
+| STACK.md | 技术栈 |
+| STRUCTURE.md | 项目结构 |
+| TESTING.md | 测试规范 |
 
 ## 当前版本
 
