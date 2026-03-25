@@ -13,8 +13,9 @@ use rust_decimal_macros::dec;
 use tokio::time::timeout;
 
 use b_data_source::{DataFeeder, Tick};
-use h_sandbox::{ShadowBinanceGateway, ShadowConfig, Side, Account, Position};
+use h_sandbox::{ShadowBinanceGateway, ShadowConfig, Account, Position};
 use h_sandbox::tick_generator::TickGenerator;
+use f_engine::types::{OrderRequest as EngineOrderRequest, Side as EngineSide, OrderType};
 
 #[tokio::main]
 async fn main() {
@@ -62,13 +63,13 @@ async fn main() {
     println!("✅ 1. DataFeeder 创建成功");
 
     // 2. 创建 ShadowGateway（劫持网关）
-    let gateway = ShadowBinanceGateway::new(ShadowConfig::default());
+    let gateway = ShadowBinanceGateway::with_default_config(dec!(10000.0));
     let gateway = Arc::new(gateway);
     println!("✅ 2. ShadowGateway 创建成功");
 
     // 3. 创建账户
-    let mut account = Account::new(dec!(10000)); // 初始资金 10000 USDT
-    println!("✅ 3. 账户创建成功 (初始资金: {})", account.balance());
+    let account = gateway.get_account().unwrap();
+    println!("✅ 3. 账户创建成功 (初始资金: {})", account.available);
 
     // 4. 准备 K线数据
     let klines = if use_mock {
@@ -87,8 +88,7 @@ async fn main() {
 
     // 6. 准备位置
     let symbol = "POWERUSDT";
-    let position = Position::new(symbol);
-    println!("✅ 6. Position 创建成功");
+    println!("✅ 6. Position 位置就绪");
 
     // 开始测试
     println!("\n=== 开始闭环测试 ===\n");
@@ -144,22 +144,28 @@ async fn main() {
             if price_change > dec!(0.001) && order_count < 5 {
                 // 尝试下单
                 let side = if tick.price > last_signal_price {
-                    Side::Buy
+                    EngineSide::Buy
                 } else {
-                    Side::Sell
+                    EngineSide::Sell
                 };
 
                 // 通过 ShadowGateway 下单
-                let result = gateway.place_order(symbol, side, tick.price, dec!(0.01)).await;
+                let result = gateway.place_order(EngineOrderRequest {
+                    symbol: symbol.to_string(),
+                    side,
+                    order_type: OrderType::Market,
+                    qty: dec!(0.01),
+                    price: Some(tick.price),
+                });
 
                 match result {
-                    Ok(order_id) => {
+                    Ok(order_result) => {
                         order_count += 1;
                         println!(
                             "[Tick {:04}] 📝 {} {} @ {} (price_change: {:.2}%)",
                             tick_count,
-                            if side == Side::Buy { "买入" } else { "卖出" },
-                            order_id,
+                            if side == EngineSide::Buy { "买入" } else { "卖出" },
+                            order_result.order_id,
                             tick.price,
                             price_change * dec!(100)
                         );
@@ -170,7 +176,7 @@ async fn main() {
                         println!(
                             "[Tick {:04}] 📝 {} 模拟订单 @ {} (reason: {:?})",
                             tick_count,
-                            if side == Side::Buy { "买入" } else { "卖出" },
+                            if side == EngineSide::Buy { "买入" } else { "卖出" },
                             tick.price,
                             e
                         );

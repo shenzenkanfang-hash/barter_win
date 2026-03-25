@@ -147,6 +147,9 @@ impl MemoryInjector {
             price: tick.price,
             qty: tick.qty,
             timestamp: tick.timestamp,
+            kline_1m: self.current_kline.clone(),
+            kline_15m: None,
+            kline_1d: None,
         };
 
         {

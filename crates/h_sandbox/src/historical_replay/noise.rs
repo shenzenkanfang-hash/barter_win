@@ -27,9 +27,8 @@ impl GaussianNoise {
     /// 生成标准高斯噪声（均值 0，标准差 1）
     #[cfg(feature = "rand")]
     pub fn sample(&mut self) -> f64 {
-        use rand::Rng;
-        let u1: f64 = self.rng.gen();
-        let u2: f64 = self.rng.gen();
+        let u1: f64 = rand::Rng::r#gen(&mut self.rng);
+        let u2: f64 = rand::Rng::r#gen(&mut self.rng);
         // Box-Muller 变换
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
         z

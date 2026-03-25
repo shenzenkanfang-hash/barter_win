@@ -124,7 +124,7 @@ impl StreamTickGenerator {
     /// 内部：加载下一根 K线
     fn load_next_kline(&mut self) -> Option<()> {
         if let Some(kline) = self.kline_iter.next() {
-            let price_path = Self::generate_price_path(
+            let price_path = self.generate_price_path(
                 kline.open,
                 kline.high,
                 kline.low,
@@ -151,6 +151,7 @@ impl StreamTickGenerator {
     /// 牛市: open → low → high → close
     /// 熊市: open → high → low → close
     fn generate_price_path(
+        &mut self,
         open: Decimal,
         high: Decimal,
         low: Decimal,
@@ -360,12 +361,12 @@ mod tests {
     #[test]
     fn test_generate_tick() {
         let klines = create_test_klines();
-        let mut gen = StreamTickGenerator::new(
+        let mut generator = StreamTickGenerator::new(
             "BTCUSDT".to_string(),
             Box::new(klines.into_iter()),
         );
 
-        let tick = gen.next_tick();
+        let tick = generator.next();
         assert!(tick.is_some());
 
         let tick = tick.unwrap();
@@ -377,19 +378,19 @@ mod tests {
     #[test]
     fn test_all_ticks_exhausted() {
         let klines = create_test_klines();
-        let mut gen = StreamTickGenerator::new(
+        let mut generator = StreamTickGenerator::new(
             "BTCUSDT".to_string(),
             Box::new(klines.into_iter()),
         );
 
         // 2根K线 * 60 ticks = 120 ticks
         for _ in 0..120 {
-            let tick = gen.next();
+            let tick = generator.next();
             assert!(tick.is_some(), "Should have tick");
         }
 
         // 再请求应该返回 None
-        let tick = gen.next();
+        let tick = generator.next();
         assert!(tick.is_none());
     }
 }

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use parking_lot::RwLock;
-use tokio::time::sleep;
+use std::thread::sleep;
 use tracing::{info, warn, error};
 
 use b_data_source::KLine;
@@ -131,8 +131,8 @@ impl ReplayController {
             config,
             state: ReplayState::Init,
             stats: ReplayStats::new(),
-            shared_data,
-            injector: MemoryInjector::with_config(shared_data.clone(), injector_config),
+            shared_data: shared_data.clone(),
+            injector: MemoryInjector::with_config(shared_data, injector_config),
         }
     }
 
@@ -151,8 +151,8 @@ impl ReplayController {
             config,
             state: ReplayState::Init,
             stats: ReplayStats::new(),
-            shared_data,
-            injector: MemoryInjector::with_config(shared_data.clone(), injector_config),
+            shared_data: shared_data.clone(),
+            injector: MemoryInjector::with_config(shared_data, injector_config),
         }
     }
 
@@ -184,8 +184,12 @@ impl ReplayController {
         let total_rows = loader.total_rows();
         info!("加载 Parquet: {} rows", total_rows);
 
-        // 创建 Tick 生成器
-        let generator = StreamTickGenerator::from_loader(symbol.to_string(), loader);
+        // 创建 Tick 生成器（过滤掉加载错误）
+        let kline_iter = loader.filter_map(|r| r.map_err(|e| {
+            tracing::warn!("加载 K线失败: {}", e);
+            e
+        }).ok());
+        let generator = StreamTickGenerator::from_loader(symbol.to_string(), kline_iter);
 
         // 开始回放
         self.state = ReplayState::Running;
@@ -225,7 +229,7 @@ impl ReplayController {
             }
 
             // 控制速度
-            sleep(effective_interval).await;
+            std::thread::sleep(effective_interval);
         }
 
         self.state = ReplayState::Completed;

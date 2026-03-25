@@ -111,6 +111,7 @@ impl Clone for ShadowBinanceGateway {
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+    use a_common::OrderStatus;
 
     #[test]
     fn test_gateway_creation() {

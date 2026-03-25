@@ -187,7 +187,7 @@ mod tests {
         // 前 10 个 tick 应该 Hold
         for i in 0..10 {
             let t = BacktestTick {
-                price: dec!(50000 + i),
+                price: Decimal::from(50000 + i),
                 ..tick.clone()
             };
             let signal = strategy.on_tick(&t);
