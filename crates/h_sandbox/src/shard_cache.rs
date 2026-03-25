@@ -177,8 +177,8 @@ impl ShardCache {
 
             // 解析分片文件
             if let Ok(mut shard) = ShardFile::from_path(&path) {
-                // 检查时间范围是否有重叠
-                if shard.start_ms <= end_ms && shard.start_ms >= start_ms {
+                // 检查时间范围是否有重叠（shard 与请求范围相交）
+                if shard.end_ms >= start_ms && shard.start_ms <= end_ms {
                     shards.push(shard);
                 }
             }
