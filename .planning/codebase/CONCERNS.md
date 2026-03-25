@@ -61,6 +61,7 @@ Status: Partially Fixed (2026-03-25)
 修复:
   - LocalPosition 和 PositionSnapshot 是不同用途的结构（运行时 vs 持久化），不适合直接统一
   - 添加 UnifiedPositionSnapshot::from_memory_backup() 和 from_hard_disk_backup() 构造函数
+  - 实现 From<MemPositionSnapshot> trait，直接用 UnifiedPositionSnapshot::from(pos) 转换
   - 简化 startup_recovery.rs 中两处持仓转换代码，消除重复字段映射
   - PositionSnapshot (a_common 备份) 和 e_risk_monitor::persistence::PositionSnapshot 是不同目的的结构
 
@@ -224,20 +225,15 @@ Status: Partially Fixed (2026-03-25)
 建议: 实现智能限流，调整请求优先级
 状态: 待架构改进（需要引入优先级队列和请求模式调整）
 
-【FRAG-004】回滚机制完整性 ⚠️ 部分改进
+【FRAG-004】回滚机制完整性 ✅ 已修复
 文件: crates/f_engine/src/core/rollback.rs
 
-问题:
-  - 回滚点设置和恢复逻辑需要严格测试
-  - 部分成交时回滚状态计算复杂
-  - 并发回滚请求可能冲突
+修复:
+  - 添加 test_rollback_manager_concurrent 并发测试
+  - 使用 std::thread::spawn 模拟 10 并发回滚
+  - 验证并发回滚成功且最终状态一致
 
-现状:
-  - 已有基础测试: test_rollback_manager_order_failed, test_rollback_manager_partial_fill
-  - 部分成交场景已覆盖
-  - 并发回滚测试尚未实现
-
-建议: 添加并发回滚请求场景测试
+修复日期: 2026-03-25
 
 ================================================================
 7. 架构问题
@@ -303,10 +299,9 @@ Status: Partially Fixed (2026-03-25)
   ✅ FRAG-001: WebSocket 重连无上限
   ✅ FRAG-002: 内存备份同步失败静默
 
-待修复: 7 项
-  TD-002 (部分修复：添加了转换构造函数，完整统一需更多重构)
+待修复: 6 项
   PERF-001, PERF-002 (需架构重构)
-  FRAG-003, FRAG-004 (需架构改进)
+  FRAG-003 (需架构改进)
   ARCH-001, ARCH-002, ARCH-003 (需架构重构)
 
 误报/非问题: 2 项
