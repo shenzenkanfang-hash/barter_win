@@ -120,7 +120,7 @@ impl StrategyExecutor {
 
                     // 缓存信号
                     let cache_key = format!("{}:{}", symbol, strategy_id);
-                    self.signal_cache.write().insert(cache_key, Arc::clone(&signal));
+                    self.signal_cache.write().insert(cache_key, signal.clone());
 
                     signals.push(signal);
                 }
