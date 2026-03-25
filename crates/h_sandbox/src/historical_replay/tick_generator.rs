@@ -391,13 +391,37 @@ mod tests {
         );
 
         // 2根K线 * 60 ticks = 120 ticks
-        for _ in 0..120 {
+        for i in 0..120 {
             let tick = generator.next();
-            assert!(tick.is_some(), "Should have tick");
+            assert!(tick.is_some(), "Should have tick {}", i);
         }
 
         // 再请求应该返回 None
         let tick = generator.next();
         assert!(tick.is_none());
+    }
+
+    /// 验证每根 K 线第 60 根 tick 的 is_last_in_kline = true
+    #[test]
+    fn test_last_tick_in_kline_is_closed() {
+        let klines = create_test_klines();
+        let mut generator = StreamTickGenerator::new(
+            "BTCUSDT".to_string(),
+            Box::new(klines.into_iter()),
+        );
+
+        for tick_idx in 0..120 {
+            let tick = generator.next().expect("Should have tick");
+            let expected_kline_idx = tick_idx / 60; // 0 或 1
+            let expected_pos_in_kline = tick_idx % 60; // 0-59
+            let expected_is_last = expected_pos_in_kline == 59;
+
+            assert_eq!(
+                tick.is_last_in_kline, expected_is_last,
+                "tick {} (kline={}, pos={}): is_last_in_kline should be {}, got {}",
+                tick_idx, expected_kline_idx, expected_pos_in_kline,
+                expected_is_last, tick.is_last_in_kline
+            );
+        }
     }
 }
