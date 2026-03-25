@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use parking_lot::RwLock;
 
-use super::generator::TickGenerator;
+use super::generator::{TickGenerator, TICKS_PER_1M};
 use b_data_source::DataFeeder;
 
 /// TickDriver - 自循环推送 Tick 到 DataFeeder
@@ -144,13 +144,17 @@ impl TickDriver {
 
     /// 获取进度
     ///
-    /// 返回 (已发送tick数, 估计总tick数)
+    /// 返回 (已发送tick数, 总tick数)
     pub fn progress(&self) -> (u64, u64) {
         let g = self.generator.read();
         let total_klines = g.total_klines();
-        let remaining = g.remaining_in_current_kline() as u64;
-        let total_ticks = (total_klines as u64) * 60;
-        let sent = total_ticks.saturating_sub(remaining);
+        let total_ticks = (total_klines as u64) * (TICKS_PER_1M as u64);
+
+        // 已发送tick数
+        // exhausted = 初始总数 - 剩余未加载K线数 - 当前K线(如果已加载)
+        let exhausted = g.exhausted_kline_count();
+        let sent = (exhausted * TICKS_PER_1M as usize) as u64 + g.current_tick_index() as u64;
+
         (sent, total_ticks)
     }
 

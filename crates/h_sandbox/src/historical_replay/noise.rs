@@ -104,7 +104,8 @@ mod tests {
     #[test]
     fn test_noise_creation() {
         let noise = GaussianNoise::new();
-        assert!(std::mem::size_of_val(&noise) > 0);
+        // 空结构体，直接验证能正常构造即可
+        let _ = noise;
     }
 
     #[test]

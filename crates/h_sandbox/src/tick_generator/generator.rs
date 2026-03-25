@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 /// 配置
-const TICKS_PER_1M: u8 = 60;
+pub const TICKS_PER_1M: u8 = 60;
 const PERIOD_MS: i64 = 60_000; // 1m = 60s = 60000ms
 const TICK_INTERVAL_MS: i64 = PERIOD_MS / TICKS_PER_1M as i64; // ~16ms
 
@@ -64,11 +64,13 @@ pub struct TickGenerator {
     accumulated_low: Decimal,
     price_path: VecDeque<Decimal>, // 预处理的价格路径
     volume_per_tick: Decimal,
+    total_klines: usize, // 初始K线总数（用于 progress 跟踪）
 }
 
 impl TickGenerator {
     /// 创建生成器
     pub fn new(symbol: String, klines: Vec<KLineInput>) -> Self {
+        let total_klines = klines.len();
         let klines = VecDeque::from(klines);
         Self {
             symbol,
@@ -79,6 +81,7 @@ impl TickGenerator {
             accumulated_low: Decimal::MAX,
             price_path: VecDeque::new(),
             volume_per_tick: Decimal::ZERO,
+            total_klines,
         }
     }
 
@@ -131,7 +134,34 @@ impl TickGenerator {
 
     /// 检查是否还有数据
     pub fn is_exhausted(&self) -> bool {
-        self.current_kline.is_none() && self.klines.is_empty()
+        // 价格路径已空 → 无法再生成 tick
+        // 注意：next_tick() 在 price_path 空的瞬间会返回 None，
+        // 此时 current_kline 可能仍为 Some（最后一个K线数据还在），
+        // 所以用 price_path.is_empty() 来判断是否真的耗尽。
+        self.price_path.is_empty() && self.klines.is_empty()
+    }
+
+    /// 当前K线是否尚未加载（第一根K线未开始）
+    pub fn current_kline_is_none(&self) -> bool {
+        self.current_kline.is_none()
+    }
+
+    /// 当前K线已发出的tick数（0-60）
+    pub fn current_tick_index(&self) -> u8 {
+        // tick_index == 60 表示当前K线已发完或未开始
+        // 但如果 current_kline.is_none()，表示尚未开始，第一根K线未发
+        if self.current_kline.is_none() {
+            0
+        } else {
+            self.tick_index.min(TICKS_PER_1M)
+        }
+    }
+
+    /// 已耗尽的K线数
+    pub fn exhausted_kline_count(&self) -> usize {
+        // 初始总数 - 剩余K线 - 当前K线(如果已加载)
+        self.total_klines.saturating_sub(self.klines.len())
+            .saturating_sub(self.current_kline.is_some() as usize)
     }
 
     /// 获取已发送的 tick 总数
@@ -152,7 +182,13 @@ impl TickGenerator {
     /// 获取当前 K线剩余 tick 数
     pub fn remaining_in_current_kline(&self) -> u8 {
         if self.tick_index >= TICKS_PER_1M {
-            0
+            // tick_index >= 60 表示当前K线已发完或未加载
+            // 如果 current_kline 为 None，下一次 next_tick() 会加载新K线，剩余 TICKS_PER_1M
+            if self.current_kline.is_none() {
+                TICKS_PER_1M
+            } else {
+                0
+            }
         } else {
             TICKS_PER_1M - self.tick_index
         }
@@ -308,7 +344,7 @@ impl TickGenerator {
 
 impl Default for TickGenerator {
     fn default() -> Self {
-        Self::new(String::new(), Vec::new())
+        Self::new(String::new(), Vec::new()) // total_klines = 0
     }
 }
 

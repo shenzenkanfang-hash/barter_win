@@ -6,5 +6,5 @@
 mod generator;
 mod driver;
 
-pub use generator::{TickGenerator, SimulatedTick, KLineInput};
+pub use generator::{TickGenerator, SimulatedTick, KLineInput, TICKS_PER_1M};
 pub use driver::TickDriver;
