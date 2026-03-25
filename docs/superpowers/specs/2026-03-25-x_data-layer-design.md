@@ -4,7 +4,7 @@ x_data 数据抽象层 - 架构重构设计文档
 Project: barter-rs 量化交易系统
 Author: 软件架构师 + Droid
 Date: 2026-03-25
-Status: ✅ 已审批通过
+Status: 🔄 Phase 1+6 执行中
 ================================================================
 
 ## 1. 背景与目标
@@ -299,12 +299,12 @@ pub use x_data::account::AccountSnapshot;
 
 | 阶段 | 任务 | 风险 | 产物 |
 |------|------|------|------|
-| Phase 1 | 创建 x_data 骨架 + Cargo.toml | 低 | crates/x_data/src/lib.rs |
+| Phase 1 | 创建 x_data 骨架 + Cargo.toml | 低 | ✅ crates/x_data/src/lib.rs |
 | Phase 2 | 迁移 position/ 模块 | 中 | 4个类型文件 |
 | Phase 3 | 迁移 account/ 模块 | 中 | 3个类型文件 |
 | Phase 4 | 迁移 market/ 模块 | 中 | 5个类型文件 |
 | Phase 5 | 迁移 trading/ 模块 | 中 | 5个类型文件 |
-| Phase 6 | 实现 state/traits.rs | 中 | StateManager trait |
+| Phase 6 | 实现 state/traits.rs | 中 | ✅ StateManager trait |
 | Phase 7 | 更新 a_common 导出（re-export过渡） | 高 | 使用 pub use x_data:: 保留旧导出 |
 | Phase 8 | 更新 b_data_source 依赖 | 高 | 修改 Cargo.toml + import |
 | Phase 9 | 更新 e_risk_monitor 依赖 | 高 | 修改 Cargo.toml + import |
