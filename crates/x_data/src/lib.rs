@@ -19,6 +19,7 @@ pub mod account;
 pub mod market;
 pub mod trading;
 pub mod state;
+pub mod error;
 
 // Re-export 常用类型
 pub use position::{LocalPosition, PositionDirection, PositionSide, PositionSnapshot, Positions, UnifiedPositionSnapshot};

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::position::snapshot::{UnifiedPositionSnapshot, PositionSnapshot};
 use crate::account::types::AccountSnapshot;
 use crate::trading::order::OrderRecord;
-use a_common::AppError;
+use crate::error::XDataError;
 
 // ============================================================================
 // StateViewer Trait (只读接口)
@@ -37,10 +37,10 @@ pub trait StateViewer: Send + Sync {
 /// 继承自 StateViewer，同时提供修改能力
 pub trait StateManager: StateViewer {
     /// 更新持仓
-    fn update_position(&self, symbol: &str, pos: PositionSnapshot) -> Result<(), AppError>;
+    fn update_position(&self, symbol: &str, pos: PositionSnapshot) -> Result<(), XDataError>;
 
     /// 移除持仓
-    fn remove_position(&self, symbol: &str) -> Result<(), AppError>;
+    fn remove_position(&self, symbol: &str) -> Result<(), XDataError>;
 
     /// 锁定持仓列表进行读取
     fn lock_positions_read(&self) -> Vec<UnifiedPositionSnapshot>;

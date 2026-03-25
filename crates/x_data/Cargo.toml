@@ -20,8 +20,5 @@ thiserror = { workspace = true }
 # 同步原语
 parking_lot = { workspace = true }
 
-# 依赖 a_common（获取 AppError 等基础设施类型）
-a_common = { path = "../a_common" }
-
 [dev-dependencies]
 tokio = { workspace = true }

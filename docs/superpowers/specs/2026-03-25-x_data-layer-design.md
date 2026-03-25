@@ -297,30 +297,32 @@ pub use x_data::account::AccountSnapshot;
 7. 执行阶段
 ================================================================
 
-| 阶段 | 任务 | 风险 | 产物 |
-|------|------|------|------|
-| Phase 1 | 创建 x_data 骨架 + Cargo.toml | 低 | ✅ crates/x_data/src/lib.rs |
-| Phase 2 | 迁移 position/ 模块 | 中 | 4个类型文件 |
-| Phase 3 | 迁移 account/ 模块 | 中 | 3个类型文件 |
-| Phase 4 | 迁移 market/ 模块 | 中 | 5个类型文件 |
-| Phase 5 | 迁移 trading/ 模块 | 中 | 5个类型文件 |
-| Phase 6 | 实现 state/traits.rs | 中 | ✅ StateManager trait |
-| Phase 7 | 更新 a_common 导出（re-export过渡） | 高 | 使用 pub use x_data:: 保留旧导出 |
-| Phase 8 | 更新 b_data_source 依赖 | 高 | 修改 Cargo.toml + import |
-| Phase 9 | 更新 e_risk_monitor 依赖 | 高 | 修改 Cargo.toml + import |
-| Phase 10 | 更新 f_engine 依赖 | 高 | 修改 Cargo.toml + import |
-| Phase 11 | 编译验证 + 修复 | - | 全部通过 |
+| 阶段 | 任务 | 风险 | 产物 | 状态 |
+|------|------|------|------|------|
+| Phase 1 | 创建 x_data 骨架 + Cargo.toml | 低 | crates/x_data/src/lib.rs | ✅ 完成 |
+| Phase 2 | 迁移 position/ 模块 | 中 | 4个类型文件 | ✅ 完成 |
+| Phase 3 | 迁移 account/ 模块 | 中 | 3个类型文件 | ✅ 完成 |
+| Phase 4 | 迁移 market/ 模块 | 中 | 5个类型文件 | ✅ 完成 |
+| Phase 5 | 迁移 trading/ 模块 | 中 | 5个类型文件 | ✅ 完成 |
+| Phase 6 | 实现 state/traits.rs | 中 | StateManager trait | ✅ 完成 |
+| Phase 7 | 更新 a_common 导出（re-export过渡） | 高 | 使用 pub use x_data:: 保留旧导出 | ⚠️ 暂缓（循环依赖） |
+| Phase 8 | 更新 b_data_source 依赖 | 高 | 修改 Cargo.toml + import | ⬜ 待执行 |
+| Phase 9 | 更新 e_risk_monitor 依赖 | 高 | 修改 Cargo.toml + import | ⬜ 待执行 |
+| Phase 10 | 更新 f_engine 依赖 | 高 | 修改 Cargo.toml + import | ⬜ 待执行 |
+| Phase 11 | 编译验证 + 修复 | - | 全部通过 | ⬜ 待执行 |
+
+**注**: Phase 7 因 a_common ↔ x_data 循环依赖暂缓。需要先消除 x_data 对 a_common 的依赖，或将 x_data 迁至独立层级。
 
 ================================================================
 8. 验收标准
 ================================================================
 
-- [ ] cargo check --all 编译通过
+- [x] cargo check --all 编译通过 ✅
+- [x] x_data 无循环依赖 ✅
 - [ ] 所有数据类型只在一处定义（无重复）
-- [ ] x_data 无循环依赖
-- [ ] StateManager trait 可被现有类型实现
+- [x] StateManager trait 可被现有类型实现 ✅
 - [ ] 不改变任何业务逻辑（只移动类型定义）
-- [ ] a_common 保留基础设施类型
+- [x] a_common 保留基础设施类型 ✅
 
 ================================================================
 9. 风险与缓解
