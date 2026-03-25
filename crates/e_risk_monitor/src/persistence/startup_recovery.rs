@@ -92,6 +92,44 @@ pub struct UnifiedPositionSnapshot {
     pub checksum: u64,
 }
 
+impl UnifiedPositionSnapshot {
+    /// 从内存备份位置创建统一持仓快照
+    pub fn from_memory_backup(pos: MemPositionSnapshot) -> Self {
+        let updated_at = DateTime::parse_from_rfc3339(&pos.updated_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        let checksum = calculate_checksum(&pos);
+        Self {
+            symbol: pos.symbol,
+            long_qty: pos.long_qty,
+            long_avg_price: pos.long_avg_price,
+            short_qty: pos.short_qty,
+            short_avg_price: pos.short_avg_price,
+            updated_at,
+            source: RecoveryPriority::MemoryDisk,
+            checksum,
+        }
+    }
+
+    /// 从硬盘备份位置创建统一持仓快照
+    pub fn from_hard_disk_backup(pos: MemPositionSnapshot) -> Self {
+        let updated_at = DateTime::parse_from_rfc3339(&pos.updated_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        let checksum = calculate_checksum(&pos);
+        Self {
+            symbol: pos.symbol,
+            long_qty: pos.long_qty,
+            long_avg_price: pos.long_avg_price,
+            short_qty: pos.short_qty,
+            short_avg_price: pos.short_avg_price,
+            updated_at,
+            source: RecoveryPriority::HardDisk,
+            checksum,
+        }
+    }
+}
+
 /// 统一账户快照
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedAccountSnapshot {
@@ -309,18 +347,7 @@ impl RecoverySource for MemoryDiskRecoverySource {
                 let snapshots: Vec<UnifiedPositionSnapshot> = mem_positions
                     .positions
                     .into_iter()
-                    .map(|p| UnifiedPositionSnapshot {
-                        symbol: p.symbol.clone(),
-                        long_qty: p.long_qty,
-                        long_avg_price: p.long_avg_price,
-                        short_qty: p.short_qty,
-                        short_avg_price: p.short_avg_price,
-                        updated_at: DateTime::parse_from_rfc3339(&p.updated_at)
-                            .map(|dt| dt.with_timezone(&Utc))
-                            .unwrap_or_else(|_| Utc::now()),
-                        source: RecoveryPriority::MemoryDisk,
-                        checksum: calculate_checksum(&p),
-                    })
+                    .map(UnifiedPositionSnapshot::from_memory_backup)
                     .collect();
                 
                 debug!("从内存盘加载了 {} 个持仓", snapshots.len());
@@ -422,25 +449,11 @@ impl RecoverySource for HardDiskRecoverySource {
         
         let mem_positions: MemPositions = serde_json::from_str(&content)
             .map_err(|e| EngineError::Other(format!("解析硬盘备份失败: {}", e)))?;
-        
+
         let snapshots: Vec<UnifiedPositionSnapshot> = mem_positions
             .positions
             .into_iter()
-            .map(|p| {
-                let checksum = calculate_checksum(&p);
-                UnifiedPositionSnapshot {
-                    symbol: p.symbol,
-                    long_qty: p.long_qty,
-                    long_avg_price: p.long_avg_price,
-                    short_qty: p.short_qty,
-                    short_avg_price: p.short_avg_price,
-                    updated_at: DateTime::parse_from_rfc3339(&p.updated_at)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_else(|_| Utc::now()),
-                    source: RecoveryPriority::HardDisk,
-                    checksum,
-                }
-            })
+            .map(UnifiedPositionSnapshot::from_hard_disk_backup)
             .collect();
         
         debug!("从硬盘加载了 {} 个持仓", snapshots.len());

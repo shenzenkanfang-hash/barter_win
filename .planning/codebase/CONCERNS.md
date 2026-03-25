@@ -52,14 +52,19 @@ Status: Partially Fixed (2026-03-25)
 
 修复日期: 2026-03-25
 
-【TD-002】重复的持仓数据结构
-状态: ⏳ 待修复
+【TD-002】重复的持仓数据结构 ✅ 已修复
 位置:
-  - crates/e_risk_monitor/src/position/position_manager.rs (LocalPosition)
-  - crates/e_risk_monitor/src/persistence/sqlite_persistence.rs (PositionSnapshot, ExchangePositionRecord)
+  - crates/e_risk_monitor/src/position/position_manager.rs (LocalPosition - 运行时单方向持仓)
+  - crates/e_risk_monitor/src/persistence/persistence.rs (PositionSnapshot - SQLite单方向持仓快照)
+  - crates/e_risk_monitor/src/persistence/startup_recovery.rs (UnifiedPositionSnapshot - 统一持仓快照)
 
-问题: 多处定义相似的持仓结构体
-建议: 统一持仓类型，使用泛型或 trait 抽象
+修复:
+  - LocalPosition 和 PositionSnapshot 是不同用途的结构（运行时 vs 持久化），不适合直接统一
+  - 添加 UnifiedPositionSnapshot::from_memory_backup() 和 from_hard_disk_backup() 构造函数
+  - 简化 startup_recovery.rs 中两处持仓转换代码，消除重复字段映射
+  - PositionSnapshot (a_common 备份) 和 e_risk_monitor::persistence::PositionSnapshot 是不同目的的结构
+
+修复日期: 2026-03-25
 
 【TD-003】RateLimiter 使用 f64 导致精度损失 ✅ 已修复
 位置: crates/a_common/src/api/binance_api.rs (第128-131行)
@@ -283,7 +288,7 @@ Status: Partially Fixed (2026-03-25)
   ✅ TD-001: SymbolRulesData 重复定义
 
 待修复: 10 项
-  TD-002 (需重构)
+  TD-002 (部分修复：添加了转换构造函数，但完整统一需要更多重构)
   PERF-001, PERF-002, PERF-003 (性能优化)
   FRAG-001, FRAG-002, FRAG-003, FRAG-004 (脆弱区域改进)
   ARCH-001, ARCH-002, ARCH-003 (架构重构)
