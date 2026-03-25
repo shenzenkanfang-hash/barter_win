@@ -2,7 +2,7 @@
 //!
 //! 提供历史 K线数据的分片存储和读取功能，支持：
 //! - 分片文件管理 (ShardFile)
-//! - 分片写入 (ShardWriter) - 自动 flush at 50000
+//! - 分片写入 (ShardWriter) - 只在 finish()/Drop 时 flush
 //! - 分片读取 (ShardReader) - Iterator 模式
 //! - 多分片链式读取 (ShardReaderChain)
 //!
@@ -73,12 +73,6 @@ pub enum ShardWriteError {
 
     #[error("CSV error: {0}")]
     Csv(#[from] csv::Error),
-
-    #[error("Writer not finished")]
-    WriterNotFinished,
-
-    #[error("Auto flush failed: {0}")]
-    AutoFlushFailed(String),
 }
 
 // ============================================================================
@@ -283,13 +277,13 @@ impl ShardCache {
 /// 分片写入器
 ///
 /// CSV 格式: `symbol,period,open,high,low,close,volume,timestamp_ms`
+///
+/// 注意: 不自动封片，只在 `finish()` 或 Drop 时 flush
 pub struct ShardWriter {
     writer: csv::Writer<io::BufWriter<std::fs::File>>,
     file_path: PathBuf,
     count: usize,
     last_timestamp_ms: i64,
-    shard_size: usize,
-    finished: bool,
 }
 
 impl ShardWriter {
@@ -312,17 +306,14 @@ impl ShardWriter {
             file_path,
             count: 0,
             last_timestamp_ms: 0,
-            shard_size: 50000,
-            finished: false,
         })
     }
 
     /// 写入一条 K线
+    ///
+    /// 注意: 不检查 shard_size 限制，只负责写入
+    /// 调用者负责在适当时候调用 `finish()` 封片
     pub fn write(&mut self, kline: &KLine) -> Result<(), ShardWriteError> {
-        if self.finished {
-            return Err(ShardWriteError::WriterNotFinished);
-        }
-
         let timestamp_ms = kline.timestamp.timestamp_millis();
         let period_str = period_to_string(&kline.period);
 
@@ -340,11 +331,6 @@ impl ShardWriter {
         self.count += 1;
         self.last_timestamp_ms = timestamp_ms;
 
-        // Auto-flush at shard_size
-        if self.count >= self.shard_size {
-            self.flush()?;
-        }
-
         Ok(())
     }
 
@@ -355,13 +341,10 @@ impl ShardWriter {
     }
 
     /// 完成写入，返回分片信息
-    pub fn finish(mut self) -> Result<ShardFile, ShardWriteError> {
-        if self.finished {
-            return Err(ShardWriteError::WriterNotFinished);
-        }
-
+    ///
+    /// 只是 flush 并返回 ShardFile，不阻止后续写入
+    pub fn finish(&mut self) -> Result<ShardFile, ShardWriteError> {
         self.writer.flush()?;
-        self.finished = true;
 
         // 解析 start_ms 从文件名
         let filename = self.file_path
@@ -376,7 +359,7 @@ impl ShardWriter {
             .unwrap_or(0);
 
         Ok(ShardFile {
-            path: self.file_path,
+            path: self.file_path.clone(),
             start_ms,
             end_ms: self.last_timestamp_ms,
         })
@@ -385,10 +368,8 @@ impl ShardWriter {
 
 impl Drop for ShardWriter {
     fn drop(&mut self) {
-        if !self.finished {
-            // 自动调用 finish
-            let _ = self.finish();
-        }
+        // 自动 flush 确保数据写入磁盘
+        let _ = self.writer.flush();
     }
 }
 
