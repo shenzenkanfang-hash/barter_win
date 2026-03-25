@@ -17,3 +17,6 @@ reqwest = { workspace = true }
 async-trait = { workspace = true }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
+
+# x_data re-export for backward compatibility
+x_data = { path = "../x_data" }

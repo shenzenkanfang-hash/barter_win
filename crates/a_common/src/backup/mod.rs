@@ -14,6 +14,18 @@
 
 pub mod memory_backup;
 
+// Re-export x_data types for backward compatibility
+pub use x_data::position::snapshot::{PositionSnapshot as XDataPositionSnapshot, Positions as XDataPositions};
+pub use x_data::account::types::AccountSnapshot as XDataAccountSnapshot;
+pub use x_data::market::kline::KlineData as XDataKlineData;
+pub use x_data::market::orderbook::DepthData as XDataDepthData;
+pub use x_data::market::tick::{Tick as XDataTick, KLine as XDataKLine};
+pub use x_data::trading::order::{OrderRejectReason as XDataOrderRejectReason, OrderResult as XDataOrderResult, OrderRecord as XDataOrderRecord};
+pub use x_data::trading::futures::{FuturesPosition as XDataFuturesPosition, FuturesAccount as XDataFuturesAccount};
+pub use x_data::trading::rules::{SymbolRulesData as XDataSymbolRulesData, ParsedSymbolRules as XDataParsedSymbolRules};
+pub use x_data::position::types::{LocalPosition as XDataLocalPosition, PositionDirection as XDataPositionDirection, PositionSide as XDataPositionSide};
+pub use x_data::market::volatility::{SymbolVolatility as XDataSymbolVolatility, VolatilitySummary as XDataVolatilitySummary};
+
 pub use crate::api::SymbolRulesData;
 
 pub use memory_backup::{
