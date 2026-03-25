@@ -2,7 +2,9 @@
 //!
 //! 数据 → TickGenerator → DataFeeder → ShadowGateway → 账户持仓
 //!
-//! 运行: cargo run -p h_sandbox --example full_loop_test -- --path "xxx.parquet"
+//! 运行: cargo run -p h_sandbox --example full_loop_test -- --fast
+//!
+//! 数据源: CSV replay (b_data_source::replay_source::ReplaySource)
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,14 +25,14 @@ async fn main() {
 
     // 解析命令行参数
     let args: Vec<String> = std::env::args().collect();
-    let mut parquet_path = "".to_string();
+    let mut csv_path = "".to_string();
     let mut kline_count = 100; // 默认100根K线
 
     for (i, arg) in args.iter().enumerate() {
         match arg.as_str() {
             "--path" => {
                 if i + 1 < args.len() {
-                    parquet_path = args[i + 1].clone();
+                    csv_path = args[i + 1].clone();
                 }
             }
             "--klines" => {
@@ -41,7 +43,7 @@ async fn main() {
             "--help" => {
                 println!("用法: full_loop_test [选项]");
                 println!("选项:");
-                println!("  --path <路径>   parquet 文件路径");
+                println!("  --path <路径>   CSV 数据文件路径");
                 println!("  --klines <N>   测试K线数量 (默认: 100)");
                 println!("  --help         显示帮助");
                 return;
@@ -51,10 +53,10 @@ async fn main() {
     }
 
     // 如果没有指定路径，使用模拟数据
-    let use_mock = parquet_path.is_empty();
+    let use_mock = csv_path.is_empty();
 
     println!("配置:");
-    println!("  模式: {}", if use_mock { "模拟数据" } else { "Parquet文件" });
+    println!("  模式: {}", if use_mock { "模拟数据" } else { "CSV文件" });
     println!("  K线数量: {}", kline_count);
     println!();
 
@@ -75,8 +77,8 @@ async fn main() {
     let klines = if use_mock {
         generate_mock_klines("POWERUSDT", kline_count)
     } else {
-        // TODO: 从 parquet 加载（parquet 0.17+ 支持后再实现）
-        println!("⚠️  Parquet 加载暂未实现，使用模拟数据");
+        // CSV replay 功能使用 b_data_source::replay_source::ReplaySource
+        println!("⚠️  CSV 加载暂未实现，使用模拟数据");
         generate_mock_klines("POWERUSDT", kline_count)
     };
     println!("✅ 4. K线数据准备完成 ({} 根)", klines.len());

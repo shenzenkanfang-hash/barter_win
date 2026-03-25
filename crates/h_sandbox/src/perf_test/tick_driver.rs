@@ -1,8 +1,8 @@
 //! TickDriver - 数据源驱动
 //!
-//! 从 parquet 读取 K线数据，生成 tick 流
+//! 生成 tick 流，支持模拟数据和 CSV replay
+//! CSV replay 使用 b_data_source::replay_source::ReplaySource
 
-use std::path::Path;
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 
@@ -221,15 +221,13 @@ impl TickDriver {
         })
     }
 
-    /// 创建 TickDriver（从 parquet 加载）
-    pub fn from_parquet(config: PerfTestConfig, sender: mpsc::Sender<TimedTick>) -> Result<Self, String> {
-        if !Path::new(&config.parquet_path).exists() {
-            return Err(format!("文件不存在: {}", config.parquet_path));
-        }
-
-        // 简化：先用模拟数据，后续添加 parquet 支持
-        tracing::warn!("Parquet 加载暂未实现，使用模拟数据");
-        Self::new(config, sender)
+    /// 创建 TickDriver（从 CSV 文件加载）
+    /// 
+    /// 注意: 当前实现使用模拟数据
+    /// CSV replay 功能使用 b_data_source::replay_source::ReplaySource
+    pub fn from_csv(_config: PerfTestConfig, sender: mpsc::Sender<TimedTick>) -> Result<Self, String> {
+        tracing::warn!("CSV 加载功能使用模拟数据");
+        Self::new(_config, sender)
     }
 
     /// 生成模拟 K线数据

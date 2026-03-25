@@ -1,6 +1,7 @@
 //! 性能测试模块 - 异步回测引擎
 //!
 //! 用于测试系统处理性能，不改动原有引擎代码
+//! 数据源: CSV replay (b_data_source/replay_source.rs)
 
 mod tick_driver;
 mod engine_driver;
@@ -15,8 +16,8 @@ pub use reporter::Reporter;
 /// 性能测试配置
 #[derive(Debug, Clone)]
 pub struct PerfTestConfig {
-    /// parquet 文件路径
-    pub parquet_path: String,
+    /// CSV 数据文件路径
+    pub csv_path: String,
     /// tick 间隔（毫秒）
     pub tick_interval_ms: u64,
     /// 测试品种
@@ -32,7 +33,7 @@ pub struct PerfTestConfig {
 impl Default for PerfTestConfig {
     fn default() -> Self {
         Self {
-            parquet_path: String::new(),
+            csv_path: String::new(),
             tick_interval_ms: 16,
             symbol: "BTCUSDT".to_string(),
             duration_secs: 60,

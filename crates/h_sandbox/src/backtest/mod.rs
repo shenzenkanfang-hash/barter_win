@@ -1,10 +1,7 @@
 //! 回测模块 - 异步回测引擎
 //!
 //! 基于 TickGenerator + DataFeeder 的异步回测框架
-
-// 回测引擎模块（待实现）
-// mod engine;
-// mod loader;   // TODO: parquet API 兼容性问题待修复
+//! 数据源支持: CSV replay (b_data_source/replay_source.rs)
 
 mod strategy;
 

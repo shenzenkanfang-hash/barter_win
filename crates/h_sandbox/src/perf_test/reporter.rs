@@ -65,7 +65,7 @@ impl Reporter {
         println!("╔══════════════════════════════════════════════════════════════╗");
         println!("║                    性能测试报告                                  ║");
         println!("╠══════════════════════════════════════════════════════════════╣");
-        println!("║  数据源: {}                                   ║", config.parquet_path);
+        println!("║  数据源: {}                                   ║", config.csv_path);
         println!("║  品种: {}                                        ║", config.symbol);
         println!("║  测试模式: {}                               ║", if config.fast_mode { "快速" } else { "实时" });
         println!("║  tick 间隔: {}ms                                   ║", config.tick_interval_ms);

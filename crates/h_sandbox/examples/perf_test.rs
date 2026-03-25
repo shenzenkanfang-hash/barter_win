@@ -1,8 +1,9 @@
 //! 性能测试示例
 //!
-//! 运行: cargo run -p h_sandbox --example perf_test -- --path "D:\\xxx\\xxx.parquet"
+//! 运行: cargo run -p h_sandbox --example perf_test -- --fast
 //!
 //! 测试系统处理性能，不改动原有引擎代码
+//! 数据源: CSV replay (b_data_source::replay_source::ReplaySource)
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +23,7 @@ async fn main() {
         match arg.as_str() {
             "--path" => {
                 if i + 1 < args.len() {
-                    config.parquet_path = args[i + 1].clone();
+                    config.csv_path = args[i + 1].clone();
                 }
             }
             "--symbol" => {
@@ -41,7 +42,7 @@ async fn main() {
             "--help" => {
                 println!("用法: perf_test [选项]");
                 println!("选项:");
-                println!("  --path <路径>     parquet 文件路径");
+                println!("  --path <路径>     CSV 数据文件路径");
                 println!("  --symbol <品种>   测试品种 (默认: BTCUSDT)");
                 println!("  --interval <ms>   tick 间隔 (默认: 16ms)");
                 println!("  --fast            快速模式 (不等待间隔)");
@@ -53,16 +54,16 @@ async fn main() {
     }
 
     // 检查必需参数（fast 模式可以使用模拟数据）
-    if config.parquet_path.is_empty() && !config.fast_mode {
+    if config.csv_path.is_empty() && !config.fast_mode {
         eprintln!("错误: 请指定 --path 参数");
-        eprintln!("示例: cargo run --example perf_test -- --path \"D:\\xxx\\xxx.parquet\"");
+        eprintln!("示例: cargo run --example perf_test -- --path \"data\\kline.csv\"");
         eprintln!("或者使用 --fast 模式（模拟数据）:");
         eprintln!("示例: cargo run --example perf_test -- --fast");
         return;
     }
 
     println!("配置:");
-    println!("  数据源: {}", config.parquet_path);
+    println!("  数据源: {}", config.csv_path);
     println!("  品种: {}", config.symbol);
     println!("  tick 间隔: {}ms", config.tick_interval_ms);
     println!("  模式: {}", if config.fast_mode { "快速" } else { "实时" });
@@ -88,8 +89,8 @@ async fn main() {
             }
         }
     } else {
-        // 实时模式从 parquet 加载
-        match TickDriver::from_parquet(config.clone(), tx) {
+        // 实时模式从 CSV 加载
+        match TickDriver::from_csv(config.clone(), tx) {
             Ok(driver) => {
                 println!("✅ 成功加载数据，共 {} ticks", driver.total_ticks());
                 driver

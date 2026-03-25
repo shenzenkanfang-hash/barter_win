@@ -95,7 +95,7 @@ impl DayQuantityCalculator {
     /// 优先级: Exit > Hedge > Open
     pub fn generate_signal(
         &self,
-        input: &DaySignalInput,
+        _input: &DaySignalInput,
         signal_output: &DaySignalOutput,
         current_position_qty: Decimal,
         vol_tier: &VolatilityTier,

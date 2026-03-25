@@ -8,7 +8,7 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use crate::types::{MinSignalInput, MinSignalOutput, VolatilityTier};
-use x_data::trading::signal::{StrategySignal, StrategyId, PositionRef, TradeCommand, PositionSide};
+use x_data::trading::signal::{StrategySignal, StrategyId, PositionRef, PositionSide};
 
 /// 分钟级策略数量配置
 #[derive(Debug, Clone)]
@@ -117,7 +117,7 @@ impl MinQuantityCalculator {
     /// 优先级: Exit > Close > Hedge > Add > Open
     pub fn generate_signal(
         &self,
-        input: &MinSignalInput,
+        _input: &MinSignalInput,
         signal_output: &MinSignalOutput,
         current_position_qty: Decimal,
         vol_tier: &VolatilityTier,
