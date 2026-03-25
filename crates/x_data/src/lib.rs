@@ -26,4 +26,5 @@ pub use position::{LocalPosition, PositionDirection, PositionSide, PositionSnaps
 pub use account::{FundPool, FundPoolManager, AccountSnapshot};
 pub use market::{Tick, KLine, KlineData, DepthData, OrderBook, OrderBookLevel, OrderBookSnapshot, SymbolVolatility, VolatilitySummary};
 pub use trading::{SymbolRulesData, ParsedSymbolRules, OrderRejectReason, OrderResult, OrderRecord, FuturesPosition, FuturesAccount};
+pub use trading::signal::{StrategySignal, TradeCommand, StrategyId, StrategyType, StrategyLevel, PositionRef};
 pub use state::{StateViewer, StateManager, UnifiedStateView, SystemSnapshot};

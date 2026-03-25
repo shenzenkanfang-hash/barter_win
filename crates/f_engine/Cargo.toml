@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 a_common = { path = "../a_common" }
 b_data_source = { path = "../b_data_source" }
+d_checktable = { path = "../d_checktable" }
+x_data = { path = "../x_data" }
 
 chrono = { workspace = true }
 futures = { workspace = true }

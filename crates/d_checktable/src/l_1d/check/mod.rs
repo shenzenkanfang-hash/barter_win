@@ -10,3 +10,6 @@ pub mod d_add;
 pub mod e_open;
 
 pub mod check_chain;
+
+// Re-export CheckChainContext
+pub use check_chain::CheckChainContext;

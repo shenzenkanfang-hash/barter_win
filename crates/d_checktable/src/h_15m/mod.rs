@@ -9,10 +9,14 @@ pub mod market_status_generator;
 pub mod pipeline_form;
 pub mod signal_generator;
 pub mod price_control_generator;
+pub mod quantity_calculator;
 pub mod check;
 
+// 导出数量计算器
+pub use quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
+
 // 导出检查链类型
-pub use check::check_chain::{CheckSignal, TriggerEvent, run_check_chain};
+pub use check::check_chain::{CheckSignal, CheckChainContext, run_check_chain};
 
 // 导出市场状态生成器
 pub use market_status_generator::MinMarketStatusGenerator;

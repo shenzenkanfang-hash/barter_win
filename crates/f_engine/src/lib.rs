@@ -47,3 +47,14 @@ pub use core::business_types::{
     TradingAction, StrategyQuery, StrategyResponse, RiskCheckResult,
     PriceControlOutput, OrderInfo, FundPool, EngineErrorCode,
 };
+
+// Re-exports - Strategy Signal (for strategy-engine communication)
+pub use x_data::trading::signal::{
+    StrategySignal, TradeCommand, StrategyId, StrategyType, StrategyLevel, PositionRef,
+};
+
+// Re-exports - CheckTable (dual-cycle)
+pub use d_checktable::h_15m::{MinQuantityCalculator, MinQuantityConfig};
+pub use d_checktable::l_1d::{DayQuantityCalculator, DayQuantityConfig};
+pub use d_checktable::h_15m::check::CheckChainContext as MinCheckChainContext;
+pub use d_checktable::l_1d::check::CheckChainContext as DayCheckChainContext;

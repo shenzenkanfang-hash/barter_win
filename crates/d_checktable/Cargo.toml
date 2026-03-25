@@ -18,3 +18,4 @@ b_data_source = { path = "../b_data_source" }
 c_data_process = { path = "../c_data_process" }
 e_risk_monitor = { path = "../e_risk_monitor" }
 a_common = { path = "../a_common" }
+x_data = { path = "../x_data" }

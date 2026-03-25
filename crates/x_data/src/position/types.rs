@@ -91,10 +91,21 @@ pub struct LocalPosition {
     pub position_cost: Decimal,
     /// 更新时间
     pub updated_at: DateTime<Utc>,
+    /// 仓位唯一ID（用于指定平仓）
+    pub position_id: String,
+    /// 关联的策略实例ID
+    pub strategy_instance_id: String,
 }
 
 impl LocalPosition {
-    pub fn new(symbol: String, direction: PositionDirection, qty: Decimal, avg_price: Decimal) -> Self {
+    pub fn new(
+        symbol: String,
+        direction: PositionDirection,
+        qty: Decimal,
+        avg_price: Decimal,
+        strategy_instance_id: String,
+    ) -> Self {
+        let position_id = Self::generate_position_id(&symbol, &direction, &strategy_instance_id);
         Self {
             symbol,
             direction,
@@ -103,7 +114,27 @@ impl LocalPosition {
             open_time: Utc::now().timestamp(),
             position_cost: Decimal::ZERO,
             updated_at: Utc::now(),
+            position_id,
+            strategy_instance_id,
         }
+    }
+
+    /// 生成唯一仓位ID
+    fn generate_position_id(symbol: &str, direction: &PositionDirection, strategy_instance_id: &str) -> String {
+        let direction_str = match direction {
+            PositionDirection::Long => "long",
+            PositionDirection::Short => "short",
+            PositionDirection::NetLong => "netlong",
+            PositionDirection::NetShort => "netshort",
+            PositionDirection::Flat => "flat",
+        };
+        format!(
+            "{}_{}_{}_{}",
+            symbol.to_lowercase(),
+            direction_str,
+            strategy_instance_id,
+            Utc::now().timestamp()
+        )
     }
 
     /// 计算未实现盈亏
