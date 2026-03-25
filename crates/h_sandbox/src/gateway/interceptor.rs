@@ -47,6 +47,11 @@ impl ShadowBinanceGateway {
         self.engine.write().update_price(symbol, price);
     }
 
+    /// 获取当前价格
+    pub fn get_current_price(&self, symbol: &str) -> Decimal {
+        self.engine.read().get_current_price(symbol).unwrap_or(Decimal::ZERO)
+    }
+
     /// 获取账户信息
     pub fn get_account(&self) -> Result<ExchangeAccount, EngineError> {
         Ok(self.engine.read().get_account())
