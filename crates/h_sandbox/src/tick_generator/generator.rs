@@ -3,8 +3,9 @@
 //! 移植自 Python historical_retracement.py 的 TickGenerator
 //! 每根 1m K线生成 60 个 tick，包含累积 OHLC 路径
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -111,7 +112,7 @@ impl TickGenerator {
         // 计算时间戳
         let kline_ts = self.current_kline.as_ref().unwrap().timestamp;
         let tick_offset_ms = (self.tick_index as i64) * TICK_INTERVAL_MS;
-        let tick_ts = kline_ts + chrono::Duration::milliseconds(tick_offset_ms);
+        let tick_ts = kline_ts + Duration::milliseconds(tick_offset_ms);
 
         self.tick_index += 1;
 
@@ -159,7 +160,7 @@ impl TickGenerator {
 
     /// 加载下一根 K线
     fn load_next_kline(&mut self) -> Option<()> {
-        self.current_kline = self.klines.pop_front()?;
+        self.current_kline = Some(self.klines.pop_front()?);
 
         let kline = self.current_kline.as_ref().unwrap();
 
@@ -339,18 +340,18 @@ mod tests {
     #[test]
     fn test_generator_creation() {
         let klines = create_test_klines();
-        let gen = TickGenerator::new("BTCUSDT".to_string(), klines);
+        let g = TickGenerator::new("BTCUSDT".to_string(), klines);
 
-        assert_eq!(gen.total_klines(), 2);
-        assert!(!gen.is_exhausted());
+        assert_eq!(g.total_klines(), 2);
+        assert!(!g.is_exhausted());
     }
 
     #[test]
     fn test_generate_tick() {
         let klines = create_test_klines();
-        let mut gen = TickGenerator::new("BTCUSDT".to_string(), klines);
+        let mut g = TickGenerator::new("BTCUSDT".to_string(), klines);
 
-        let tick = gen.next_tick();
+        let tick = g.next_tick();
         assert!(tick.is_some());
 
         let tick = tick.unwrap();
@@ -362,18 +363,18 @@ mod tests {
     #[test]
     fn test_all_ticks_exhausted() {
         let klines = create_test_klines();
-        let mut gen = TickGenerator::new("BTCUSDT".to_string(), klines);
+        let mut g = TickGenerator::new("BTCUSDT".to_string(), klines);
 
         // 2根K线 * 60 ticks = 120 ticks
         for _ in 0..120 {
-            let tick = gen.next_tick();
+            let tick = g.next_tick();
             assert!(tick.is_some(), "Should have tick");
         }
 
         // 再请求应该返回 None
-        let tick = gen.next_tick();
+        let tick = g.next_tick();
         assert!(tick.is_none());
-        assert!(gen.is_exhausted());
+        assert!(g.is_exhausted());
     }
 
     #[test]
@@ -415,14 +416,14 @@ mod tests {
             timestamp: Utc::now(),
         }];
 
-        let mut gen = TickGenerator::new("BTCUSDT".to_string(), klines);
+        let mut g = TickGenerator::new("BTCUSDT".to_string(), klines);
 
         let mut prev_high = dec!(0);
         let mut prev_low = Decimal::MAX;
 
         // 前10个 tick
         for _ in 0..10 {
-            let tick = gen.next_tick().unwrap();
+            let tick = g.next_tick().unwrap();
             assert!(tick.high >= prev_high);
             assert!(tick.low <= prev_low);
             prev_high = tick.high;

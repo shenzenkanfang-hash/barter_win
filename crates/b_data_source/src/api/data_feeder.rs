@@ -115,6 +115,11 @@ impl DataFeeder {
         ticks.insert(symbol, tick);
     }
 
+    /// 推送 Tick（公开接口，用于模拟数据注入）
+    pub fn push_tick(&self, tick: Tick) {
+        self.update_tick(tick);
+    }
+
     /// 获取波动率管理器（内部使用）
     #[allow(dead_code)]
     pub(crate) fn get_volatility_manager(&self) -> Arc<VolatilityManager> {

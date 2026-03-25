@@ -19,3 +19,5 @@ tracing = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 fnv = "1.0"
+chrono = { workspace = true }
+parquet = { version = "56", default-features = false, features = ["snap"] }
