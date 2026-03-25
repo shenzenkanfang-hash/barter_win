@@ -229,5 +229,8 @@ pub enum MyError {
 | Phase 3: Indicator | 完成 | EMA, RSI, PineColor, PricePosition |
 | Phase 4: Strategy | 完成 | Signal, TradingDecision |
 | Phase 5: Engine | 完成 | RiskPreChecker, OrderExecutor, ModeSwitcher |
-| Phase 6: Integration | 进行中 | TradingEngine, c层整理 |
-| v1.7 Architecture | 完成 | 归档旧文档，统一以代码为准 |
+| Phase 6: Integration | 完成 | TradingEngine, c层整理 |
+| Phase 8: StateManager Trait | 完成 | StateViewer + StateManager 定义 |
+| Phase 9: PositionManager | 完成 | LocalPositionManager impl StateManager |
+| Phase 10: UnifiedStateView | 完成 | SystemSnapshot 完整实现 |
+| V4.0 Architecture | 完成 | x_data 重构 + 终极验收通过 |
