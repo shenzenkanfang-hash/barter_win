@@ -6,11 +6,11 @@
 //!
 //! ```text
 //! historical_replay/
-//! ├── mod.rs           - 模块入口
-//! ├── kline_loader.rs   - Parquet K线加载器（流式）
-//! ├── tick_generator.rs - 仿真 Tick 生成器（流式）
-//! ├── noise.rs          - 高斯噪声模块
-//! ├── memory_injector.rs - 内存写入适配器
+//! ├── mod.rs              - 模块入口
+//! ├── kline_loader.rs     - Parquet K线加载器（流式）
+//! ├── tick_generator.rs   - 仿真 Tick 生成器（流式）
+//! ├── noise.rs            - 高斯噪声模块
+//! ├── memory_injector.rs  - 内存写入适配器
 //! └── replay_controller.rs - 流式控制器
 //! ```
 //!
@@ -30,5 +30,12 @@
 #![forbid(unsafe_code)]
 
 pub mod kline_loader;
+pub mod tick_generator;
+pub mod noise;
+pub mod memory_injector;
+pub mod replay_controller;
 
 pub use kline_loader::{KlineLoader, KlineLoadError, ParquetInfo};
+pub use tick_generator::{StreamTickGenerator, SimulatedTick};
+pub use memory_injector::{MemoryInjector, MemoryInjectorConfig, SharedMarketData};
+pub use replay_controller::{ReplayController, ReplayConfig, ReplayState, ReplayStats, ReplayError};

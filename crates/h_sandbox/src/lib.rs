@@ -17,4 +17,9 @@ pub use perf_test::{
     TickDriver as PerfTickDriver, EngineDriver, Reporter,
 };
 pub use backtest::{BacktestStrategy, BacktestTick, MaCrossStrategy, Signal};
-pub use historical_replay::{KlineLoader, KlineLoadError, ParquetInfo};
+pub use historical_replay::{
+    KlineLoader, KlineLoadError, ParquetInfo,
+    StreamTickGenerator, SimulatedTick,
+    MemoryInjector, MemoryInjectorConfig, SharedMarketData,
+    ReplayController, ReplayConfig, ReplayState, ReplayStats, ReplayError,
+};
