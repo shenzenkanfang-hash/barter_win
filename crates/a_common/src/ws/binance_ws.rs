@@ -309,12 +309,13 @@ impl BinanceCombinedStream {
         })
     }
 
-    /// 发送订阅消息
+    /// 发送订阅消息并等待服务器确认
     pub async fn subscribe(&mut self, streams: &[String]) -> Result<(), MarketError> {
+        let msg_id = chrono::Utc::now().timestamp_millis();
         let msg = serde_json::json!({
             "method": "SUBSCRIBE",
             "params": streams,
-            "id": chrono::Utc::now().timestamp_millis()
+            "id": msg_id
         });
 
         let text = serde_json::to_string(&msg)
@@ -324,10 +325,59 @@ impl BinanceCombinedStream {
             .await
             .map_err(|e| MarketError::WebSocketError(e.to_string()))?;
 
+        // 等待服务器确认响应
+        self.wait_for_subscription_response(msg_id).await?;
+
         self.subscribed = true;
-        tracing::info!("Subscribed to streams: {:?}", streams);
+        tracing::info!("已确认订阅 streams: {:?}", streams);
 
         Ok(())
+    }
+
+    /// 等待订阅响应并验证成功
+    async fn wait_for_subscription_response(&mut self, msg_id: i64) -> Result<(), MarketError> {
+        use futures_util::StreamExt;
+
+        let timeout = tokio::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+
+        while start.elapsed() < timeout {
+            if let Some(msg) = self.read.next().await {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        // 解析响应
+                        if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&text.to_string()) {
+                            if let Some(resp_id) = resp.get("id").and_then(|v| v.as_i64()) {
+                                if resp_id == msg_id {
+                                    // 检查是否有错误
+                                    if let Some(error) = resp.get("error") {
+                                        let code = error.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+                                        let msg = error.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
+                                        tracing::error!("订阅失败: code={}, msg={}", code, msg);
+                                        return Err(MarketError::WebSocketError(format!("订阅被拒绝: {}", msg)));
+                                    }
+                                    // 成功
+                                    tracing::debug!("订阅确认收到: id={}", msg_id);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                    Ok(Message::Ping(data)) => {
+                        let _ = self.write.send(Message::Pong(data)).await;
+                    }
+                    Ok(Message::Close(_)) => {
+                        return Err(MarketError::WebSocketError("连接在订阅确认前关闭".to_string()));
+                    }
+                    Err(e) => {
+                        return Err(MarketError::WebSocketError(e.to_string()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Err(MarketError::WebSocketError("订阅确认超时".to_string()))
     }
 
     /// 获取下一条原始消息

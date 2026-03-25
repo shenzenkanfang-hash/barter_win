@@ -23,7 +23,7 @@
 //!     TradingEngine
 //! ```
 //!
-//! 注意：检查逻辑上顺序执行（优先级固定），但实际在线程池并发执行以提高吞吐。
+//! 注意：检查函数为 CPU 密集型纯函数，顺序执行比并发更高效（避免线程调度开销）。
 //! 信号优先级：Exit > Close > Add > Open（由 Vec 中的顺序决定）。
 
 use crate::h_15m::check::{a_exit, b_close, d_add, e_open};

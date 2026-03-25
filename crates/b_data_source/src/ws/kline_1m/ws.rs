@@ -310,10 +310,21 @@ impl Kline1mStream {
                         kline.get("c").and_then(|v| v.as_str()),
                         kline.get("T").and_then(|v| v.as_i64()),
                     ) {
-                        // 将字符串转换为 Decimal，Binance 价格精度为 8 位小数
-                        let parse_price = |s: &str| -> rust_decimal::Decimal {
-                            s.parse::<rust_decimal::Decimal>().unwrap_or(rust_decimal::Decimal::ZERO)
+                        // 将字符串转换为 Decimal，解析失败时记录错误并通知风控
+                        let parse_price = |s: &str| -> Option<rust_decimal::Decimal> {
+                            s.parse::<rust_decimal::Decimal>()
+                                .map_err(|e| tracing::error!("价格解析失败: symbol={}, price={}, error={}", symbol, s, e))
+                                .ok()
                         };
+
+                        let (Some(open), Some(high), Some(low), Some(close)) =
+                            (parse_price(o), parse_price(h), parse_price(l), parse_price(c))
+                        else {
+                            // 解析失败，跳过此 tick，但通知风控
+                            tracing::error!("[BUG-005] K线价格解析失败，跳过 symbol={}", symbol);
+                            continue;
+                        };
+
                         let timestamp_ms = t;
                         let timestamp = match Utc.timestamp_millis_opt(timestamp_ms) {
                             chrono::LocalResult::Single(t) => t,
@@ -321,10 +332,10 @@ impl Kline1mStream {
                         };
 
                         let kline_input = KLineInput {
-                            open: parse_price(o),
-                            high: parse_price(h),
-                            low: parse_price(l),
-                            close: parse_price(c),
+                            open,
+                            high,
+                            low,
+                            close,
                             timestamp,
                         };
 

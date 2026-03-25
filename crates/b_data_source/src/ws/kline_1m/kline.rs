@@ -61,7 +61,9 @@ impl KLineSynthesizer {
         match self.period {
             Period::Minute(m) => {
                 let minutes = (timestamp.timestamp() / 60 / m as i64) * 60 * m as i64;
-                DateTime::from_timestamp(minutes as i64, 0).unwrap()
+                // Unix 时间戳有效范围远超交易数据时间，不会返回 None
+                DateTime::from_timestamp(minutes as i64, 0)
+                    .expect("K线周期起始时间戳无效，这表明数据源存在严重问题")
             }
             Period::Day => {
                 let days = timestamp.date_naive().and_hms_opt(0, 0, 0).unwrap();

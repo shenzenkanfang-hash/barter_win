@@ -539,18 +539,20 @@ impl MemoryBackup {
     // =========================================================================
 
     pub async fn save_depth(&self, symbol: &str, depth: &DepthData) -> Result<(), EngineError> {
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, DEPTH_DIR.trim_end_matches('/'), symbol);
+        let sanitized = Self::sanitize_symbol(symbol)?;
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, DEPTH_DIR.trim_end_matches('/'), sanitized);
         self.ensure_dir(&path).await?;
 
         let mut data = depth.clone();
-        self.trim_depth_entries(&mut data.bids, MAX_DEPTH_ENTRIES);
-        self.trim_depth_entries(&mut data.asks, MAX_DEPTH_ENTRIES);
+        self.trim_depth_entries(&mut data.bids, MAX_DEPTH_ENTRIES, true);
+        self.trim_depth_entries(&mut data.asks, MAX_DEPTH_ENTRIES, false);
 
         self.write_json(&path, &data).await
     }
 
     pub async fn load_depth(&self, symbol: &str) -> Result<Option<DepthData>, EngineError> {
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, DEPTH_DIR.trim_end_matches('/'), symbol);
+        let sanitized = Self::sanitize_symbol(symbol)?;
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, DEPTH_DIR.trim_end_matches('/'), sanitized);
         match self.load_json::<DepthData>(&path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) => self.handle_load_error(e),
@@ -651,14 +653,30 @@ impl MemoryBackup {
     // 规则
     // =========================================================================
 
+    /// 验证并清理交易对符号，防止路径遍历攻击
+    /// 只允许字母、数字和下划线
+    fn sanitize_symbol(symbol: &str) -> Result<String, EngineError> {
+        if symbol.is_empty() || symbol.len() > 20 {
+            return Err(EngineError::MemoryBackup(format!("无效的交易对符号: {}", symbol)));
+        }
+        // 只允许字母、数字和下划线
+        let sanitized = symbol.to_uppercase();
+        if !sanitized.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(EngineError::MemoryBackup(format!("交易对符号包含非法字符: {}", symbol)));
+        }
+        Ok(sanitized)
+    }
+
     pub async fn save_symbol_rules(&self, symbol: &str, rules: &SymbolRulesData) -> Result<(), EngineError> {
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, RULES_DIR.trim_end_matches('/'), symbol);
+        let sanitized = Self::sanitize_symbol(symbol)?;
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, RULES_DIR.trim_end_matches('/'), sanitized);
         self.ensure_dir(&path).await?;
         self.write_json(&path, rules).await
     }
 
     pub async fn load_symbol_rules(&self, symbol: &str) -> Result<Option<SymbolRulesData>, EngineError> {
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, RULES_DIR.trim_end_matches('/'), symbol);
+        let sanitized = Self::sanitize_symbol(symbol)?;
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, RULES_DIR.trim_end_matches('/'), sanitized);
         match self.load_json::<SymbolRulesData>(&path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) => self.handle_load_error(e),
@@ -670,8 +688,9 @@ impl MemoryBackup {
     // =========================================================================
 
     pub async fn save_kline(&self, symbol: &str, period: &str, data_type: &str, kline: &KlineData) -> Result<(), EngineError> {
+        let sanitized = Self::sanitize_symbol(symbol)?;
         let dir = self.get_kline_dir(period, data_type);
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), symbol);
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), sanitized);
         self.ensure_dir(&path).await?;
 
         let mut data = kline.clone();
@@ -681,8 +700,9 @@ impl MemoryBackup {
     }
 
     pub async fn load_kline(&self, symbol: &str, period: &str, data_type: &str) -> Result<Option<KlineData>, EngineError> {
+        let sanitized = Self::sanitize_symbol(symbol)?;
         let dir = self.get_kline_dir(period, data_type);
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), symbol);
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), sanitized);
         match self.load_json::<KlineData>(&path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) => self.handle_load_error(e),
@@ -704,15 +724,17 @@ impl MemoryBackup {
     // =========================================================================
 
     pub async fn save_indicators(&self, symbol: &str, period: &str, data_type: &str, indicators: &IndicatorsData) -> Result<(), EngineError> {
+        let sanitized = Self::sanitize_symbol(symbol)?;
         let dir = self.get_indicators_dir(period, data_type);
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), symbol);
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), sanitized);
         self.ensure_dir(&path).await?;
         self.write_json(&path, indicators).await
     }
 
     pub async fn load_indicators(&self, symbol: &str, period: &str, data_type: &str) -> Result<Option<IndicatorsData>, EngineError> {
+        let sanitized = Self::sanitize_symbol(symbol)?;
         let dir = self.get_indicators_dir(period, data_type);
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), symbol);
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), sanitized);
         match self.load_json::<IndicatorsData>(&path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) => self.handle_load_error(e),
@@ -770,23 +792,25 @@ impl MemoryBackup {
     // =========================================================================
 
     pub async fn save_mutex_status(&self, strategy_level: &str, symbol: &str, status: &SymbolMutexStatus) -> Result<(), EngineError> {
+        let sanitized = Self::sanitize_symbol(symbol)?;
         let dir = match strategy_level {
             "minute" => MUTEX_MINUTE_DIR,
             "hour" => MUTEX_HOUR_DIR,
             _ => return Err(EngineError::MemoryBackup(format!("未知策略级别: {}", strategy_level))),
         };
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), symbol);
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), sanitized);
         self.ensure_dir(&path).await?;
         self.write_json(&path, status).await
     }
 
     pub async fn load_mutex_status(&self, strategy_level: &str, symbol: &str) -> Result<Option<SymbolMutexStatus>, EngineError> {
+        let sanitized = Self::sanitize_symbol(symbol)?;
         let dir = match strategy_level {
             "minute" => MUTEX_MINUTE_DIR,
             "hour" => MUTEX_HOUR_DIR,
             _ => return Err(EngineError::MemoryBackup(format!("未知策略级别: {}", strategy_level))),
         };
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), symbol);
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), sanitized);
         match self.load_json::<SymbolMutexStatus>(&path).await {
             Ok(data) => Ok(Some(data)),
             Err(e) => self.handle_load_error(e),
@@ -794,12 +818,13 @@ impl MemoryBackup {
     }
 
     pub async fn remove_mutex_status(&self, strategy_level: &str, symbol: &str) -> Result<(), EngineError> {
+        let sanitized = Self::sanitize_symbol(symbol)?;
         let dir = match strategy_level {
             "minute" => MUTEX_MINUTE_DIR,
             "hour" => MUTEX_HOUR_DIR,
             _ => return Err(EngineError::MemoryBackup(format!("未知策略级别: {}", strategy_level))),
         };
-        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), symbol);
+        let path = format!("{}/{}/{}.json", self.tmpfs_dir, dir.trim_end_matches('/'), sanitized);
 
         if Path::new(&path).exists() {
             fs::remove_file(&path).await.map_err(|e| {
@@ -829,11 +854,20 @@ impl MemoryBackup {
         }
     }
 
-    fn trim_depth_entries(&self, v: &mut Vec<DepthEntry>, max: usize) {
+    /// 修剪并排序深度条目
+    /// - bids: 买盘，按价格升序排列（最低价在前）
+    /// - asks: 卖盘，按价格降序排列（最高价在前）
+    fn trim_depth_entries(&self, v: &mut Vec<DepthEntry>, max: usize, is_bids: bool) {
         while v.len() > max {
             v.remove(0);
         }
-        v.sort_by(|a, b| b.price.cmp(&a.price));
+        if is_bids {
+            // 买盘：升序（价格从低到高）
+            v.sort_by(|a, b| a.price.cmp(&b.price));
+        } else {
+            // 卖盘：降序（价格从高到低）
+            v.sort_by(|a, b| b.price.cmp(&a.price));
+        }
     }
 
     async fn load_json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T, EngineError> {

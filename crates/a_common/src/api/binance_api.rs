@@ -26,6 +26,14 @@ use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 use tracing::{info, error};
 
+/// 创建带超时配置的 HTTP 客户端
+fn new_http_client() -> Client {
+    Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("创建 HTTP 客户端失败")
+}
+
 /// API 限速器 - 区分 REQUEST_WEIGHT 和 ORDERS 两个体系
 ///
 /// 限制值通过 set_limits() 设置一次（从 exchangeInfo 解析）
@@ -75,11 +83,11 @@ impl RateLimiter {
             match (limit.rate_limit_type.as_str(), limit.interval.as_str()) {
                 ("REQUEST_WEIGHT", "MINUTE") => {
                     *self.request_weight_limit.lock() = limit.limit as u32;
-                    println!("[RateLimiter] 设置 REQUEST_WEIGHT 限制: {}", limit.limit);
+                    tracing::info!("[RateLimiter] 设置 REQUEST_WEIGHT 限制: {}", limit.limit);
                 }
                 ("ORDERS", "MINUTE") => {
                     *self.orders_limit.lock() = limit.limit as u32;
-                    println!("[RateLimiter] 设置 ORDERS 限制: {}", limit.limit);
+                    tracing::info!("[RateLimiter] 设置 ORDERS 限制: {}", limit.limit);
                 }
                 _ => {}
             }
@@ -112,7 +120,7 @@ impl RateLimiter {
         *self.limits_set.lock() = true;
         // 注意：used_weight/used_orders 和 window_start 需要根据当前时间重新计算
         // 如果距离上次保存已经超过 60 秒，窗口会重置
-        println!("[RateLimiter] 从快照恢复限制: REQUEST_WEIGHT={}, ORDERS={}",
+        tracing::info!("[RateLimiter] 从快照恢复限制: REQUEST_WEIGHT={}, ORDERS={}",
             config.request_weight_limit, config.orders_limit);
     }
 
@@ -125,11 +133,12 @@ impl RateLimiter {
         // 更新 REQUEST_WEIGHT（只接受 > 0 的值）
         if let Some(weight_str) = headers.get("x-mbx-used-weight-1m") {
             if let Ok(weight_str) = weight_str.to_str() {
-                if let Ok(weight) = weight_str.parse::<f64>() {
-                    if weight > 0.0 {
+                // 直接解析为 u32，避免 f64 精度损失
+                if let Ok(weight) = weight_str.parse::<u32>() {
+                    if weight > 0 {
                         let mut used_weight = self.used_weight.lock();
-                        *used_weight = weight as u32;
-                        println!("[RateLimiter] 已用 REQUEST_WEIGHT: {} / {}", *used_weight, *self.request_weight_limit.lock());
+                        *used_weight = weight;
+                        tracing::info!("[RateLimiter] 已用 REQUEST_WEIGHT: {} / {}", *used_weight, *self.request_weight_limit.lock());
                     }
                 }
             }
@@ -138,11 +147,12 @@ impl RateLimiter {
         // 更新 ORDERS 计数（只接受 > 0 的值）
         if let Some(orders_str) = headers.get("x-mbx-order-count-1m") {
             if let Ok(orders_str) = orders_str.to_str() {
-                if let Ok(orders) = orders_str.parse::<f64>() {
-                    if orders > 0.0 {
+                // 直接解析为 u32，避免 f64 精度损失
+                if let Ok(orders) = orders_str.parse::<u32>() {
+                    if orders > 0 {
                         let mut used_orders = self.used_orders.lock();
-                        *used_orders = orders as u32;
-                        println!("[RateLimiter] 已用 ORDERS: {} / {}", *used_orders, *self.orders_limit.lock());
+                        *used_orders = orders;
+                        tracing::info!("[RateLimiter] 已用 ORDERS: {} / {}", *used_orders, *self.orders_limit.lock());
                     }
                 }
             }
@@ -239,7 +249,7 @@ impl BinanceApiGateway {
     /// 创建新的网关（现货 API）
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: new_http_client(),
             market_api_base: "https://api.binance.com".to_string(),
             account_api_base: "https://api.binance.com".to_string(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
@@ -250,7 +260,7 @@ impl BinanceApiGateway {
     /// 创建 USDT 合约 API 网关（实盘价格 + 实盘账户）
     pub fn new_futures() -> Self {
         Self {
-            client: Client::new(),
+            client: new_http_client(),
             market_api_base: "https://fapi.binance.com".to_string(),
             account_api_base: "https://fapi.binance.com".to_string(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
@@ -263,7 +273,7 @@ impl BinanceApiGateway {
     /// 用于：实盘行情 + 模拟交易
     pub fn new_futures_with_testnet() -> Self {
         Self {
-            client: Client::new(),
+            client: new_http_client(),
             market_api_base: "https://fapi.binance.com".to_string(),      // 实盘行情
             account_api_base: "https://testnet.binancefuture.com".to_string(), // 测试网账户
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
@@ -274,7 +284,7 @@ impl BinanceApiGateway {
     /// 创建带自定义 API 地址的网关（用于测试）
     pub fn with_api_base(api_base: &str) -> Self {
         Self {
-            client: Client::new(),
+            client: new_http_client(),
             market_api_base: api_base.to_string(),
             account_api_base: api_base.to_string(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())),

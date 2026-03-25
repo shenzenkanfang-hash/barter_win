@@ -195,16 +195,18 @@ impl MockBinanceGateway {
     pub fn update_pnl(&self, symbol: &str, current_price: Decimal) {
         let mut positions = self.positions.write();
         if let Some(pos) = positions.get_mut(symbol) {
-            // 多头盈亏
-            if pos.long_qty > Decimal::ZERO {
-                let long_pnl = (current_price - pos.long_avg_price) * pos.long_qty;
-                pos.unrealized_pnl = long_pnl;
-            }
-            // 空头盈亏
-            if pos.short_qty > Decimal::ZERO {
-                let short_pnl = (pos.short_avg_price - current_price) * pos.short_qty;
-                pos.unrealized_pnl += short_pnl;
-            }
+            // 分别计算多头和空头盈亏，最后累加
+            let long_pnl = if pos.long_qty > Decimal::ZERO {
+                (current_price - pos.long_avg_price) * pos.long_qty
+            } else {
+                Decimal::ZERO
+            };
+            let short_pnl = if pos.short_qty > Decimal::ZERO {
+                (pos.short_avg_price - current_price) * pos.short_qty
+            } else {
+                Decimal::ZERO
+            };
+            pos.unrealized_pnl = long_pnl + short_pnl;
         }
     }
 
