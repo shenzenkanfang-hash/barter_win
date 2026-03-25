@@ -9,7 +9,6 @@ use std::thread::sleep;
 use tracing::{info, warn, error};
 
 use b_data_source::KLine;
-use super::kline_loader::KlineLoader;
 use super::tick_generator::StreamTickGenerator;
 use super::memory_injector::{MemoryInjector, SharedMarketData, MemoryInjectorConfig};
 use super::tick_generator::SimulatedTick;
@@ -171,25 +170,19 @@ impl ReplayController {
         &self.stats
     }
 
-    /// 启动回放（同步版本）
-    pub fn run(&mut self, parquet_path: &str, symbol: &str) -> Result<(), ReplayError> {
-        info!("启动回放: path={}, symbol={}, speed={}x",
-            parquet_path, symbol, self.config.playback_speed);
+    /// 启动回放（使用已有 K线迭代器）
+    ///
+    /// K线由调用方加载（如 ApiKlineFetcher），这里只负责回放控制。
+    pub fn run_with_klines(
+        &mut self,
+        klines: Vec<KLine>,
+        symbol: &str,
+    ) -> Result<(), ReplayError> {
+        info!("启动回放: klines={}, symbol={}, speed={}x",
+            klines.len(), symbol, self.config.playback_speed);
 
-        // 加载 Parquet
-        let loader = KlineLoader::new(parquet_path)
-            .map_err(|e| ReplayError::LoadError(e.to_string()))?
-            .with_symbol(symbol);
-
-        let total_rows = loader.total_rows();
-        info!("加载 Parquet: {} rows", total_rows);
-
-        // 创建 Tick 生成器（过滤掉加载错误）
-        let kline_iter = loader.filter_map(|r| r.map_err(|e| {
-            tracing::warn!("加载 K线失败: {}", e);
-            e
-        }).ok());
-        let generator = StreamTickGenerator::from_loader(symbol.to_string(), kline_iter);
+        // 创建 Tick 生成器
+        let generator = StreamTickGenerator::from_loader(symbol.to_string(), klines.into_iter());
 
         // 开始回放
         self.state = ReplayState::Running;

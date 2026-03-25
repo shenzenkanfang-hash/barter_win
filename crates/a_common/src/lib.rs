@@ -25,6 +25,7 @@ pub use api::{BinanceApiGateway, RateLimiter, SymbolRulesFetcher, SymbolRulesDat
 pub use api::{BinanceExchangeInfo, BinanceSymbol, PositionRisk, LeverageBracket};
 pub use api::{BinanceAccountInfo, BinancePositionRisk, BinanceLeverageBracket};
 pub use api::{FuturesAccountResponse, FuturesAsset, FuturesPositionResponse};
+pub use api::{ApiKlineFetcher, KlineFetcherConfig, KlineInterval, ApiKline};
 
 // Re-exports - Config
 pub use config::{Platform, Paths, VolatilityConfig, VOLATILITY_CONFIG};

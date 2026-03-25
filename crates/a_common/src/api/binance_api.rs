@@ -247,6 +247,7 @@ impl RateLimiter {
 }
 
 /// 币安 API 网关
+#[derive(Debug, Clone)]
 pub struct BinanceApiGateway {
     client: Client,
     /// 价格/市场数据 API（实盘）
@@ -1029,6 +1030,57 @@ impl BinanceApiGateway {
         let taker_fee = Decimal::from_str(&rate.taker_commission_rate).unwrap_or(dec!(0.0004));
 
         Ok((maker_fee, taker_fee))
+    }
+
+    /// 从币安 API 获取历史 K线
+    ///
+    /// # 参数
+    /// * `symbol` - 交易对，如 "BTCUSDT"
+    /// * `interval` - K线周期，如 "1m", "5m", "15m", "1h", "1d"
+    /// * `start_time` - 起始时间（毫秒）
+    /// * `end_time` - 结束时间（毫秒）
+    /// * `limit` - 数量（最大 1000）
+    ///
+    /// # 返回
+    /// * `Vec<Vec<serde_json::Value>>` - 原始 K线数组
+    pub async fn fetch_klines(
+        &self,
+        symbol: &str,
+        interval: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: u16,
+    ) -> Result<Vec<Vec<serde_json::Value>>, EngineError> {
+        self.rate_limiter.lock().acquire().await;
+
+        let url = format!("{}/api/v3/klines", self.market_api_base);
+        let mut req = self.client.get(&url);
+
+        req = req.query(&[
+            ("symbol", symbol),
+            ("interval", interval),
+            ("limit", &limit.to_string()),
+        ]);
+
+        if let Some(start) = start_time {
+            req = req.query(&[("startTime", &start.to_string())]);
+        }
+        if let Some(end) = end_time {
+            req = req.query(&[("endTime", &end.to_string())]);
+        }
+
+        let resp = req.send().await
+            .map_err(|e| EngineError::Other(format!("HTTP 请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(EngineError::Other(format!(
+                "K线 API 返回错误: {}",
+                resp.status()
+            )));
+        }
+
+        resp.json().await
+            .map_err(|e| EngineError::Other(format!("解析 K线失败: {}", e)))
     }
 }
 

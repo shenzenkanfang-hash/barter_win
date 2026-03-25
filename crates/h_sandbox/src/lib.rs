@@ -18,8 +18,8 @@ pub use perf_test::{
 };
 pub use backtest::{BacktestStrategy, BacktestTick, MaCrossStrategy, Signal};
 pub use historical_replay::{
-    KlineLoader, KlineLoadError, ParquetInfo,
     StreamTickGenerator,
     MemoryInjector, MemoryInjectorConfig, SharedMarketData,
     ReplayController, ReplayConfig, ReplayState, ReplayStats, ReplayError,
+    TickToWsConverter,
 };
