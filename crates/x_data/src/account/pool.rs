@@ -6,6 +6,8 @@ use rust_decimal::Decimal;
 use std::sync::Arc;
 use parking_lot::RwLock;
 
+use crate::account::types::FundPool;
+
 /// 资金池管理器
 pub struct FundPoolManager {
     /// 分钟级资金池
