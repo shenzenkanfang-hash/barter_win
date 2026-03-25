@@ -36,7 +36,7 @@ pub use logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLog
 pub use models::*;
 
 // Re-exports - Claint (errors)
-pub use claint::{EngineError, MarketError};
+pub use claint::{EngineError, MarketError, AppError};
 
 // Re-exports - Util
 pub use util::{TelegramConfig, TelegramNotifier};
