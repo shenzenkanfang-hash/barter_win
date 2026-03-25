@@ -6,7 +6,6 @@
 //!
 //! ```text
 //! historical_replay/
-//! ├── kline_loader.rs     - CSV K线加载器（已废弃，使用 ApiKlineFetcher）
 //! ├── tick_generator.rs   - 仿真 Tick 生成器（流式）
 //! ├── noise.rs            - 高斯噪声模块
 //! ├── memory_injector.rs  - 内存写入适配器

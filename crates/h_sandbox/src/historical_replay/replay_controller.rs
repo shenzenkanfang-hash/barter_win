@@ -102,7 +102,7 @@ impl ReplayStats {
 
 /// 流式回放控制器
 ///
-/// 协调 KlineLoader → StreamTickGenerator → MemoryInjector → Engine 的流程。
+/// 协调 StreamTickGenerator → MemoryInjector → Engine 的流程。
 pub struct ReplayController {
     /// 配置
     config: ReplayConfig,

@@ -107,7 +107,7 @@ impl StreamTickGenerator {
         }
     }
 
-    /// 创建生成器（从 KlineLoader）
+    /// 创建生成器（从任意 K线迭代器）
     pub fn from_loader(
         symbol: String,
         loader: impl Iterator<Item = KLine> + Send + 'static,
