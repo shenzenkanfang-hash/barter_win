@@ -1,10 +1,10 @@
 ================================================================
-CONCERNS.md - Technical Debt, Issues, and Fragile Areas
+技术债务、问题与脆弱区域 - Barter-rs 量化交易系统
 ================================================================
-Project: barter-rs 量化交易系统
-Author: Code Analysis
-Date: 2026-03-25
-Status: Partially Fixed (2026-03-25)
+项目: barter-rs 量化交易系统
+作者: Code Analysis
+日期: 2026-03-25
+状态: 部分已修复 (2026-03-25)
 ================================================================
 
 目录
@@ -23,11 +23,11 @@ Status: Partially Fixed (2026-03-25)
 
 【高优先级】
 - ✅ 资金计算精度问题：mock_binance_gateway.rs 中浮点运算可能导致资金不一致
-- ⏳ Check 链性能：每次 check 都创建新的 MinSignalGenerator 实例 (误报，零大小类型)
+- ⏳ 检查链性能：每次 check 都创建新的 MinSignalGenerator 实例（误报，零大小类型）
 - ✅ RateLimiter 日志使用 println! 而非 tracing
 
 【中优先级】
-- ⏳ 重复数据结构：SymbolRulesData 在多个模块中定义 (建议后续重构)
+- ⏳ 重复数据结构：SymbolRulesData 在多个模块中定义（建议后续重构）
 - ✅ 错误吞没：多处使用 unwrap_or 默认值隐藏解析错误
 - ✅ WebSocket 重连后订阅状态可能丢失
 
@@ -39,18 +39,15 @@ Status: Partially Fixed (2026-03-25)
 2. 技术债务
 ================================================================
 
-【TD-001】重复的 SymbolRulesData 定义 ✅ 已修复
+【TD-001】重复的 SymbolRulesData 定义
+状态: ⏳ 待修复
 位置:
-  - crates/a_common/src/api/binance_api.rs (第1253-1274行) - 保留为主定义
-  - crates/a_common/src/backup/memory_backup.rs (原第296-312行) - 已删除
+  - crates/a_common/src/api/binance_api.rs (第1238-1268行)
+  - crates/a_common/src/backup/memory_backup.rs (第296-312行)
 
-修复:
-  - 删除 memory_backup.rs 中的重复定义
-  - 添加 `use crate::api::SymbolRulesData;` 导入
-  - 通过 backup/mod.rs 重新导出 SymbolRulesData
-  - 保留 api 模块中的 canonical 定义（包含 max_leverage 字段）
-
-修复日期: 2026-03-25
+问题: 两个结构体几乎完全相同，违反 DRY 原则
+影响: 维护成本增加，类型不一致风险
+建议: 统一使用一个定义，通过 re-export 共享
 
 【TD-002】重复的持仓数据结构
 状态: ⏳ 待修复
@@ -77,9 +74,7 @@ Status: Partially Fixed (2026-03-25)
 状态: ✅ 误报（非问题）
 位置: crates/d_checktable/src/h_15m/check/a_exit.rs (第33-39行)
 
-说明: MinSignalGenerator 是零大小类型（unit struct），MinMarketStatusGenerator 只有
-一个常量字段。创建这些实例没有内存浪费，因为它们是栈上分配的零大小类型。
-无状态需要保留，因此缓存不会带来性能提升。
+说明: MinSignalGenerator 是零大小类型（unit struct），MinMarketStatusGenerator 只有一个常量字段。创建这些实例没有内存浪费，因为它们是栈上分配的零大小类型。无状态需要保留，因此缓存不会带来性能提升。
 
 ================================================================
 3. Bug 风险
@@ -228,7 +223,7 @@ Status: Partially Fixed (2026-03-25)
 【ARCH-001】模块边界模糊
 状态: ⏳ 待规划
 问题: b_data_source 依赖 a_common，但 a_common 的某些模块
-     (如 config/Paths) 也被业务逻辑直接使用
+     （如 config/Paths）也被业务逻辑直接使用
 
 建议: 明确分层，a_common 只做基础设施
 
@@ -269,7 +264,7 @@ Status: Partially Fixed (2026-03-25)
 修复摘要 (2026-03-25)
 ================================================================
 
-已修复: 11 项
+已修复: 9 项
   ✅ BUG-001: unrealized_pnl 计算
   ✅ BUG-002: 订单簿深度排序
   ✅ BUG-003: K线时间戳 unwrap
@@ -280,10 +275,10 @@ Status: Partially Fixed (2026-03-25)
   ✅ SEC-002: HTTP 超时
   ✅ SEC-003: 路径遍历
   ✅ PERF-004: 注释修正（非代码问题）
-  ✅ TD-001: SymbolRulesData 重复定义
 
-待修复: 10 项
-  TD-002 (需重构)
+待修复: 12 项
+  TD-001, TD-002 (需重构)
+  SEC-001 (敏感信息)
   PERF-001, PERF-002, PERF-003 (性能优化)
   FRAG-001, FRAG-002, FRAG-003, FRAG-004 (脆弱区域改进)
   ARCH-001, ARCH-002, ARCH-003 (架构重构)

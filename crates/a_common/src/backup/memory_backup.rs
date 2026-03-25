@@ -5,6 +5,7 @@
 //! 将实时交易数据保存到高速内存盘 (E:/shm/backup)，定期同步到磁盘。
 //! 用于快速读写高频交易数据，同时保证数据持久性。
 
+use crate::api::SymbolRulesData;
 use crate::config::Paths;
 use crate::EngineError;
 use rust_decimal::Decimal;
@@ -290,25 +291,6 @@ pub struct TradingPairInfo {
     pub status: String,
     pub base_asset: String,
     pub quote_asset: String,
-}
-
-/// 交易规则数据
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SymbolRulesData {
-    pub symbol: String,
-    pub price_precision: i32,
-    pub quantity_precision: i32,
-    pub tick_size: Decimal,
-    pub min_qty: Decimal,
-    pub step_size: Decimal,
-    pub min_notional: Decimal,
-    pub max_notional: Decimal,
-    pub leverage: i32,
-    pub maker_fee: Decimal,
-    pub taker_fee: Decimal,
-    pub liquidation_fee: Decimal,
-    #[serde(default)]
-    pub filters: serde_json::Value,
 }
 
 /// 策略互斥状态

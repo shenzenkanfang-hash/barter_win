@@ -322,7 +322,7 @@ impl Kline1mStream {
                         else {
                             // 解析失败，跳过此 tick，但通知风控
                             tracing::error!("[BUG-005] K线价格解析失败，跳过 symbol={}", symbol);
-                            continue;
+                            return Some(text);
                         };
 
                         let timestamp_ms = t;
