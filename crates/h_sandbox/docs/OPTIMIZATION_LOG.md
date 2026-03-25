@@ -111,6 +111,36 @@ let account = self.gateway.get_account();   // 从 gateway 获取状态
 
 ---
 
+## 6. 并发订单生命周期问题修复
+
+**缺陷ID**: BUG-004  
+**等级**: P2 一般  
+**问题位置**: `crates/h_sandbox/examples/stress_order_batch.rs`  
+**问题描述**: 闭包捕获变量生命周期不兼容，tokio::spawn 要求 'static 生命周期  
+**修复状态**: ✅ 已修复  
+**影响范围**: 压力测试示例  
+
+**修复方案**:
+```rust
+// 修复前：iterator.map + 闭包
+let handles: Vec<_> = requests.iter().map(|req| {
+    tokio::spawn(async move {
+        gw.place_order(req.clone())  // 生命周期错误
+    })
+}).collect();
+
+// 修复后：for 循环
+let mut handles = Vec::new();
+for i in 0..order_count {
+    let gw = gateway.clone();
+    handles.push(tokio::spawn(async move {
+        gw.place_order(req)
+    }));
+}
+```
+
+---
+
 ## 累计统计
 
 | 指标 | 数量 |
@@ -119,7 +149,7 @@ let account = self.gateway.get_account();   // 从 gateway 获取状态
 | 修复缺陷总数 | 3 |
 | P0 阻塞 | 0 |
 | P1 严重 | 2 |
-| P2 一般 | 1 |
+| P2 一般 | 2 |
 
 ---
 
