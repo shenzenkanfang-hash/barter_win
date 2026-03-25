@@ -143,65 +143,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect();
     } else {
         // 尝试从本地缓存分片读取
-        match cache.find_shards(&args.symbol, "1m", start_ms, end_ms) {
-            Ok(shards) if !shards.is_empty() && cache.shards_cover_range(&shards, start_ms, end_ms) => {
-                // 本地缓存完整，直接使用
-                info!("使用本地缓存: {} 个分片", shards.len());
+        let shards = cache.find_shards(&args.symbol, "1m", start_ms, end_ms);
+        if !shards.is_empty() && ShardCache::shards_cover_range(&shards, start_ms, end_ms) {
+            // 本地缓存完整，直接使用
+            info!("使用本地缓存: {} 个分片", shards.len());
 
-                let readers: Result<Vec<_>, _> = shards.iter()
-                    .map(|s| ShardReader::new(&s.path))
-                    .collect();
-                let chain = ShardReaderChain::new(readers?);
+            let readers: Result<Vec<_>, _> = shards.iter()
+                .map(|s| ShardReader::new(&s.path))
+                .collect();
+            let chain = ShardReaderChain::new(readers?);
 
-                // 将 ShardReaderChain 转换为内部 KLine
-                internal_klines = chain.filter_map(|r| r.ok()).collect();
-                info!("从缓存读取 K线: {} 条", internal_klines.len());
+            // 将 ShardReaderChain 转换为内部 KLine
+            internal_klines = chain.filter_map(|r| r.ok()).collect();
+            info!("从缓存读取 K线: {} 条", internal_klines.len());
+        } else {
+            // 本地缓存未命中或不全，拉取 API 并写入缓存
+            info!("本地缓存未命中，拉取 API...");
+
+            let api = BinanceApiGateway::new_futures();
+            let mut config = KlineFetcherConfig::new(api, &args.symbol, KlineInterval::Minute1);
+            config.start_time = Some(start_ms);
+            config.end_time = Some(end_ms);
+            config.limit = args.limit;
+
+            let fetcher = ApiKlineFetcher::new(config);
+
+            let klines = fetcher.fetch_all().await
+                .map_err(|e| format!("拉取 K线失败: {}", e))?;
+
+            if klines.is_empty() {
+                error!("未获取到 K线数据");
+                return Ok(());
             }
-            _ => {
-                // 本地缓存未命中或不全，拉取 API 并写入缓存
-                info!("本地缓存未命中，拉取 API...");
 
-                let api = BinanceApiGateway::new_futures();
-                let mut config = KlineFetcherConfig::new(api, &args.symbol, KlineInterval::Minute1);
-                config.start_time = Some(start_ms);
-                config.end_time = Some(end_ms);
-                config.limit = args.limit;
+            info!("获取 K线: {} 条", klines.len());
 
-                let fetcher = ApiKlineFetcher::new(config);
-
-                let klines = fetcher.fetch_all().await
-                    .map_err(|e| format!("拉取 K线失败: {}", e))?;
-
-                if klines.is_empty() {
-                    error!("未获取到 K线数据");
-                    return Ok(());
-                }
-
-                info!("获取 K线: {} 条", klines.len());
-
-                // 转换为内部 KLine
-                internal_klines = klines
-                    .into_iter()
-                    .map(|k| {
-                        b_data_source::KLine {
-                            symbol: args.symbol.clone(),
-                            period: b_data_source::Period::Minute(1),
-                            open: k.open,
-                            high: k.high,
-                            low: k.low,
-                            close: k.close,
-                            volume: k.volume,
-                            timestamp: k.open_time,
-                        }
-                    })
-                    .collect();
-
-                // 写入缓存
-                if !internal_klines.is_empty() {
-                    match cache.write_shard(&args.symbol, "1m", &internal_klines) {
-                        Ok(shard) => info!("缓存已写入: {:?}", shard.path),
-                        Err(e) => info!("缓存写入失败（不影响回放）: {}", e),
+            // 转换为内部 KLine
+            internal_klines = klines
+                .into_iter()
+                .map(|k| {
+                    b_data_source::KLine {
+                        symbol: args.symbol.clone(),
+                        period: b_data_source::Period::Minute(1),
+                        open: k.open,
+                        high: k.high,
+                        low: k.low,
+                        close: k.close,
+                        volume: k.volume,
+                        timestamp: k.open_time,
                     }
+                })
+                .collect();
+
+            // 写入缓存
+            if !internal_klines.is_empty() {
+                let first_ts = internal_klines.first()
+                    .map(|k| k.timestamp.timestamp_millis())
+                    .unwrap_or(start_ms);
+                let mut writer = cache.write_shard(&args.symbol, "1m", first_ts);
+                for kline in &internal_klines {
+                    if let Err(e) = writer.write(kline) {
+                        info!("缓存写入失败（不影响回放）: {}", e);
+                        break;
+                    }
+                }
+                if let Ok(shard) = writer.finish() {
+                    info!("缓存已写入: {:?}", shard.path);
                 }
             }
         }
