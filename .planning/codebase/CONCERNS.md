@@ -323,9 +323,11 @@ Status: ✅ Fixed (2026-03-25) - x_data架构重构完成
 
 待修复: 0 项（架构类问题已全部解决）
 
-可选优化项 (Phase 9-10):
-  🔧 AccountPool 实现 StateManager trait
-  🔧 统一状态视图 UnifiedStateView 实际使用
+✅ ARCH-002 全量实现完成:
+  - LocalPositionManager 实现 StateViewer + StateManager ✅
+  - AccountPool 实现 StateViewer + StateManager ✅
+  - e_risk_monitor 导出 UnifiedStateView ✅
+  - 统一状态视图可投入使用 ✅
 
 已修复: 18 项
   ... (保持原有列表)

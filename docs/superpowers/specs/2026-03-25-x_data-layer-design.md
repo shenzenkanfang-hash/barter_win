@@ -307,8 +307,8 @@ pub use x_data::account::AccountSnapshot;
 | Phase 6 | 实现 state/traits.rs | 中 | StateManager trait | ✅ 完成 |
 | Phase 7 | 更新 a_common 导出（re-export过渡） | 高 | ✅ 使用 XData 前缀 re-export x_data 类型 | ✅ 完成 |
 | Phase 8 | 为 LocalPositionManager 实现 StateManager | 高 | ✅ impl StateManager for LocalPositionManager | ✅ 完成 |
-| Phase 9 | 为 AccountPool 实现 StateManager | 中 | impl StateManager for AccountPool | 🔧 可选 |
-| Phase 10 | 统一状态视图使用 | 中 | UnifiedStateView 使用 | 🔧 可选 |
+| Phase 9 | 为 AccountPool 实现 StateManager | 中 | ✅ impl StateManager for AccountPool | ✅ 完成 |
+| Phase 10 | 统一状态视图使用 | 中 | ✅ e_risk_monitor 导出 UnifiedStateView | ✅ 完成 |
 | Phase 11 | 编译验证 + 修复 | - | 全部通过 | ✅ 完成 |
 
 **注**: Phase 7 因 a_common ↔ x_data 循环依赖暂缓。需要先消除 x_data 对 a_common 的依赖，或将 x_data 迁至独立层级。
