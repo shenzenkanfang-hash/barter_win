@@ -5,16 +5,16 @@
 //!
 //!   run_check_chain(symbol, input)
 //!           |
-//!     +-----+-----+-----+-----+
-//!     |     |     |     |     |
-//!     v     v     v     v     v
-//!   a_exit b_close d_add e_open
-//!     |     |      |     |
-//!     v     v      v     v
-//!   Exit  [始终]  Add   Open
-//!   (最高) false (最低)
-//!     |           |
-//!     +-----+-----+
+//!     +-----+-----+-----+-----+-----+
+//!     |     |     |     |     |     |
+//!     v     v     v     v     v     v
+//!   a_exit b_close c_hedge d_add e_open
+//!     |     |      |      |     |
+//!     v     v      v      v     v
+//!   Exit  Close  Hedge  Add   Open
+//!   (最高)                (最低)
+//!     |           |        |
+//!     +-----+-----+--------+
 //!           |
 //!           v
 //!     TriggerEvent
@@ -24,9 +24,9 @@
 //! ```
 //!
 //! 注意：检查函数为 CPU 密集型纯函数，顺序执行比并发更高效（避免线程调度开销）。
-//! 信号优先级：Exit > Close > Add > Open（由 Vec 中的顺序决定）。
+//! 信号优先级：Exit > Close > Hedge > Add > Open（由 Vec 中的顺序决定）。
 
-use crate::h_15m::check::{a_exit, b_close, d_add, e_open};
+use crate::h_15m::check::{a_exit, b_close, c_hedge, d_add, e_open};
 use crate::types::MinSignalInput;
 
 /// 检查信号枚举
@@ -34,6 +34,7 @@ use crate::types::MinSignalInput;
 pub enum CheckSignal {
     Exit,   // 退出信号
     Close,  // 关仓信号
+    Hedge,  // 对冲信号
     Add,    // 加仓信号
     Open,   // 开仓信号
 }
@@ -83,6 +84,7 @@ pub fn run_check_chain(symbol: &str, input: &MinSignalInput) -> Option<TriggerEv
     // 各检查函数接收 MinSignalInput
     let exit_result = a_exit::check(input);
     let close_result = b_close::check(input);
+    let hedge_result = c_hedge::check(input);
     let add_result = d_add::check(input);
     let open_result = e_open::check(input);
 
@@ -90,6 +92,7 @@ pub fn run_check_chain(symbol: &str, input: &MinSignalInput) -> Option<TriggerEv
     let mut signals = Vec::new();
     if exit_result { signals.push(CheckSignal::Exit); }
     if close_result { signals.push(CheckSignal::Close); }
+    if hedge_result { signals.push(CheckSignal::Hedge); }
     if add_result { signals.push(CheckSignal::Add); }
     if open_result { signals.push(CheckSignal::Open); }
 
