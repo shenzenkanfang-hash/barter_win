@@ -3,6 +3,13 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
+use x_data::state::{StateViewer, StateManager};
+use x_data::position::snapshot::{UnifiedPositionSnapshot, PositionSnapshot};
+use x_data::position::snapshot::RecoveryPriority;
+use x_data::account::types::AccountSnapshot;
+use x_data::trading::order::OrderRecord;
+use x_data::error::XDataError;
+
 /// 持仓方向
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
@@ -337,5 +344,65 @@ mod tests {
 
         let pnl = mgr.unrealized_pnl(dec!(49000));
         assert_eq!(pnl, dec!(1000)); // (50000 - 49000) * 1
+    }
+}
+
+// ============================================================================
+// StateViewer + StateManager 实现 (x_data trait)
+// ============================================================================
+
+impl StateViewer for LocalPositionManager {
+    fn get_positions(&self) -> Vec<UnifiedPositionSnapshot> {
+        let pos = self.position.read();
+        let (long_qty, long_avg, short_qty, short_avg) = match pos.direction {
+            Direction::Long => (pos.qty, pos.avg_price, Decimal::ZERO, Decimal::ZERO),
+            Direction::Short => (Decimal::ZERO, Decimal::ZERO, pos.qty, pos.avg_price),
+        };
+        // LocalPositionManager 不存储 symbol，返回 "UNKNOWN" 作为占位符
+        vec![UnifiedPositionSnapshot::new(
+            "UNKNOWN".to_string(),
+            long_qty,
+            long_avg,
+            short_qty,
+            short_avg,
+            RecoveryPriority::Sqlite,
+        )]
+    }
+
+    fn get_account(&self) -> Option<AccountSnapshot> {
+        None
+    }
+
+    fn get_open_orders(&self) -> Vec<OrderRecord> {
+        Vec::new()
+    }
+}
+
+impl StateManager for LocalPositionManager {
+    fn update_position(&self, _symbol: &str, pos: PositionSnapshot) -> Result<(), XDataError> {
+        // LocalPositionManager 不支持从外部更新持仓（只能通过 open_position/close_position）
+        // 这里只做简单验证：如果有持仓，检查方向是否匹配
+        let current = self.position.read();
+        if current.qty > Decimal::ZERO {
+            let expected_side = match pos.long_qty > Decimal::ZERO {
+                true => Direction::Long,
+                false => Direction::Short,
+            };
+            if current.direction != expected_side {
+                return Err(XDataError::StateInconsistent(
+                    "Position direction mismatch".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_position(&self, _symbol: &str) -> Result<(), XDataError> {
+        self.reset();
+        Ok(())
+    }
+
+    fn lock_positions_read(&self) -> Vec<UnifiedPositionSnapshot> {
+        self.get_positions()
     }
 }
