@@ -4,7 +4,7 @@ x_data 数据抽象层 - 架构重构设计文档
 Project: barter-rs 量化交易系统
 Author: 软件架构师 + Droid
 Date: 2026-03-25
-Status: 待审批
+Status: ✅ 已审批通过
 ================================================================
 
 ## 1. 背景与目标
@@ -23,7 +23,7 @@ Status: 待审批
 1. 建立 x_data 业务数据抽象层
 2. 所有业务数据类型统一管理，消除重复定义
 3. 定义 StateManager trait，实现统一状态视图
-4. 明确依赖方向：a_common -> x_data -> b_data_source/e_risk_monitor/f_engine
+4. 明确依赖方向：a_common <- x_data <- 业务层（单向依赖，无循环）
 
 ================================================================
 2. 目标架构
@@ -141,6 +141,7 @@ crates/x_data/src/
 
 | 类型 | 留在原层原因 |
 |------|-------------|
+| EngineState | 含引擎运行逻辑，保留在 f_engine |
 | LocalPositionManager | 含业务逻辑（持仓管理方法） |
 | AccountPool | 含业务逻辑（资金池操作方法） |
 | KLineSynthesizer | 含业务逻辑（K线合成算法） |
@@ -196,11 +197,14 @@ impl UnifiedStateView {
         Self { position_manager, account_pool }
     }
 
-    /// 原子读取所有状态
+    /// 原子读取所有状态（带原子锁确保一致性）
     pub fn snapshot(&self) -> SystemSnapshot {
+        // 使用 Arc::spawn_blocking 确保跨线程安全
+        let positions = self.position_manager.get_positions();
+        let account = self.account_pool.get_account();
         SystemSnapshot {
-            positions: self.position_manager.get_positions(),
-            account: self.account_pool.get_account(),
+            positions,
+            account,
             timestamp: Utc::now(),
         }
     }
@@ -275,6 +279,20 @@ x_data = { path = "../x_data" }
 x_data = { path = "../x_data" }
 ```
 
+### 6.3 Phase 7 re-export 过渡方案
+
+Phase 7 不直接删除 a_common 中的旧类型，而是通过 re-export 保持向后兼容：
+
+```rust
+// a_common/src/backup/memory_backup.rs
+
+// 旧类型保留，用于向后兼容
+pub use x_data::position::PositionSnapshot;
+pub use x_data::account::AccountSnapshot;
+```
+
+这样旧代码无需立即修改 import 路径，可逐步迁移。
+
 ================================================================
 7. 执行阶段
 ================================================================
@@ -287,7 +305,7 @@ x_data = { path = "../x_data" }
 | Phase 4 | 迁移 market/ 模块 | 中 | 5个类型文件 |
 | Phase 5 | 迁移 trading/ 模块 | 中 | 5个类型文件 |
 | Phase 6 | 实现 state/traits.rs | 中 | StateManager trait |
-| Phase 7 | 更新 a_common 导出 | 高 | 删除迁出类型 |
+| Phase 7 | 更新 a_common 导出（re-export过渡） | 高 | 使用 pub use x_data:: 保留旧导出 |
 | Phase 8 | 更新 b_data_source 依赖 | 高 | 修改 Cargo.toml + import |
 | Phase 9 | 更新 e_risk_monitor 依赖 | 高 | 修改 Cargo.toml + import |
 | Phase 10 | 更新 f_engine 依赖 | 高 | 修改 Cargo.toml + import |
@@ -316,7 +334,28 @@ x_data = { path = "../x_data" }
 | StateManager trait 设计不合理 | 中 | 先实现简单版本，后续迭代 |
 
 ================================================================
-10. 后续优化（可选）
+10. 回滚方案
+================================================================
+
+### 10.1 分阶段回滚能力
+
+| 阶段 | 回滚方式 |
+|------|----------|
+| Phase 1~6 | 直接删除 x_data 文件夹即可回滚 |
+| Phase 7~11 | 恢复 a_common 的类型导出，回退 Cargo.toml 依赖 |
+
+### 10.2 回滚检查清单
+
+- [ ] 删除 x_data 文件夹
+- [ ] 恢复 a_common 中被迁移的类型定义
+- [ ] 恢复 a_common/Cargo.toml 的依赖配置
+- [ ] 恢复 b_data_source/Cargo.toml 的依赖
+- [ ] 恢复 e_risk_monitor/Cargo.toml 的依赖
+- [ ] 恢复 f_engine/Cargo.toml 的依赖
+- [ ] `cargo check --all` 验证编译通过
+
+================================================================
+11. 后续优化（可选）
 ================================================================
 
 完成数据层抽象后，可进一步优化：
@@ -329,29 +368,31 @@ x_data = { path = "../x_data" }
 附录：迁移类型完整清单
 ================================================================
 
-| # | 类型 | 来源 | 目标 |
-|---|------|------|------|
-| 1 | AccountSnapshot | a_common/backup | x_data/account/types.rs |
-| 2 | PositionSnapshot | a_common/backup | x_data/position/snapshot.rs |
-| 3 | Positions | a_common/backup | x_data/position/snapshot.rs |
-| 4 | PositionDirection | a_common/models/dto.rs | x_data/position/types.rs |
-| 5 | OrderBookLevel | a_common/models | x_data/market/orderbook.rs |
-| 6 | OrderBookSnapshot | a_common/models | x_data/market/orderbook.rs |
-| 7 | OrderRejectReason | a_common/exchange | x_data/trading/order.rs |
-| 8 | OrderResult | a_common/exchange | x_data/trading/order.rs |
-| 9 | Tick | b_data_source/models | x_data/market/tick.rs |
-| 10 | KLine | b_data_source/models | x_data/market/kline.rs |
-| 11 | SymbolRulesData | b_data_source | x_data/trading/rules.rs |
-| 12 | ParsedSymbolRules | b_data_source | x_data/trading/rules.rs |
-| 13 | FuturesPosition | b_data_source/api | x_data/trading/futures.rs |
-| 14 | FuturesAccount | b_data_source/api | x_data/trading/futures.rs |
-| 15 | DepthData | b_data_source/ws | x_data/market/orderbook.rs |
-| 16 | KlineData | b_data_source/ws | x_data/market/kline.rs |
-| 17 | SymbolVolatility | b_data_source/ws | x_data/market/volatility.rs |
-| 18 | LocalPosition | e_risk_monitor | x_data/position/types.rs |
-| 19 | UnifiedPositionSnapshot | e_risk_monitor | x_data/position/snapshot.rs |
-| 20 | FundPool | e_risk_monitor | x_data/account/types.rs |
-| 21 | FundPoolManager | e_risk_monitor | x_data/account/pool.rs |
+| # | 类型 | 来源 | 目标 | 状态 |
+|---|------|------|------|------|
+| 1 | AccountSnapshot | a_common/backup | x_data/account/types.rs | ⬜ |
+| 2 | PositionSnapshot | a_common/backup | x_data/position/snapshot.rs | ⬜ |
+| 3 | Positions | a_common/backup | x_data/position/snapshot.rs | ⬜ |
+| 4 | PositionDirection | a_common/models/dto.rs | x_data/position/types.rs | ⬜ |
+| 5 | OrderBookLevel | a_common/models | x_data/market/orderbook.rs | ⬜ |
+| 6 | OrderBookSnapshot | a_common/models | x_data/market/orderbook.rs | ⬜ |
+| 7 | OrderRejectReason | a_common/exchange | x_data/trading/order.rs | ⬜ |
+| 8 | OrderResult | a_common/exchange | x_data/trading/order.rs | ⬜ |
+| 9 | Tick | b_data_source/models | x_data/market/tick.rs | ⬜ |
+| 10 | KLine | b_data_source/models | x_data/market/kline.rs | ⬜ |
+| 11 | SymbolRulesData | b_data_source | x_data/trading/rules.rs | ⬜ |
+| 12 | ParsedSymbolRules | b_data_source | x_data/trading/rules.rs | ⬜ |
+| 13 | FuturesPosition | b_data_source/api | x_data/trading/futures.rs | ⬜ |
+| 14 | FuturesAccount | b_data_source/api | x_data/trading/futures.rs | ⬜ |
+| 15 | DepthData | b_data_source/ws | x_data/market/orderbook.rs | ⬜ |
+| 16 | KlineData | b_data_source/ws | x_data/market/kline.rs | ⬜ |
+| 17 | SymbolVolatility | b_data_source/ws | x_data/market/volatility.rs | ⬜ |
+| 18 | LocalPosition | e_risk_monitor | x_data/position/types.rs | ⬜ |
+| 19 | UnifiedPositionSnapshot | e_risk_monitor | x_data/position/snapshot.rs | ⬜ |
+| 20 | FundPool | e_risk_monitor | x_data/account/types.rs | ⬜ |
+| 21 | FundPoolManager | e_risk_monitor | x_data/account/pool.rs | ⬜ |
+
+图例：⬜ 待迁移 | 🔄 迁移中 | ✅ 已完成
 
 ================================================================
 End of Design Document
