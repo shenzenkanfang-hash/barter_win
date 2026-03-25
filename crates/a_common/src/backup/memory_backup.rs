@@ -10,10 +10,11 @@ use crate::config::Paths;
 use crate::EngineError;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs::{self, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, Instant};
 
 // ============================================================================
 // 常量定义
@@ -34,6 +35,12 @@ pub const MAX_INDICATORS_ENTRIES: usize = 100;
 pub const MAX_DEPTH_ENTRIES: usize = 100;
 /// 任务最大条目数
 pub const MAX_TASKS_ENTRIES: usize = 100;
+
+/// 刷新间隔（秒）
+const BUFFER_FLUSH_INTERVAL_SECS: u64 = 5;
+
+/// 检查文件大小的调用间隔
+const FILE_SIZE_CHECK_INTERVAL: usize = 10;
 
 // CSV 文件最大大小 (100MB)
 pub const MAX_CSV_FILE_SIZE: u64 = 100 * 1024 * 1024;
@@ -361,6 +368,10 @@ pub struct MemoryBackup {
     tmpfs_dir: String,
     disk_dir: String,
     sync_interval_secs: u64,
+    /// 写入缓冲（symbol -> 待写入的 JSON 数据）
+    write_buffer: HashMap<String, Vec<u8>>,
+    /// 上次刷新时间
+    last_flush: HashMap<String, Instant>,
 }
 
 impl MemoryBackup {
@@ -369,7 +380,53 @@ impl MemoryBackup {
             tmpfs_dir: tmpfs_dir.to_string(),
             disk_dir: disk_dir.to_string(),
             sync_interval_secs,
+            write_buffer: HashMap::new(),
+            last_flush: HashMap::new(),
         }
+    }
+
+    /// 刷新缓冲（内部使用）
+    async fn flush_buffer(&mut self, symbol: &str) -> Result<(), EngineError> {
+        if let Some(data) = self.write_buffer.get(symbol) {
+            if !data.is_empty() {
+                let path = format!("{}/{}.json", self.tmpfs_dir, symbol);
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .await
+                    .map_err(|e| EngineError::MemoryBackup(format!("打开文件失败: {}", e)))?;
+                file.write_all(data).await
+                    .map_err(|e| EngineError::MemoryBackup(format!("写入缓冲失败: {}", e)))?;
+                self.write_buffer.get_mut(symbol).unwrap().clear();
+            }
+        }
+        self.last_flush.insert(symbol.to_string(), Instant::now());
+        Ok(())
+    }
+
+    /// 缓冲写入（替代直接序列化）
+    pub async fn save_with_buffer(&mut self, symbol: &str, data: &impl Serialize) -> Result<(), EngineError> {
+        let json = serde_json::to_vec(data)
+            .map_err(|e| EngineError::MemoryBackup(format!("序列化失败: {}", e)))?;
+
+        // 追加到缓冲（修正：追加实际JSON数据而非仅换行符）
+        let buffer = self.write_buffer.entry(symbol.to_string()).or_insert_with(Vec::new);
+        buffer.extend_from_slice(&json);
+        buffer.push(b'\n');
+
+        // 检查是否需要刷新
+        let now = Instant::now();
+        let should_flush = self.last_flush
+            .get(symbol)
+            .map(|t| now.duration_since(*t).as_secs() >= BUFFER_FLUSH_INTERVAL_SECS)
+            .unwrap_or(true);
+
+        if should_flush {
+            self.flush_buffer(symbol).await?;
+        }
+
+        Ok(())
     }
 
     pub async fn start_sync_task(self: std::sync::Arc<Self>) {
