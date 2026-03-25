@@ -3,9 +3,7 @@
 //! 模拟真实生产环境的所有组件：
 //! - DataFeeder (数据源)
 //! - BacktestStrategy (真实策略: MaCrossStrategy)
-//! - ShadowRiskChecker (风控)
-//! - ShadowBinanceGateway (劫持网关)
-//! - Account (账户)
+//! - ShadowBinanceGateway (劫持网关 + 账户持仓)
 //!
 //! 运行: cargo run -p h_sandbox --example sim_trading
 
@@ -18,16 +16,12 @@ use rust_decimal_macros::dec;
 
 use b_data_source::DataFeeder;
 use h_sandbox::backtest::{BacktestStrategy, BacktestTick, MaCrossStrategy, Signal};
-use h_sandbox::{
-    ShadowBinanceGateway, ShadowConfig,
-    Account,
-};
+use h_sandbox::{ShadowBinanceGateway, ShadowConfig};
 
 /// 模拟交易系统
 struct SimTradingSystem<S: BacktestStrategy> {
     data_feeder: Arc<DataFeeder>,
     gateway: Arc<ShadowBinanceGateway>,
-    account: Account,
     strategy: S,
     position_open: bool,
 }
@@ -35,15 +29,12 @@ struct SimTradingSystem<S: BacktestStrategy> {
 impl<S: BacktestStrategy> SimTradingSystem<S> {
     fn new(initial_balance: Decimal, strategy: S) -> Self {
         let config = ShadowConfig::new(initial_balance);
-        
         let data_feeder = Arc::new(DataFeeder::new());
-        let gateway = ShadowBinanceGateway::new(initial_balance, config.clone());
-        let account = Account::new(initial_balance, &config);
+        let gateway = ShadowBinanceGateway::new(initial_balance, config);
 
         Self {
             data_feeder,
             gateway: Arc::new(gateway),
-            account,
             strategy,
             position_open: false,
         }
@@ -63,8 +54,8 @@ impl<S: BacktestStrategy> SimTradingSystem<S> {
         };
         self.data_feeder.push_tick(tick);
 
-        // 2. 更新账户价格
-        self.account.update_price(symbol, price);
+        // 2. 更新 gateway 价格（用于计算未实现盈亏）
+        self.gateway.update_price(symbol, price);
 
         // 3. 策略信号
         let backtest_tick = BacktestTick {
@@ -119,16 +110,16 @@ impl<S: BacktestStrategy> SimTradingSystem<S> {
 
     /// 打印状态
     fn print_status(&self, tick_count: u64, symbol: &str, price: Decimal) {
-        let equity = self.account.total_equity();
-        let unrealized_pnl = self.account.total_unrealized_pnl();
+        // 从 gateway 获取真实账户状态
+        let account = self.gateway.get_account().unwrap();
 
         println!(
             "[{:04}] {} @ {} | 权益: {} | 未实现盈亏: {} | 持仓: {}",
             tick_count,
             symbol,
             price,
-            equity,
-            unrealized_pnl,
+            account.total_equity,
+            account.unrealized_pnl,
             if self.position_open { "有" } else { "无" }
         );
     }
@@ -187,7 +178,12 @@ async fn main() {
 
     let elapsed = start.elapsed();
 
-    // 4. 最终报告
+    // 4. 最终报告（从 gateway 获取真实账户状态）
+    let final_account = system.gateway.get_account().unwrap();
+    let equity = final_account.total_equity;
+    let unrealized_pnl = final_account.unrealized_pnl;
+    let available = final_account.available;
+
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║                    模拟交易报告                               ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
@@ -196,10 +192,6 @@ async fn main() {
     println!("  处理Tick: {}", tick_count);
     println!("  处理速率: {:.0} ticks/s", tick_count as f64 / elapsed.as_secs_f64());
     println!();
-
-    let equity = system.account.total_equity();
-    let unrealized_pnl = system.account.total_unrealized_pnl();
-    let available = system.account.available();
 
     println!("  初始资金: {}", initial_balance);
     println!("  最终权益: {}", equity);
