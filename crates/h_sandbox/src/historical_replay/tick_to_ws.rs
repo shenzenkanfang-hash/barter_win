@@ -20,10 +20,18 @@ impl TickToWsConverter {
     /// 将 SimulatedTick 转换为 BinanceKlineMsg
     ///
     /// # 参数
-    /// * `tick` - SimulatedTick 数据
+    /// * `tick` - SimulatedTick 数据（含 is_last_in_kline 标记）
     /// * `tick_index` - 当前 tick 在 K 线内的索引 (0-59)
-    /// * `is_last_tick` - 是否是当前 K 线的最后一个 tick
+    /// * `is_last_tick` - 备选：外部指定的 last tick 标记（当 tick.is_last_in_kline 为 true 时优先使用）
     pub fn convert(&self, tick: &SimulatedTick, tick_index: u8, is_last_tick: bool) -> BinanceKlineMsg {
+        // 优先使用 SimulatedTick 自身的 is_last_in_kline 标记（由生成器内部判断）
+        // 若未标记（外部构造的 tick），则使用传入的 is_last_tick 参数
+        let is_closed = if tick.is_last_in_kline {
+            true
+        } else {
+            is_last_tick
+        };
+
         BinanceKlineMsg {
             event_type: "kline".to_string(),
             event_time: tick.timestamp.timestamp_millis(),
@@ -41,7 +49,7 @@ impl TickToWsConverter {
                 low: tick.low.to_string(),
                 volume: tick.volume.to_string(),
                 num_trades: 0,
-                is_closed: is_last_tick,
+                is_closed,
             },
         }
     }
@@ -67,6 +75,7 @@ mod tests {
             low: dec!(49975),
             volume: dec!(1.5),
             kline_timestamp: Utc::now(),
+            is_last_in_kline: false,
         };
 
         let ws_msg = converter.convert(&tick, 30, false);
@@ -91,9 +100,10 @@ mod tests {
             low: dec!(49975),
             volume: dec!(1.5),
             kline_timestamp: Utc::now(),
+            is_last_in_kline: true, // 由生成器内部判断为最后一根
         };
 
-        let ws_msg = converter.convert(&tick, 59, true);
+        let ws_msg = converter.convert(&tick, 59, false); // 外部参数传 false，但 tick.is_last_in_kline=true
 
         assert!(ws_msg.kline.is_closed);
     }

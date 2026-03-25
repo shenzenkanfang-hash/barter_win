@@ -144,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (idx, tick) in generator.enumerate() {
         let tick_idx = (idx % 60) as u8;
-        let is_last = tick_idx == 59;
+        let is_last = tick.is_last_in_kline; // 由 StreamTickGenerator 自身判断
 
         // 转换为 WS 格式
         let ws_msg = converter.convert(&tick, tick_idx, is_last);

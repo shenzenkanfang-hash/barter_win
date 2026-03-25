@@ -52,6 +52,8 @@ pub struct SimulatedTick {
     pub volume: Decimal,
     /// 所属 1m K线时间戳
     pub kline_timestamp: DateTime<Utc>,
+    /// 是否为当前 K 线的最后一根 Tick（由生成器内部判断）
+    pub is_last_in_kline: bool,
 }
 
 /// Tick 生成器状态
@@ -310,6 +312,10 @@ impl Iterator for StreamTickGenerator {
                         *volume_per_tick = kline.volume / Decimal::from(TICKS_PER_1M);
                     }
 
+                    // 判断是否为当前 K 线最后一根 Tick
+                    // 注意：此时 tick_index 还未 +1，是当前 tick 的索引（0-59）
+                    let is_last_in_kline = *tick_index + 1 >= TICKS_PER_1M;
+
                     *tick_index += 1;
 
                     return Some(SimulatedTick {
@@ -322,6 +328,7 @@ impl Iterator for StreamTickGenerator {
                         low: *accumulated_low,
                         volume: *volume_per_tick,
                         kline_timestamp: kline_ts,
+                        is_last_in_kline,
                     });
                 }
             }
