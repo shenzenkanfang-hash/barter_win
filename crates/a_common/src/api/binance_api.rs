@@ -197,7 +197,7 @@ impl RateLimiter {
                 // 如果超过60秒，窗口重置，限流值也清零
                 if elapsed > Duration::from_secs(60) {
                     *window_start = Instant::now();
-                    println!("[RateLimiter] 窗口重置");
+                    tracing::debug!("[RateLimiter] 窗口重置");
                     break;
                 }
 
@@ -207,7 +207,7 @@ impl RateLimiter {
 
                 if used_weight > weight_threshold {
                     let wait_time = Duration::from_secs(60) - elapsed;
-                    println!("[RateLimiter] REQUEST_WEIGHT {} > 80%阈值{}，等待 {} 秒",
+                    tracing::warn!("[RateLimiter] REQUEST_WEIGHT {} > 80%阈值{}，等待 {} 秒",
                         used_weight, weight_threshold, wait_time.as_secs());
                     drop(window_start);
                     tokio::time::sleep(wait_time).await;
@@ -216,7 +216,7 @@ impl RateLimiter {
 
                 if used_orders > orders_threshold {
                     let wait_time = Duration::from_secs(60) - elapsed;
-                    println!("[RateLimiter] ORDERS {} > 80%阈值{}，等待 {} 秒",
+                    tracing::warn!("[RateLimiter] ORDERS {} > 80%阈值{}，等待 {} 秒",
                         used_orders, orders_threshold, wait_time.as_secs());
                     drop(window_start);
                     tokio::time::sleep(wait_time).await;
@@ -520,8 +520,8 @@ impl BinanceApiGateway {
         let body_text = resp.text().await.map_err(|e| EngineError::Other(format!("读取响应体失败: {}", e)))?;
 
         // 打印原始响应（调试用）
-        println!("[exchangeInfo] 原始响应长度: {} bytes", body_text.len());
-        println!("[exchangeInfo] 前500字符: {}", &body_text[..body_text.len().min(500)]);
+        tracing::debug!("[exchangeInfo] 原始响应长度: {} bytes", body_text.len());
+        tracing::debug!("[exchangeInfo] 前500字符: {}", &body_text[..body_text.len().min(500)]);
 
         // 解析获取所有交易对列表
         let info: BinanceExchangeInfo = serde_json::from_str(&body_text)
@@ -828,9 +828,9 @@ impl BinanceApiGateway {
         let body_text = resp.text().await.unwrap_or_default();
 
         // 打印响应 Headers
-        println!("[account] Response Headers:");
+        tracing::debug!("[account] Response Headers:");
         for (key, value) in headers.iter() {
-            println!("  {}: {:?}", key, value);
+            tracing::debug!("  {}: {:?}", key, value);
         }
 
         // 更新限速器（只更新 > 0 的权重值）
@@ -844,7 +844,7 @@ impl BinanceApiGateway {
             )));
         }
 
-        println!("[account] 原始响应: {}", &body_text[..body_text.len().min(1000)]);
+        tracing::debug!("[account] 原始响应: {}", &body_text[..body_text.len().min(1000)]);
 
         let account: FuturesAccountResponse = serde_json::from_str(&body_text)
             .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {} - Response: {}", e, &body_text[..body_text.len().min(500)])))?;
@@ -872,9 +872,9 @@ impl BinanceApiGateway {
         let body_text = resp.text().await.unwrap_or_default();
 
         // 打印响应 Headers
-        println!("[positionRisk] Response Headers:");
+        tracing::debug!("[positionRisk] Response Headers:");
         for (key, value) in headers.iter() {
-            println!("  {}: {:?}", key, value);
+            tracing::debug!("  {}: {:?}", key, value);
         }
 
         // 更新限速器（只更新 > 0 的权重值）
@@ -888,7 +888,7 @@ impl BinanceApiGateway {
             )));
         }
 
-        println!("[positionRisk] 原始响应: {}", &body_text[..body_text.len().min(1000)]);
+        tracing::debug!("[positionRisk] 原始响应: {}", &body_text[..body_text.len().min(1000)]);
 
         let positions: Vec<FuturesPositionResponse> = serde_json::from_str(&body_text)
             .map_err(|e| EngineError::Other(format!("解析 JSON 失败: {} - Response: {}", e, &body_text[..body_text.len().min(500)])))?;

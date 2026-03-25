@@ -75,8 +75,11 @@ Status: Partially Fixed (2026-03-25)
 【TD-004】日志使用 println! 而非 tracing ✅ 已修复
 位置: crates/a_common/src/api/binance_api.rs (多处)
 
-修复: 全部替换为 tracing::info!
-修复日期: 2026-03-25
+修复: binance_api.rs 中剩余的 8 处 println! 已全部替换为 tracing::debug! 或 tracing::warn!
+       - 窗口重置、原始响应等调试信息使用 tracing::debug!
+       - 限流等待警告使用 tracing::warn!
+       - checkpoint.rs 中的 eprintln! 保留（用于检查点输出）
+修复日期: 2026-03-25 (补修遗漏)
 
 【TD-005】检查链中重复创建 Generator 实例
 状态: ✅ 误报（非问题）
@@ -210,65 +213,68 @@ Status: Partially Fixed (2026-03-25)
 
 修复日期: 2026-03-25
 
-【FRAG-003】交易所 API 限流处理
-状态: ⏳ 待改进
+【FRAG-003】交易所 API 限流处理 ⚠️ 需架构改进
 文件: crates/a_common/src/api/binance_api.rs
 
-脆弱性:
+问题:
   - 限流时只是等待，不尝试调整请求模式
   - 多个 API 调用竞争同一个 rate_limiter
   - 测试网和实盘限流规则不同
 
 建议: 实现智能限流，调整请求优先级
+状态: 待架构改进（需要引入优先级队列和请求模式调整）
 
-【FRAG-004】回滚机制完整性
-状态: ⏳ 待改进
+【FRAG-004】回滚机制完整性 ⚠️ 部分改进
 文件: crates/f_engine/src/core/rollback.rs
 
-脆弱性:
+问题:
   - 回滚点设置和恢复逻辑需要严格测试
   - 部分成交时回滚状态计算复杂
   - 并发回滚请求可能冲突
 
-建议: 添加回滚测试用例，验证各种边界情况
+现状:
+  - 已有基础测试: test_rollback_manager_order_failed, test_rollback_manager_partial_fill
+  - 部分成交场景已覆盖
+  - 并发回滚测试尚未实现
+
+建议: 添加并发回滚请求场景测试
 
 ================================================================
 7. 架构问题
 ================================================================
 
-【ARCH-001】模块边界模糊
-状态: ⏳ 待规划
+【ARCH-001】模块边界模糊 ⚠️ 需架构重构
 问题: b_data_source 依赖 a_common，但 a_common 的某些模块
      (如 config/Paths) 也被业务逻辑直接使用
-
 建议: 明确分层，a_common 只做基础设施
+状态: 需架构重构（P3 优先级，需要重新划分模块边界）
 
-【ARCH-002】状态管理分散
-状态: ⏳ 待规划
+【ARCH-002】状态管理分散 ⚠️ 需架构重构
 问题: EngineState, LocalPositionManager, AccountPool 等都有独立的状态
      没有统一的全局状态视图
-
 建议: 引入统一的状态管理中枢
+状态: 需架构重构（P3 优先级，需要设计统一状态管理 trait）
 
-【ARCH-003】错误类型不统一
-状态: ⏳ 待规划
+【ARCH-003】错误类型不统一 ⚠️ 需架构重构
 问题:
   - MarketError 定义在 a_common
   - EngineError 也定义在 a_common
   - 各子模块还有自己的错误类型
-
 建议: 建立统一的错误层次体系
+状态: 需架构重构（P3 优先级，当前按领域分离尚可接受）
 
 ================================================================
 附录：关键文件索引
 ================================================================
 
 高风险文件:
-  - crates/a_common/src/api/binance_api.rs      (RateLimiter, API 调用) ✅ 已修复多处
-  - crates/a_common/src/ws/binance_ws.rs        (WebSocket 连接) ✅ 已修复订阅验证
+  - crates/a_common/src/api/binance_api.rs      (RateLimiter, API 调用) ✅ 已修复限流+println
+  - crates/a_common/src/ws/binance_ws.rs        (WebSocket 连接) ✅ 已修复订阅验证+重连上限
   - crates/f_engine/src/order/mock_binance_gateway.rs  (订单执行) ✅ 已修复PnL计算
-  - crates/b_data_source/src/ws/kline_1m/ws.rs  (K线数据) ✅ 已修复解析错误
-  - crates/a_common/src/backup/memory_backup.rs (内存备份) ✅ 已修复路径遍历+排序
+  - crates/b_data_source/src/ws/kline_1m/ws.rs  (K线数据) ✅ 已修复解析错误+文件增长限制
+  - crates/a_common/src/backup/memory_backup.rs (内存备份) ✅ 已修复路径遍历+排序+同步失败
+  - crates/a_common/src/util/sanitize.rs        (脱敏工具) ✅ 新增敏感信息脱敏函数
+  - crates/e_risk_monitor/src/persistence/startup_recovery.rs ✅ 添加UnifiedPositionSnapshot转换构造
 
 测试覆盖不足区域:
   - 并发订单处理
@@ -280,25 +286,28 @@ Status: Partially Fixed (2026-03-25)
 修复摘要 (2026-03-25)
 ================================================================
 
-已修复: 12 项
+已修复: 14 项
   ✅ BUG-001: unrealized_pnl 计算
   ✅ BUG-002: 订单簿深度排序
   ✅ BUG-003: K线时间戳 unwrap
   ✅ BUG-004: WebSocket 订阅验证
   ✅ BUG-005: decimal 解析错误
   ✅ TD-003: RateLimiter f64 精度
-  ✅ TD-004: RateLimiter println!
+  ✅ TD-004: RateLimiter println! (补修遗漏)
+  ✅ SEC-001: 敏感信息脱敏工具
   ✅ SEC-002: HTTP 超时
   ✅ SEC-003: 路径遍历
   ✅ PERF-004: 注释修正（非代码问题）
   ✅ TD-001: SymbolRulesData 重复定义
   ✅ PERF-003: K线历史文件增长限制
+  ✅ FRAG-001: WebSocket 重连无上限
+  ✅ FRAG-002: 内存备份同步失败静默
 
-待修复: 9 项
+待修复: 7 项
   TD-002 (部分修复：添加了转换构造函数，完整统一需更多重构)
-  PERF-001, PERF-002 (性能优化)
-  FRAG-001, FRAG-002, FRAG-003, FRAG-004 (脆弱区域改进)
-  ARCH-001, ARCH-002, ARCH-003 (架构重构)
+  PERF-001, PERF-002 (需架构重构)
+  FRAG-003, FRAG-004 (需架构改进)
+  ARCH-001, ARCH-002, ARCH-003 (需架构重构)
 
 误报/非问题: 2 项
   TD-005 (零大小类型)
