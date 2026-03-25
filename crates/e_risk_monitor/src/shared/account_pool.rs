@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::shared::margin_config::{MarginPoolConfig, StrategyLevel, MIN_EFFECTIVE_MARGIN};
 
+use x_data::state::{StateViewer, StateManager};
+use x_data::position::snapshot::{UnifiedPositionSnapshot, PositionSnapshot};
+use x_data::account::types::AccountSnapshot;
+use x_data::trading::order::OrderRecord;
+use x_data::error::XDataError;
+
 /// 熔断状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CircuitBreakerState {
@@ -398,6 +404,53 @@ impl AccountPool {
         *self.initial_balance.write() = amount;
         account.total_equity = amount;
         account.available = amount;
+    }
+}
+
+// ============================================================================
+// StateViewer + StateManager 实现 (x_data trait)
+// ============================================================================
+
+impl StateViewer for AccountPool {
+    fn get_positions(&self) -> Vec<UnifiedPositionSnapshot> {
+        // AccountPool 不管理持仓，返回空列表
+        Vec::new()
+    }
+
+    fn get_account(&self) -> Option<AccountSnapshot> {
+        let acc = self.account.read();
+        Some(AccountSnapshot {
+            account_id: acc.account_id.clone(),
+            equity: acc.total_equity,
+            available: acc.available,
+            frozen: acc.frozen,
+            unrealized_pnl: acc.unrealized_pnl,
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
+    fn get_open_orders(&self) -> Vec<OrderRecord> {
+        Vec::new()
+    }
+}
+
+impl StateManager for AccountPool {
+    fn update_position(&self, _symbol: &str, _pos: PositionSnapshot) -> Result<(), XDataError> {
+        // AccountPool 不直接管理持仓，只管理账户资金
+        Err(XDataError::ValidationFailed(
+            "AccountPool does not manage positions".to_string(),
+        ))
+    }
+
+    fn remove_position(&self, _symbol: &str) -> Result<(), XDataError> {
+        // AccountPool 不直接管理持仓
+        Err(XDataError::ValidationFailed(
+            "AccountPool does not manage positions".to_string(),
+        ))
+    }
+
+    fn lock_positions_read(&self) -> Vec<UnifiedPositionSnapshot> {
+        Vec::new()
     }
 }
 
