@@ -20,6 +20,23 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use thiserror::Error;
+
+/// 市场数据业务错误（适配项目现有错误体系）
+#[derive(Error, Debug, Clone, Eq, PartialEq)]
+pub enum MarketRuleError {
+    #[error("无效价格（负数）: {0}")]
+    InvalidPrice(Decimal),
+    #[error("无效数量（负数）: {0}")]
+    InvalidQuantity(Decimal),
+    #[error("开仓名义价值必须大于0: {0}")]
+    InvalidOpenNotional(Decimal),
+    #[error("开仓价格必须大于0: {0}")]
+    InvalidOpenPrice(Decimal),
+}
+
+/// 简化别名
+pub type MarketRuleResult<T> = Result<T, MarketRuleError>;
 
 /// 规则缓存条目
 #[derive(Debug, Clone)]
@@ -96,26 +113,26 @@ impl ParsedSymbolRules {
     }
 
     /// 价格取整
-    pub fn round_price(&self, price: Decimal) -> Decimal {
+    pub fn round_price(&self, price: Decimal) -> MarketRuleResult<Decimal> {
         if price < dec!(0) {
-            panic!("价格不能为负数：{}", price);
+            return Err(MarketRuleError::InvalidPrice(price));
         }
-        if self.tick_size > dec!(0) {
+        let rounded = if self.tick_size > dec!(0) {
             let rounded = (price / self.tick_size).round() * self.tick_size;
             rounded.round_dp(self.price_precision as u32)
         } else {
             price.round_dp(self.price_precision as u32)
-        }
+        };
+        Ok(rounded)
     }
 
     /// 数量取整（自动使用 effective_min_qty）
-    pub fn round_qty(&self, qty: Decimal) -> Decimal {
+    pub fn round_qty(&self, qty: Decimal) -> MarketRuleResult<Decimal> {
         if qty < dec!(0) {
-            panic!("数量不能为负数：{}", qty);
+            return Err(MarketRuleError::InvalidQuantity(qty));
         }
-        // 使用实际有效最小数量替代原始 min_qty
         let valid_qty = std::cmp::max(qty, self.effective_min_qty());
-        Self::round_to_precision(valid_qty, self.quantity_precision)
+        Ok(Self::round_to_precision(valid_qty, self.quantity_precision))
     }
 
     /// 验证订单是否符合最小名义价值要求
@@ -129,13 +146,13 @@ impl ParsedSymbolRules {
 
     /// 基于名义价值计算合规开仓数量
     /// 使用 Decimal 保证高精度计算
-    pub fn calculate_open_qty(&self, open_notional: Decimal, open_price: Decimal) -> Decimal {
+    pub fn calculate_open_qty(&self, open_notional: Decimal, open_price: Decimal) -> MarketRuleResult<Decimal> {
         // 1. 参数合法性校验
         if open_notional <= dec!(0) {
-            panic!("开仓名义价值必须大于0：{}", open_notional);
+            return Err(MarketRuleError::InvalidOpenNotional(open_notional));
         }
         if open_price <= dec!(0) {
-            panic!("开仓价格必须大于0：{}", open_price);
+            return Err(MarketRuleError::InvalidOpenPrice(open_price));
         }
 
         // 2. 基础数量计算：数量 = 名义价值 / 价格
@@ -154,7 +171,7 @@ impl ParsedSymbolRules {
             final_qty = final_qty + self.step_size;
         }
 
-        final_qty
+        Ok(final_qty)
     }
 }
 
@@ -328,7 +345,7 @@ mod tests {
             update_ts: 0,
         };
 
-        let rounded = rules.round_price(dec!(68000.456));
+        let rounded = rules.round_price(dec!(68000.456)).unwrap();
         assert_eq!(rounded, dec!(68000.46));
     }
 
@@ -351,7 +368,7 @@ mod tests {
             update_ts: 0,
         };
 
-        let rounded = rules.round_qty(dec!(0.0001));
+        let rounded = rules.round_qty(dec!(0.0001)).unwrap();
         // 应该不小于 effective_min_qty
         assert!(rounded >= rules.effective_min_qty());
     }

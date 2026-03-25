@@ -472,7 +472,8 @@ mod tests {
     #[test]
     fn test_shard_file_from_path() {
         let path = Path::new("data/btc/usdt/1m/part_1742534400000.csv");
-        let shard = ShardFile::from_path(path).unwrap();
+        let shard = ShardFile::from_path(path)
+            .expect("测试用例：固定路径格式必须有效");
         assert_eq!(shard.start_ms, 1742534400000);
         assert_eq!(shard.end_ms, 1742534400000 + 50_000 * 60_000);
     }
@@ -504,14 +505,14 @@ mod tests {
                 volume: dec!(100),
                 timestamp: Utc.timestamp_millis_opt(1000 + i as i64 * 60_000)
                     .single()
-                    .unwrap(),
+                    .expect("测试用例：固定时间戳必须有效"),
             };
-            writer.write(&kline).unwrap();
+            writer.write(&kline).expect("测试用例：写入必须成功");
         }
-        writer.finish().unwrap();
+        writer.finish().expect("测试用例：finish 必须成功");
 
         // Read back
-        let reader = ShardReader::new(&path).unwrap();
+        let reader = ShardReader::new(&path).expect("测试用例：Reader 创建必须成功");
         let klines: Vec<_> = reader.filter_map(|r| r.ok()).collect();
         assert_eq!(klines.len(), 100);
         assert_eq!(klines[0].symbol, "BTCUSDT");
@@ -532,9 +533,9 @@ mod tests {
         let shard_dir = temp_dir.join("BTCUSDT").join("1m");
         std::fs::create_dir_all(&shard_dir).ok();
 
-        std::fs::write(shard_dir.join("part_1000.csv"), "").unwrap();
-        std::fs::write(shard_dir.join("part_4000000000.csv"), "").unwrap();
-        std::fs::write(shard_dir.join("part_7000000000.csv"), "").unwrap();
+        std::fs::write(shard_dir.join("part_1000.csv"), "").expect("测试用例：文件创建必须成功");
+        std::fs::write(shard_dir.join("part_4000000000.csv"), "").expect("测试用例：文件创建必须成功");
+        std::fs::write(shard_dir.join("part_7000000000.csv"), "").expect("测试用例：文件创建必须成功");
 
         // Query range [2000, 5000000000]
         let shards = cache.find_shards("BTCUSDT", "1m", 2000, 5000000000);

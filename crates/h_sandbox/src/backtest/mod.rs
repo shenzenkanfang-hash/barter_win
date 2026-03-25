@@ -2,7 +2,8 @@
 //!
 //! 基于 TickGenerator + DataFeeder 的异步回测框架
 
-// mod engine;  // TODO: 后续实现
+// 回测引擎模块（待实现）
+// mod engine;
 // mod loader;   // TODO: parquet API 兼容性问题待修复
 
 mod strategy;

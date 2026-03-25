@@ -112,8 +112,10 @@ impl TickGenerator {
             self.accumulated_low = price;
         }
 
-        // 计算时间戳
-        let kline_ts = self.current_kline.as_ref().unwrap().timestamp;
+        // 安全获取当前 K线数据（load_next_kline 已确保有值）
+        let kline = self.current_kline.as_ref()?;
+        let kline_ts = kline.timestamp;
+        let kline_open = kline.open;
         let tick_offset_ms = (self.tick_index as i64) * TICK_INTERVAL_MS;
         let tick_ts = kline_ts + Duration::milliseconds(tick_offset_ms);
 
@@ -124,7 +126,7 @@ impl TickGenerator {
             price,
             qty: dec!(0.01), // 固定数量，可配置
             timestamp: tick_ts,
-            open: self.current_kline.as_ref().unwrap().open,
+            open: kline_open,
             high: self.accumulated_high,
             low: self.accumulated_low,
             volume: self.volume_per_tick,
@@ -196,24 +198,29 @@ impl TickGenerator {
 
     /// 加载下一根 K线
     fn load_next_kline(&mut self) -> Option<()> {
-        self.current_kline = Some(self.klines.pop_front()?);
+        let kline = self.klines.pop_front()?;
+        let kline_high = kline.high;
+        let kline_low = kline.low;
+        let kline_open = kline.open;
+        let kline_close = kline.close;
+        let kline_volume = kline.volume;
 
-        let kline = self.current_kline.as_ref().unwrap();
+        self.current_kline = Some(kline);
 
         // 重置状态
         self.tick_index = 0;
-        self.accumulated_high = kline.high;
-        self.accumulated_low = kline.low;
+        self.accumulated_high = kline_high;
+        self.accumulated_low = kline_low;
 
         // 计算每 tick 成交量
-        self.volume_per_tick = kline.volume / Decimal::from(TICKS_PER_1M);
+        self.volume_per_tick = kline_volume / Decimal::from(TICKS_PER_1M);
 
         // 生成价格路径
         self.price_path = Self::generate_price_path(
-            kline.open,
-            kline.high,
-            kline.low,
-            kline.close,
+            kline_open,
+            kline_high,
+            kline_low,
+            kline_close,
         );
 
         Some(())

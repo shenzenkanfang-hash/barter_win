@@ -75,7 +75,7 @@ async fn main() {
     let klines = if use_mock {
         generate_mock_klines("POWERUSDT", kline_count)
     } else {
-        // TODO: 从 parquet 加载
+        // TODO: 从 parquet 加载（parquet 0.17+ 支持后再实现）
         println!("⚠️  Parquet 加载暂未实现，使用模拟数据");
         generate_mock_klines("POWERUSDT", kline_count)
     };
