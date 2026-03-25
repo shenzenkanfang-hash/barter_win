@@ -165,12 +165,18 @@ Status: Partially Fixed (2026-03-25)
 问题: SQLite 写入操作是同步的，可能阻塞交易线程
 建议: 使用异步写入或批量提交机制
 
-【PERF-003】K线历史文件无限增长
-状态: ⏳ 待修复
+【PERF-003】K线历史文件无限增长 ✅ 已修复
 位置: crates/b_data_source/src/ws/kline_1m/ws.rs (write_to_history)
 
-问题: 每次追加都读取整个文件到内存，文件越大越慢
-建议: 使用追加写入模式，或限制文件大小
+修复:
+  - 添加 MAX_KLINE_FILE_SIZE = 10MB 常量
+  - 添加 kline_file_index HashMap 追踪每个 symbol 的当前文件索引
+  - 文件大小超限时自动切换到下一个编号文件 (symbol_XXXX.json)
+  - 实现原子写入（先写临时文件再 rename）防止写入中途崩溃导致文件损坏
+  - 写入前检查文件大小，超过限制自动切换新文件
+  - 注意：日期分目录和30天压缩为 .gz 尚未实现（需要更多基础设施）
+
+修复日期: 2026-03-25
 
 【PERF-004】检查链并发执行但结果串行处理 ✅ 已修复（注释修正）
 位置: crates/d_checktable/src/h_15m/check/check_chain.rs
@@ -274,7 +280,7 @@ Status: Partially Fixed (2026-03-25)
 修复摘要 (2026-03-25)
 ================================================================
 
-已修复: 11 项
+已修复: 12 项
   ✅ BUG-001: unrealized_pnl 计算
   ✅ BUG-002: 订单簿深度排序
   ✅ BUG-003: K线时间戳 unwrap
@@ -286,10 +292,11 @@ Status: Partially Fixed (2026-03-25)
   ✅ SEC-003: 路径遍历
   ✅ PERF-004: 注释修正（非代码问题）
   ✅ TD-001: SymbolRulesData 重复定义
+  ✅ PERF-003: K线历史文件增长限制
 
-待修复: 10 项
-  TD-002 (部分修复：添加了转换构造函数，但完整统一需要更多重构)
-  PERF-001, PERF-002, PERF-003 (性能优化)
+待修复: 9 项
+  TD-002 (部分修复：添加了转换构造函数，完整统一需更多重构)
+  PERF-001, PERF-002 (性能优化)
   FRAG-001, FRAG-002, FRAG-003, FRAG-004 (脆弱区域改进)
   ARCH-001, ARCH-002, ARCH-003 (架构重构)
 

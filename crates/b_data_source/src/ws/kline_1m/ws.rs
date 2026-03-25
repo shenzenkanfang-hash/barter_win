@@ -62,7 +62,12 @@ pub struct Kline1mStream {
     write_timeout_secs: u64,
     /// 波动率管理器
     volatility_manager: VolatilityManager,
+    /// 每个 symbol 的当前历史文件索引（用于文件分片）
+    kline_file_index: HashMap<String, usize>,
 }
+
+/// K线历史文件大小上限 (10MB)
+const MAX_KLINE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 impl Kline1mStream {
     /// 创建 1m K线流管理器 (分片订阅: 每批50个，间隔500ms)
@@ -145,6 +150,7 @@ impl Kline1mStream {
             last_write_times: HashMap::new(),
             write_timeout_secs: 5, // 5秒超时写入
             volatility_manager: VolatilityManager::new(),
+            kline_file_index: HashMap::new(),
         })
     }
 
@@ -186,15 +192,9 @@ impl Kline1mStream {
 
     /// 写入历史K线文件（收盘时调用）
     /// 格式: [[o,h,l,c,v,t], [o,h,l,c,v,t], ...]
+    /// 文件大小超限时自动分片 (MAX_KLINE_FILE_SIZE = 10MB)
     fn write_to_history(&mut self, symbol: &str, kline_obj: &serde_json::Value) -> std::io::Result<()> {
         let symbol_lower = symbol.to_lowercase();
-        let path = format!("{}/{}.json", self.history_dir, symbol_lower);
-
-        // 确保目录存在
-        if let Err(e) = Self::ensure_dir(std::path::Path::new(&path)) {
-            tracing::error!("Failed to create history directory for {}: {}", symbol_lower, e);
-            return Err(e);
-        }
 
         // 提取 OHLCVT 数据: [open, high, low, close, volume, time]
         let o = kline_obj.get("o").and_then(|v| v.as_str()).unwrap_or("0");
@@ -205,6 +205,37 @@ impl Kline1mStream {
         let t = kline_obj.get("T").and_then(|v| v.as_i64()).unwrap_or(0);
 
         let ohlcvt = serde_json::json!([o, h, l, c, v, t]);
+
+        // 获取或初始化文件索引
+        let file_index = self.kline_file_index.entry(symbol_lower.clone()).or_insert(0);
+
+        // 构建带索引的文件路径: {symbol}_XXXX.json
+        let path = loop {
+            let path_str = format!("{}/{}_{:04}.json", self.history_dir, symbol_lower, file_index);
+
+            // 确保目录存在
+            if let Err(e) = Self::ensure_dir(std::path::Path::new(&path_str)) {
+                tracing::error!("Failed to create history directory for {}: {}", symbol_lower, e);
+                return Err(e);
+            }
+
+            // 检查文件大小
+            let file_size = if std::path::Path::new(&path_str).exists() {
+                std::fs::metadata(&path_str).map(|m| m.len()).unwrap_or(0)
+            } else {
+                0
+            };
+
+            // 如果文件大小未超过限制，使用此路径
+            if file_size < MAX_KLINE_FILE_SIZE {
+                break path_str;
+            }
+
+            // 文件已满，切换到下一个文件
+            tracing::info!("K线历史文件 {} 已达到大小限制 ({:.1}MB)，切换到下一个文件",
+                path_str, MAX_KLINE_FILE_SIZE as f64 / 1024.0 / 1024.0);
+            *file_index += 1;
+        };
 
         // 读取现有数据或创建新数组
         let mut data: Vec<serde_json::Value> = Vec::new();
@@ -235,11 +266,20 @@ impl Kline1mStream {
         // 写入文件
         let json_str = serde_json::to_string(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let mut file = File::create(&path)?;
-        file.write_all(json_str.as_bytes())?;
-        file.write_all(b"\n")?;
-        file.flush()?;
-        tracing::debug!("Write history kline to {}: {} klines", path, data.len());
+
+        // 原子写入：先写临时文件，再 rename（避免写入中途崩溃导致文件损坏）
+        let temp_path = format!("{}.tmp", path);
+        {
+            let mut file = File::create(&temp_path)?;
+            file.write_all(json_str.as_bytes())?;
+            file.write_all(b"\n")?;
+            file.flush()?;
+        }
+        std::fs::rename(&temp_path, &path)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        tracing::debug!("Write history kline to {}: {} klines, file size: {:.1}KB",
+            path, data.len(), json_str.len() as f64 / 1024.0);
         Ok(())
     }
 
