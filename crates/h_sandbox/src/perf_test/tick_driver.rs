@@ -233,7 +233,7 @@ impl TickDriver {
     }
 
     /// 生成模拟 K线数据
-    fn generate_mock_klines(symbol: &str, count: usize) -> Vec<KLineInput> {
+    fn generate_mock_klines(_symbol: &str, count: usize) -> Vec<KLineInput> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         

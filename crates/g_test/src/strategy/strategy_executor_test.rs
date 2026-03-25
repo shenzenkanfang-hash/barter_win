@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 use parking_lot::RwLock;
+use rust_decimal_macros::dec;
 
 use f_engine::strategy::{
     Strategy, StrategyKLine,

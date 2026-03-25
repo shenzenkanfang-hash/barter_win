@@ -351,17 +351,20 @@ impl Kline1mStream {
                         kline.get("T").and_then(|v| v.as_i64()),
                     ) {
                         // 将字符串转换为 Decimal，解析失败时记录错误并通知风控
-                        let parse_price = |s: &str| -> Option<rust_decimal::Decimal> {
+                        let parse_price = |s: &str, field_name: &str| -> Option<rust_decimal::Decimal> {
                             s.parse::<rust_decimal::Decimal>()
-                                .map_err(|e| tracing::error!("价格解析失败: symbol={}, price={}, error={}", symbol, s, e))
+                                .map_err(|e| tracing::error!(
+                                    "[BUG-005] K线价格解析失败: symbol={}, field={}, value={}, error={}",
+                                    symbol, field_name, s, e
+                                ))
                                 .ok()
                         };
 
                         let (Some(open), Some(high), Some(low), Some(close)) =
-                            (parse_price(o), parse_price(h), parse_price(l), parse_price(c))
+                            (parse_price(o, "open"), parse_price(h, "high"), parse_price(l, "low"), parse_price(c, "close"))
                         else {
                             // 解析失败，跳过此 tick，但通知风控
-                            tracing::error!("[BUG-005] K线价格解析失败，跳过 symbol={}", symbol);
+                            tracing::error!("[BUG-005] K线价格解析失败，跳过 symbol={}, o={}, h={}, l={}, c={}", symbol, o, h, l, c);
                             return Some(text);
                         };
 

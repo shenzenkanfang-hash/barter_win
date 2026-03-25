@@ -108,9 +108,6 @@ pub struct AccountPool {
     margin_config: MarginPoolConfig,
     /// 总已用保证金 (RwLock 保护) - 用于全局上限计算
     total_used_margin: RwLock<Decimal>,
-    /// Redis连续失败计数器 (用于熔断)
-    #[allow(dead_code)]
-    redis_failure_count: RwLock<u32>,
 }
 
 impl Default for AccountPool {
@@ -142,7 +139,6 @@ impl AccountPool {
             last_circuit_ts: RwLock::new(0),
             margin_config: MarginPoolConfig::default(),
             total_used_margin: RwLock::new(dec!(0)),
-            redis_failure_count: RwLock::new(0),
         }
     }
 
@@ -171,7 +167,6 @@ impl AccountPool {
             last_circuit_ts: RwLock::new(0),
             margin_config: MarginPoolConfig::default(),
             total_used_margin: RwLock::new(dec!(0)),
-            redis_failure_count: RwLock::new(0),
         }
     }
 

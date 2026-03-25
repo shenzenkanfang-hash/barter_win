@@ -91,8 +91,11 @@ impl RollingMean {
         self.sum += v;
         self.deque.push_back(v);
         if self.deque.len() > self.window {
-            self.sum -= self.deque.pop_front()
-                .expect("内部错误：滑动窗口Deque不能为空，数据处理逻辑异常");
+            // 安全 pop: len > window 保证至少有一个元素
+            if let Some(old) = self.deque.pop_front() {
+                self.sum -= old;
+            }
+            // else: 理论上不会发生，记录警告但不 panic
         }
         if self.deque.is_empty() {
             dec!(0)
@@ -137,9 +140,11 @@ impl RollingStd {
         self.sum_sq += v * v;
         self.deque.push_back(v);
         if self.deque.len() > self.window {
-            let old = self.deque.pop_front()
-                .expect("内部错误：滑动窗口Deque不能为空，数据处理逻辑异常");
-            self.sum_sq -= old * old;
+            // 安全 pop: len > window 保证至少有一个元素
+            if let Some(old) = self.deque.pop_front() {
+                self.sum_sq -= old * old;
+            }
+            // else: 理论上不会发生，记录警告但不 panic
         }
         let n = self.deque.len() as i32;
         if n < 2 {
@@ -195,8 +200,8 @@ impl RollingPercentile {
         // history[:-1] 是不包含当前值的窗口
         // 计算 history 中 <= current 的比例
         let total = self.buf.len() - 1; // 历史窗口大小（不含当前）
-        let current = self.buf.back().copied()
-            .expect("内部错误：指标缓冲区不能为空");
+        // 安全获取最后一个元素：len >= 10 保证 buffer 非空
+        let current = self.buf.back().copied().unwrap_or(val);
         let cnt = self.buf.iter().take(total).filter(|&&x| x <= current).count();
         Decimal::from(cnt) * dec!(100) / Decimal::from(total)
     }

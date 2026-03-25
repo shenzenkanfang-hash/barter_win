@@ -5,8 +5,7 @@
 use std::sync::Arc;
 use parking_lot::RwLock;
 use chrono::Utc;
-use rust_decimal::Decimal;
-use tracing::{info, debug, warn};
+use tracing::debug;
 
 use b_data_source::{KLine, Period, Tick};
 use super::tick_generator::SimulatedTick;

@@ -60,10 +60,17 @@ mod business_types_tests {
 
     #[test]
     fn test_volatility_tier() {
-        assert_eq!(VolatilityTier::from_ratio(dec!(3)), VolatilityTier::Low);
-        assert_eq!(VolatilityTier::from_ratio(dec!(7)), VolatilityTier::Medium);
-        assert_eq!(VolatilityTier::from_ratio(dec!(15)), VolatilityTier::High);
-        assert_eq!(VolatilityTier::from_ratio(dec!(25)), VolatilityTier::Extreme);
+        // from_volatility(vol_1m, vol_15m)
+        // thresholds: high_vol_1m=0.03, high_vol_15m=0.13
+        // High: vol_15m >= 0.13
+        assert_eq!(VolatilityTier::from_volatility(dec!(0.01), dec!(0.15)), VolatilityTier::High);
+        assert_eq!(VolatilityTier::from_volatility(dec!(0.01), dec!(0.13)), VolatilityTier::High);
+        // Medium: vol_15m < 0.13 AND vol_1m >= 0.03
+        assert_eq!(VolatilityTier::from_volatility(dec!(0.03), dec!(0.10)), VolatilityTier::Medium);
+        assert_eq!(VolatilityTier::from_volatility(dec!(0.05), dec!(0.05)), VolatilityTier::Medium);
+        // Low: vol_15m < 0.13 AND vol_1m < 0.03
+        assert_eq!(VolatilityTier::from_volatility(dec!(0.01), dec!(0.05)), VolatilityTier::Low);
+        assert_eq!(VolatilityTier::from_volatility(dec!(0.02), dec!(0.02)), VolatilityTier::Low);
     }
 
     #[test]

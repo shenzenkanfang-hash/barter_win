@@ -23,7 +23,7 @@ impl TickToWsConverter {
     /// * `tick` - SimulatedTick 数据（含 is_last_in_kline 标记）
     /// * `tick_index` - 当前 tick 在 K 线内的索引 (0-59)
     /// * `is_last_tick` - 备选：外部指定的 last tick 标记（当 tick.is_last_in_kline 为 true 时优先使用）
-    pub fn convert(&self, tick: &SimulatedTick, tick_index: u8, is_last_tick: bool) -> BinanceKlineMsg {
+    pub fn convert(&self, tick: &SimulatedTick, _tick_index: u8, is_last_tick: bool) -> BinanceKlineMsg {
         // 优先使用 SimulatedTick 自身的 is_last_in_kline 标记（由生成器内部判断）
         // 若未标记（外部构造的 tick），则使用传入的 is_last_tick 参数
         let is_closed = if tick.is_last_in_kline {

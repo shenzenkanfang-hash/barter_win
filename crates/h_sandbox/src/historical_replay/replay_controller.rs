@@ -5,13 +5,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use parking_lot::RwLock;
-use std::thread::sleep;
-use tracing::{info, warn, error};
+use tracing::info;
 
 use b_data_source::KLine;
 use super::tick_generator::StreamTickGenerator;
 use super::memory_injector::{MemoryInjector, SharedMarketData, MemoryInjectorConfig};
-use super::tick_generator::SimulatedTick;
 
 /// 回放控制器配置
 #[derive(Debug, Clone)]

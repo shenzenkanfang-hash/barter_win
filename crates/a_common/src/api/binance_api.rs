@@ -27,11 +27,11 @@ use std::time::{Duration, Instant};
 use tracing::{info, error};
 
 /// 创建带超时配置的 HTTP 客户端
-fn new_http_client() -> Client {
+fn new_http_client() -> Result<Client, crate::claint::error::EngineError> {
     Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
-        .expect("创建 HTTP 客户端失败")
+        .map_err(|e| crate::claint::error::EngineError::Network(format!("HTTP客户端创建失败: {}", e)))
 }
 
 /// API 限速器 - 区分 REQUEST_WEIGHT 和 ORDERS 两个体系
@@ -264,7 +264,7 @@ impl BinanceApiGateway {
     /// 创建新的网关（现货 API）
     pub fn new() -> Self {
         Self {
-            client: new_http_client(),
+            client: new_http_client().expect("创建 HTTP 客户端失败"),
             market_api_base: "https://api.binance.com".to_string(),
             account_api_base: "https://api.binance.com".to_string(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
@@ -275,7 +275,7 @@ impl BinanceApiGateway {
     /// 创建 USDT 合约 API 网关（实盘价格 + 实盘账户）
     pub fn new_futures() -> Self {
         Self {
-            client: new_http_client(),
+            client: new_http_client().expect("创建 HTTP 客户端失败"),
             market_api_base: "https://fapi.binance.com".to_string(),
             account_api_base: "https://fapi.binance.com".to_string(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
@@ -288,7 +288,7 @@ impl BinanceApiGateway {
     /// 用于：实盘行情 + 模拟交易
     pub fn new_futures_with_testnet() -> Self {
         Self {
-            client: new_http_client(),
+            client: new_http_client().expect("创建 HTTP 客户端失败"),
             market_api_base: "https://fapi.binance.com".to_string(),      // 实盘行情
             account_api_base: "https://testnet.binancefuture.com".to_string(), // 测试网账户
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())), // 限制值将从 exchangeInfo 设置
@@ -299,7 +299,7 @@ impl BinanceApiGateway {
     /// 创建带自定义 API 地址的网关（用于测试）
     pub fn with_api_base(api_base: &str) -> Self {
         Self {
-            client: new_http_client(),
+            client: new_http_client().expect("创建 HTTP 客户端失败"),
             market_api_base: api_base.to_string(),
             account_api_base: api_base.to_string(),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())),
