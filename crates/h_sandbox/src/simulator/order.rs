@@ -54,6 +54,16 @@ impl OrderEngine {
         self.account.update_price(symbol, price);
     }
 
+    /// 获取当前价格
+    pub fn get_current_price(&self, symbol: &str) -> Option<Decimal> {
+        let price = self.account.get_price(symbol);
+        if price == Decimal::ZERO {
+            None
+        } else {
+            Some(price)
+        }
+    }
+
     /// 检查是否为平仓
     pub fn is_closing(&self, symbol: &str, side: Side) -> bool {
         self.account.get_position(symbol)

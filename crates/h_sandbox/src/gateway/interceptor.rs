@@ -64,7 +64,10 @@ impl ShadowBinanceGateway {
             EngineSide::Sell => Side::Sell,
         };
 
-        let price = req.price.unwrap_or(Decimal::ZERO);
+        // 市价单需要使用当前市场价格
+        let price = req.price.unwrap_or_else(|| {
+            self.engine.read().get_current_price(&req.symbol).unwrap_or(Decimal::ZERO)
+        });
         let leverage = dec!(1); // 默认1倍杠杆，后续可配置
 
         let order_req = OrderRequest {
