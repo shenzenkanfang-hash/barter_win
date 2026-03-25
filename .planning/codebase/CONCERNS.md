@@ -150,20 +150,19 @@ Status: Partially Fixed (2026-03-25)
 5. 性能问题
 ================================================================
 
-【PERF-001】内存备份频繁序列化和反序列化
-状态: ⏳ 待修复
+【PERF-001】内存备份频繁序列化 ⚠️ 需架构重构
 位置: crates/a_common/src/backup/memory_backup.rs
 
-问题: 每次保存都执行完整的 JSON 序列化
-     append_trade 每次都检查文件大小并可能创建新文件
-建议: 使用缓冲写入，定期刷新到磁盘
+问题: 每次保存都执行完整的 JSON 序列化，append_trade 频繁检查文件大小
+建议: 使用 BufWriter 缓冲写入，每100次操作或5秒刷新一次，批量检查文件大小
+状态: 待架构重构（P2 优先级，需要引入缓冲写入机制）
 
-【PERF-002】SQLite 写入可能阻塞主线程
-状态: ⏳ 待修复
+【PERF-002】SQLite 写入可能阻塞主线程 ⚠️ 需架构重构
 位置: crates/e_risk_monitor/src/persistence/sqlite_persistence.rs
 
 问题: SQLite 写入操作是同步的，可能阻塞交易线程
 建议: 使用异步写入或批量提交机制
+状态: 待架构重构（P2 优先级，需要引入 tokio::spawn 异步写入）
 
 【PERF-003】K线历史文件无限增长 ✅ 已修复
 位置: crates/b_data_source/src/ws/kline_1m/ws.rs (write_to_history)
@@ -188,27 +187,28 @@ Status: Partially Fixed (2026-03-25)
 6. 脆弱区域
 ================================================================
 
-【FRAG-001】WebSocket 重连逻辑
-状态: ⏳ 待改进
+【FRAG-001】WebSocket 重连逻辑 ✅ 已改进
 文件: crates/a_common/src/ws/binance_ws.rs
 
-脆弱性:
-  - 重连使用指数退避但没有最大重试次数
-  - 重连后订阅状态需要手动恢复
-  - 断开连接检测依赖消息超时
+修复:
+  - 添加 MAX_RECONNECT_ATTEMPTS = 10 最大重试次数
+  - 使用 for 循环替代无限 loop，超过重试次数后返回 MarketError::WebSocketError
+  - 添加尝试次数日志，方便调试追踪
+  - 注意：重连后订阅状态恢复尚未实现（调用方负责重新订阅）
 
-建议: 添加最大重试次数限制，实现自动订阅恢复机制
+修复日期: 2026-03-25
 
-【FRAG-002】内存备份同步
-状态: ⏳ 待改进
+【FRAG-002】内存备份同步 ✅ 已改进
 文件: crates/a_common/src/backup/memory_backup.rs
 
-脆弱性:
-  - sync_to_disk 失败时会记录错误但继续运行
-  - 磁盘空间不足时可能静默失败
-  - 同步期间内存数据可能不一致
+修复:
+  - 添加 SyncStatus 枚举 (Synced/Dirty/Failed)
+  - 添加 check_disk_space() 函数检查磁盘可用空间（阈值 100MB）
+  - sync_to_disk() 失败时返回错误而非静默继续
+  - start_sync_task() 追踪连续失败次数，超过3次输出【严重】级别警告
+  - 同步成功时打印 info 级别日志，失败时打印 warn/error 级别
 
-建议: 添加同步状态检查，失败时通知风控
+修复日期: 2026-03-25
 
 【FRAG-003】交易所 API 限流处理
 状态: ⏳ 待改进

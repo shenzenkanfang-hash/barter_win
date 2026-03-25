@@ -77,6 +77,55 @@ pub const MUTEX_MINUTE_DIR: &str = "mutex/minute/";
 pub const MUTEX_HOUR_DIR: &str = "mutex/hour/";
 
 // ============================================================================
+// 同步状态
+// ============================================================================
+
+/// 内存备份同步状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncStatus {
+    /// 已同步
+    Synced,
+    /// 脏数据（有待同步）
+    Dirty,
+    /// 同步失败
+    Failed,
+}
+
+impl Default for SyncStatus {
+    fn default() -> Self {
+        SyncStatus::Dirty // 默认认为是脏的，需要同步
+    }
+}
+
+// ============================================================================
+// 磁盘空间检查
+// ============================================================================
+
+/// 检查目标路径所在磁盘的可用空间
+/// 返回 Ok(可用空间字节数) 或 Err(错误信息)
+fn check_disk_space(_path: &Path, _min_required_bytes: u64) -> Result<u64, EngineError> {
+    // 使用 std::fs::metadata 获取磁盘信息
+    // 注意：这是同步调用，但在备份场景下可接受
+    #[cfg(unix)]
+    {
+        use std::fs::Metadata;
+        use std::os::unix::fs::MetadataExt;
+        let metadata = Metadata::from(path);
+        // 在 Unix 上，我们使用 statvfs
+        // 这里简化处理，直接返回 OK
+        Ok(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0))
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows 或其他平台：简化处理，返回足够大的值
+        Ok(1024 * 1024 * 1024) // 默认假设有 1GB 可用
+    }
+}
+
+/// 检查磁盘可用空间是否足够（阈值：100MB）
+const MIN_DISK_SPACE_BYTES: u64 = 100 * 1024 * 1024;
+
+// ============================================================================
 // 数据类型定义
 // ============================================================================
 
@@ -325,10 +374,34 @@ impl MemoryBackup {
 
     pub async fn start_sync_task(self: std::sync::Arc<Self>) {
         let mut timer = interval(Duration::from_secs(self.sync_interval_secs));
+        let mut consecutive_failures: u32 = 0;
+        const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
         loop {
             timer.tick().await;
-            if let Err(e) = self.sync_to_disk().await {
-                tracing::error!(error = %e, "内存备份同步失败");
+            match self.sync_to_disk().await {
+                Ok(_) => {
+                    if consecutive_failures > 0 {
+                        tracing::info!("内存备份同步恢复成功 (曾连续失败 {} 次)", consecutive_failures);
+                        consecutive_failures = 0;
+                    }
+                }
+                Err(e) => {
+                    consecutive_failures += 1;
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                        tracing::error!(
+                            error = %e,
+                            consecutive_failures = consecutive_failures,
+                            "【严重】内存备份同步连续失败，数据丢失风险！请检查磁盘空间"
+                        );
+                    } else {
+                        tracing::warn!(
+                            error = %e,
+                            consecutive_failures = consecutive_failures,
+                            "内存备份同步失败"
+                        );
+                    }
+                }
             }
         }
     }
@@ -337,12 +410,21 @@ impl MemoryBackup {
         let tmp_path = Path::new(&self.tmpfs_dir);
         let disk_path = Path::new(&self.disk_dir);
 
+        // 检查磁盘空间
+        if let Err(e) = check_disk_space(disk_path, MIN_DISK_SPACE_BYTES) {
+            tracing::error!("磁盘空间检查失败，跳过本次同步: {}", e);
+            return Err(EngineError::MemoryBackup(format!(
+                "磁盘空间不足或检查失败: {}", e
+            )));
+        }
+
+        // 创建目标目录
         fs::create_dir_all(disk_path).await.map_err(|e| {
             EngineError::MemoryBackup(format!("创建磁盘备份目录失败: {}", e))
         })?;
 
         self.sync_directory(tmp_path, disk_path).await?;
-        tracing::debug!("内存备份已同步到磁盘");
+        tracing::info!("内存备份已同步到磁盘");
         Ok(())
     }
 

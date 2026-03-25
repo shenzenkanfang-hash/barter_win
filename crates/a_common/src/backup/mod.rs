@@ -18,7 +18,7 @@ pub use crate::api::SymbolRulesData;
 
 pub use memory_backup::{
     AccountSnapshot, DepthData, DepthEntry, IndicatorsData, KlineData, KlineEntry,
-    MemoryBackup, PositionSnapshot, Positions, SymbolMutexStatus,
+    MemoryBackup, PositionSnapshot, Positions, SymbolMutexStatus, SyncStatus,
     SystemConfig, TaskInfo, TaskPool, TradingPairInfo, TradingPairs, ChannelData,
     ACCOUNT_FILE, DEPTH_DIR, INDICATORS_1D_HISTORY_DIR, INDICATORS_1D_REALTIME_DIR,
     INDICATORS_1M_HISTORY_DIR, INDICATORS_1M_REALTIME_DIR, KLINE_1D_HISTORY_DIR,

@@ -201,12 +201,15 @@ impl BinanceWsConnector {
     /// 重连 (指数退避)
     ///
     /// 重连策略: 5s → 10s → 20s → ... → 120s (最大)
+    /// 最多重试 MAX_RECONNECT_ATTEMPTS 次，超过后返回错误
     pub async fn reconnect_with_backoff(&mut self) -> Result<(), MarketError> {
+        const MAX_RECONNECT_ATTEMPTS: u32 = 10;
         let mut backoff = Duration::from_secs(5);
         let max_backoff = Duration::from_secs(120);
 
-        loop {
-            tracing::info!("WebSocket 重连中, 等待 {:?}...", backoff);
+        for attempt in 1..=MAX_RECONNECT_ATTEMPTS {
+            tracing::info!("WebSocket 重连中 (尝试 {}/{}), 等待 {:?}...",
+                attempt, MAX_RECONNECT_ATTEMPTS, backoff);
             sleep(backoff).await;
 
             match self.connect().await {
@@ -215,11 +218,19 @@ impl BinanceWsConnector {
                     return Ok(());
                 }
                 Err(e) => {
-                    tracing::warn!("WebSocket 重连失败: {}", e);
+                    tracing::warn!("WebSocket 重连失败 (尝试 {}/{}): {}",
+                        attempt, MAX_RECONNECT_ATTEMPTS, e);
                     backoff = (backoff * 2).min(max_backoff);
                 }
             }
         }
+
+        let msg = format!(
+            "WebSocket 重连失败: 已达到最大重试次数 ({})",
+            MAX_RECONNECT_ATTEMPTS
+        );
+        tracing::error!("{}", msg);
+        Err(MarketError::WebSocketError(msg))
     }
 }
 
