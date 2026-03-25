@@ -14,3 +14,4 @@ pub mod h_15m;     // 高频15分钟策略检查
 pub mod l_1d;      // 低频1天策略检查
 
 pub use check_table::{CheckTable, CheckEntry};
+pub use types::{CheckChainContext, CheckSignal, CheckChainResult};

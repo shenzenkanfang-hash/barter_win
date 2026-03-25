@@ -227,3 +227,55 @@ pub struct TradingDecision {
     pub confidence: u8,
     pub level: StrategyLevel,
 }
+
+// ==================== CheckChain 类型 ====================
+
+use x_data::trading::signal::{StrategyId, PositionRef};
+
+/// 检查链上下文（双周期通用）
+#[derive(Debug, Clone)]
+pub struct CheckChainContext {
+    /// 当前持仓数量
+    pub current_position_qty: Decimal,
+    /// 策略标识
+    pub strategy_id: StrategyId,
+    /// 仓位引用（加仓/平仓时必须）
+    pub position_ref: Option<PositionRef>,
+}
+
+/// 检查信号枚举
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckSignal {
+    Exit,   // 退出信号
+    Close,  // 关仓信号
+    Hedge,  // 对冲信号
+    Add,    // 加仓信号
+    Open,   // 开仓信号
+}
+
+/// 检查链结果
+#[derive(Debug, Clone, Default)]
+pub struct CheckChainResult {
+    pub signals: Vec<CheckSignal>,
+}
+
+impl CheckChainResult {
+    pub fn new() -> Self {
+        Self { signals: Vec::new() }
+    }
+
+    /// 添加信号
+    pub fn add_signal(&mut self, signal: CheckSignal) {
+        self.signals.push(signal);
+    }
+
+    /// 检查是否有特定信号
+    pub fn has(&self, signal: CheckSignal) -> bool {
+        self.signals.contains(&signal)
+    }
+
+    /// 是否有任何信号
+    pub fn is_empty(&self) -> bool {
+        self.signals.is_empty()
+    }
+}
