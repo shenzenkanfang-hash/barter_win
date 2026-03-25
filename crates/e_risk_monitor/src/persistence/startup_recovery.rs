@@ -130,6 +130,13 @@ impl UnifiedPositionSnapshot {
     }
 }
 
+/// 从 MemPositionSnapshot 自动转换（默认使用 MemoryDisk 源）
+impl From<MemPositionSnapshot> for UnifiedPositionSnapshot {
+    fn from(pos: MemPositionSnapshot) -> Self {
+        UnifiedPositionSnapshot::from_memory_backup(pos)
+    }
+}
+
 /// 统一账户快照
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedAccountSnapshot {
