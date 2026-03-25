@@ -6,4 +6,4 @@
 
 pub mod error;
 
-pub use error::{EngineError, MarketError};
+pub use error::{EngineError, MarketError, AppError};
