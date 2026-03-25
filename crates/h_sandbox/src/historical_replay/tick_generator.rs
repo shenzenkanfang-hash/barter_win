@@ -24,6 +24,7 @@ use rust_decimal_macros::dec;
 
 use b_data_source::KLine;
 use super::noise::GaussianNoise;
+use super::shard_cache::{ShardFile, ShardReader, ShardReaderChain, ShardCacheError};
 
 /// 配置参数
 const TICKS_PER_1M: u8 = 60;
@@ -115,6 +116,33 @@ impl StreamTickGenerator {
         loader: impl Iterator<Item = KLine> + Send + 'static,
     ) -> Self {
         Self::new(symbol, Box::new(loader))
+    }
+
+    /// 从分片缓存创建生成器
+    pub fn from_shards(
+        symbol: String,
+        shards: Vec<ShardFile>,
+    ) -> Result<Self, ShardCacheError> {
+        let readers: Result<Vec<ShardReader>, _> = shards
+            .iter()
+            .map(|s| {
+                ShardReader::new(&s.path).map_err(|e| match e {
+                    super::shard_cache::ShardReadError::Io(io_err) => {
+                        ShardCacheError::Io(io_err)
+                    }
+                    super::shard_cache::ShardReadError::Csv(csv_err) => {
+                        ShardCacheError::Csv(csv_err)
+                    }
+                    super::shard_cache::ShardReadError::Parse(msg) => {
+                        ShardCacheError::Parse(msg)
+                    }
+                })
+            })
+            .collect();
+        let chain = ShardReaderChain::new(readers?);
+        // filter_map 过滤掉读取错误，只保留有效的 K线
+        let kline_iter = chain.filter_map(|r| r.ok());
+        Ok(Self::from_loader(symbol, kline_iter))
     }
 
     /// 设置固定 qty
