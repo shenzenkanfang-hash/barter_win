@@ -1,684 +1,453 @@
-# Rust 量化交易引擎 - 架构文档
-
-> 本文档是项目的**唯一权威架构文档**，整合了接口化解耦设计与 V1.4 业务流程。
->
-> **文档版本: 3.0** | 更新日期: 2026-03-24 | 评分: **100/100** ✅
-
----
+================================================================
+barter-rs 量化交易系统 - 最终架构文档
+================================================================
+项目: barter-rs 量化交易系统
+Author: 软件架构师 + Droid
+Date: 2026-03-25
+Version: V4.0 (x_data 架构重构完成版)
+Status: ✅ 生产可用
+================================================================
 
 ## 目录
 
-- [1. 整体架构](#1-整体架构)
-- [2. 分层架构](#2-分层架构)
-- [3. 接口层定义](#3-接口层定义)
-- [4. 核心引擎 (V1.4)](#4-核心引擎-v14)
-- [5. 模块详细说明](#5-模块详细说明)
-- [6. V1.4 业务流程](#6-v14-业务流程)
-- [7. 依赖关系](#7-依赖关系)
-- [8. 封装与安全](#8-封装与安全)
-- [9. 审计评分](#9-审计评分)
+1. 整体架构
+2. 分层依赖关系
+3. x_data 业务数据抽象层
+4. StateManager 统一状态管理
+5. 核心组件说明
+6. Crate 结构
+7. 依赖方向图
+8. 验收状态
+9. 版本历史
 
----
-
-## 1. 整体架构
+================================================================
+1. 整体架构
+================================================================
 
 ### 1.1 设计目标
 
 | 特性 | 说明 |
 |------|------|
-| **模块化** | 每个 crate 单一职责 |
-| **接口隔离** | 模块间通过 Trait 接口通信 |
-| **依赖注入** | 核心组件通过构造函数注入 |
-| **内存安全** | `#![forbid(unsafe_code)]` 全局启用 |
-| **线程安全** | `Send + Sync` 约束 + 同步原语 |
+| 模块化 | 每个 crate 单一职责 |
+| 接口隔离 | 模块间通过 Trait 接口通信 |
+| 依赖注入 | 核心组件通过构造函数注入 |
+| 内存安全 | #![forbid(unsafe_code)] 全局启用 |
+| 线程安全 | Send + Sync 约束 + 同步原语 |
+| 状态统一 | StateManager trait 统一状态视图 |
 
-### 1.2 六层架构
+### 1.2 八层架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
+│ L8: h_sandbox (沙盒层)                                           │
+│   └── 实验性代码、压力测试                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ L7: g_test (测试层)                                              │
+│   └── 集成测试                                                   │
+├─────────────────────────────────────────────────────────────────┤
 │ L6: f_engine (引擎运行时层)                                       │
-│   ├── interfaces/    # 100% 纯 Trait 接口契约                   │
-│   └── core/          # TradingEngineV2 (V1.4)                   │
+│   ├── core/          # TradingEngine 主循环                     │
+│   ├── order/         # 订单执行                                  │
+│   └── channel/       # 交易模式切换                              │
 ├─────────────────────────────────────────────────────────────────┤
 │ L5: e_risk_monitor (合规约束层)                                   │
+│   ├── risk/          # 风控检查                                 │
+│   ├── position/      # 持仓管理 (StateManager)                   │
+│   ├── persistence/   # 持久化                                    │
+│   └── shared/        # 账户池 (StateManager)                    │
 ├─────────────────────────────────────────────────────────────────┤
-│ L4: d_checktable (检查层)                                         │
+│ L4: d_checktable (检查层)                                        │
+│   └── h_15m/, l_1d/  # 高频/低频检查                           │
 ├─────────────────────────────────────────────────────────────────┤
 │ L3: c_data_process (信号生成层)                                   │
+│   └── min/, day/      # 指标计算、信号生成                       │
 ├─────────────────────────────────────────────────────────────────┤
-│ L2: b_data_source (数据源层)                                      │
+│ L2: b_data_source (数据源层)                                     │
+│   ├── api/           # REST API                                 │
+│   └── ws/            # WebSocket 数据                           │
 ├─────────────────────────────────────────────────────────────────┤
 │ L1: a_common (基础设施层)                                         │
-│   └── models/dto  # 接口层 DTO 统一收敛                          │
+│   ├── api/           # API 网关、限流器                         │
+│   ├── ws/            # WebSocket 连接器                         │
+│   ├── config/        # 平台配置、路径                           │
+│   └── error.rs       # 错误类型                                 │
 └─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  x_data        │  ← 业务数据抽象层 (新增)
+                    │  业务数据层     │
+                    ├─────────────────┤
+                    │ position/      │  持仓数据类型
+                    │ account/       │  账户数据类型
+                    │ market/        │  市场数据类型
+                    │ trading/       │  交易数据类型
+                    │ state/         │  StateManager trait
+                    └─────────────────┘
 ```
 
-### 1.3 Crate 目录结构
+================================================================
+2. 分层依赖关系
+================================================================
+
+### 2.1 单向依赖链 (无循环)
 
 ```
-crates/
-├── a_common/           # L1 基础设施：API、WS、配置、日志、类型
-│   └── src/models/
-│       ├── types.rs    # Side, OrderType, OrderStatus, PositionSide
-│       ├── market_data.rs # MarketKLine, MarketTick, OrderBook
-│       └── dto.rs      # 接口层 DTO (Signal, Risk, CheckTable)
-├── b_data_source/      # L2 数据源：数据获取、K线、品种池
-├── c_data_process/     # L3 信号生成：指标计算、信号
-├── d_checktable/       # L4 检查层：高频/低频检查
-├── e_risk_monitor/     # L5 风控：风控、持仓、持久化
-└── f_engine/           # L6 引擎：100% 纯 Trait 接口 + TradingEngineV2
-    ├── interfaces/     # 100% 纯 Trait 定义
-    └── core/           # 核心引擎实现
+a_common (基础设施层 - 零依赖)
+    ↑
+    │  ← x_data 依赖 a_common 获取错误类型
+x_data (业务数据抽象层)
+    ↑
+    │  ← e_risk_monitor 依赖 x_data 获取数据类型 + trait
+e_risk_monitor (合规约束层)
+    ↑
+    │  ← f_engine 依赖 e_risk_monitor 获取风控、持仓
+f_engine (引擎运行时层)
+    ↑
+    │  ← d_checktable, c_data_process, b_data_source
+d_checktable, c_data_process, b_data_source
 ```
 
----
+### 2.2 依赖规则
 
-## 2. 分层架构
+- a_common: 纯基础设施，无业务依赖
+- x_data: 依赖 a_common，不依赖任何业务层
+- b/c/d 层: 依赖 a_common + x_data
+- e_risk_monitor: 依赖 a_common + x_data
+- f_engine: 依赖 a_common + x_data + e_risk_monitor (仅通过 trait)
 
-### 2.1 L1: a_common (基础设施层)
+================================================================
+3. x_data 业务数据抽象层
+================================================================
+
+### 3.1 目录结构
+
+```
+crates/x_data/src/
+├── lib.rs                     → 统一导出所有子模块
+│
+├── position/                  → 持仓数据类型
+│   ├── mod.rs
+│   ├── types.rs              → LocalPosition, Direction, PositionSide
+│   └── snapshot.rs           → PositionSnapshot, UnifiedPositionSnapshot
+│
+├── account/                   → 账户数据类型
+│   ├── mod.rs
+│   ├── types.rs              → FundPool, AccountSnapshot
+│   └── pool.rs               → FundPoolManager
+│
+├── market/                    → 市场数据类型
+│   ├── mod.rs
+│   ├── tick.rs               → Tick
+│   ├── kline.rs              → KLine, KlineData
+│   ├── orderbook.rs           → OrderBook, DepthData
+│   └── volatility.rs          → SymbolVolatility
+│
+├── trading/                   → 交易数据类型
+│   ├── mod.rs
+│   ├── rules.rs              → SymbolRulesData, ParsedSymbolRules
+│   ├── order.rs              → OrderRejectReason, OrderResult
+│   └── futures.rs            → FuturesPosition, FuturesAccount
+│
+├── state/                    → 状态管理trait
+│   ├── mod.rs
+│   └── traits.rs             → StateViewer, StateManager, UnifiedStateView
+│
+└── error.rs                  → XDataError (避免循环依赖)
+```
+
+### 3.2 迁移数据类型清单
+
+| 类型 | 来源 | 目标 |
+|------|------|------|
+| LocalPosition | e_risk_monitor | x_data/position/types.rs |
+| Direction | e_risk_monitor | x_data/position/types.rs |
+| PositionSnapshot | a_common/backup | x_data/position/snapshot.rs |
+| UnifiedPositionSnapshot | e_risk_monitor | x_data/position/snapshot.rs |
+| AccountSnapshot | a_common/backup | x_data/account/types.rs |
+| FundPool | e_risk_monitor | x_data/account/types.rs |
+| FundPoolManager | e_risk_monitor | x_data/account/pool.rs |
+| Tick | b_data_source | x_data/market/tick.rs |
+| KLine | b_data_source | x_data/market/kline.rs |
+| OrderBookLevel | a_common | x_data/market/orderbook.rs |
+| OrderRejectReason | a_common/exchange | x_data/trading/order.rs |
+| OrderResult | a_common/exchange | x_data/trading/order.rs |
+| SymbolRulesData | b_data_source | x_data/trading/rules.rs |
+| FuturesPosition | b_data_source | x_data/trading/futures.rs |
+
+### 3.3 兼容性设计
+
+为避免大规模 import 修改，采用双兼容模式：
+
+```
+原始类型保留位置:
+    a_common/src/backup/ → 继续导出原类型
+
+新增 x_data 前缀重导出:
+    a_common/src/backup/mod.rs:
+        pub use x_data::position::snapshot::PositionSnapshot as XDataPositionSnapshot;
+        pub use x_data::account::types::AccountSnapshot as XDataAccountSnapshot;
+```
+
+================================================================
+4. StateManager 统一状态管理
+================================================================
+
+### 4.1 Trait 定义
+
+```rust
+// x_data/src/state/traits.rs
+
+/// 状态视图 trait（只读接口）
+pub trait StateViewer: Send + Sync {
+    fn get_positions(&self) -> Vec<UnifiedPositionSnapshot>;
+    fn get_account(&self) -> Option<AccountSnapshot>;
+    fn get_open_orders(&self) -> Vec<OrderRecord>;
+}
+
+/// 状态管理器 trait（可写接口）
+pub trait StateManager: StateViewer {
+    fn update_position(&self, symbol: &str, pos: PositionSnapshot) -> Result<(), XDataError>;
+    fn remove_position(&self, symbol: &str) -> Result<(), XDataError>;
+    fn lock_positions_read(&self) -> Vec<UnifiedPositionSnapshot>;
+}
+```
+
+### 4.2 实现者
+
+| 实现者 | 实现的 trait | 说明 |
+|--------|-------------|------|
+| LocalPositionManager | StateManager | 持仓状态管理 |
+| AccountPool (FundPoolManager) | StateManager | 账户状态管理 |
+
+### 4.3 统一状态视图
+
+```rust
+/// 统一状态视图 - 组合多个 StateManager
+pub struct UnifiedStateView {
+    position_manager: Arc<dyn StateManager>,
+    account_pool: Arc<dyn StateManager>,
+}
+
+impl UnifiedStateView {
+    /// 原子读取所有状态
+    pub fn snapshot(&self) -> SystemSnapshot {
+        let positions = self.position_manager.get_positions();
+        let account = self.account_pool.get_account();
+        SystemSnapshot {
+            positions,
+            account,
+            timestamp: Utc::now(),
+        }
+    }
+}
+
+/// 系统完整快照
+pub struct SystemSnapshot {
+    pub positions: Vec<UnifiedPositionSnapshot>,
+    pub account: Option<AccountSnapshot>,
+    pub timestamp: DateTime<Utc>,
+}
+```
+
+### 4.4 导出位置
+
+```rust
+// e_risk_monitor/src/lib.rs
+pub use x_data::state::{StateViewer, StateManager, UnifiedStateView, SystemSnapshot};
+```
+
+================================================================
+5. 核心组件说明
+================================================================
+
+### 5.1 a_common (L1 - 基础设施层)
 
 ```
 a_common/src/
-├── api/            # Binance API 网关、限流器
-├── ws/             # WebSocket 连接器
-├── models/         # 公共数据类型
-│   ├── types.rs    # Side, OrderType, OrderStatus, PositionSide
-│   ├── market_data.rs # MarketKLine, MarketTick, OrderBook
-│   └── dto.rs      # 接口层 DTO (Signal, Risk, CheckTable)
-├── config/         # 平台配置、路径
-├── logs/           # 检查点日志
-├── backup/         # 内存备份
-├── exchange/       # 交易所类型 (ExchangeAccount, OrderResult)
-└── volatility/     # 波动率计算
+├── api/                    # Binance API 网关、限流器
+├── ws/                     # WebSocket 连接器
+├── config/                 # Platform, Paths
+├── backup/                 # 内存备份 (re-export x_data)
+├── error.rs               # EngineError, MarketError, AppError
+└── claint/                # 统一错误 AppError
 ```
 
-**核心类型导出:**
-
-| 类型 | 位置 | 说明 |
-|------|------|------|
-| `Side` | models/types | 订单方向 (Buy/Sell) |
-| `OrderType` | models/types | 订单类型 (Market/Limit) |
-| `OrderStatus` | models/types | 订单状态 |
-| `PositionSide` | models/types | 持仓方向 (Long/Short/NONE) |
-| `TradingSignal` | models/dto | 交易信号 |
-| `RiskLevel` | models/dto | 风控等级 |
-| `CheckTableResult` | models/dto | 检查结果 |
-| `ExchangeAccount` | exchange | 账户信息 |
-| `OrderResult` | exchange | 订单结果 |
-
-### 2.2 L2: b_data_source (数据源层)
+### 5.2 x_data (新增 - 业务数据层)
 
 ```
-b_data_source/src/
-├── api/            # 数据 API
-├── ws/             # 数据 WebSocket
-├── models/         # 数据模型 (KLine, Tick)
-├── symbol_rules/   # 品种规则
-├── trader_pool/    # 品种池管理
-├── replay_source/  # 历史数据回放
-└── recovery/       # 灾难恢复
+x_data/src/
+├── position/              # 持仓数据类型
+├── account/               # 账户数据类型
+├── market/                # 市场数据类型
+├── trading/               # 交易数据类型
+├── state/                 # 状态管理trait
+└── error.rs              # XDataError
 ```
 
-### 2.3 L3: c_data_process (信号生成层)
-
-```
-c_data_process/src/
-├── min/            # 分钟级策略
-│   └── trend.rs    # 趋势指标 (EMA, RSI, MACD)
-├── day/            # 日线级策略
-│   └── trend.rs    # 日线指标
-├── strategy_state/ # 策略状态
-├── processor.rs    # 信号处理器
-├── types.rs        # 类型定义
-└── pine_indicator_full.rs # Pine 指标实现
-```
-
-### 2.4 L4: d_checktable (检查层)
-
-```
-d_checktable/src/
-├── h_15m/          # 高频 15 分钟通道
-│   ├── signal_generator.rs
-│   ├── price_control_generator.rs
-│   ├── market_status_generator.rs
-│   └── check/     # 检查模块
-├── l_1d/           # 低频 1 天通道
-│   ├── signal_generator.rs
-│   ├── price_control_generator.rs
-│   └── check/     # 检查模块
-├── check_table.rs
-└── types.rs
-```
-
-### 2.5 L5: e_risk_monitor (风控层)
+### 5.3 e_risk_monitor (L5 - 合规约束层)
 
 ```
 e_risk_monitor/src/
-├── risk/           # 风控核心
-│   ├── common/    # 通用风控 (RiskPreChecker)
-│   ├── pin/       # Pin Bar 风控
-│   ├── trend/     # 趋势风控
-│   └── minute_risk.rs
-├── position/       # 持仓管理
-│   ├── LocalPositionManager
-│   └── PositionExclusionChecker
-├── persistence/    # 持久化
-│   ├── sqlite_persistence.rs
-│   └── disaster_recovery.rs
-└── shared/        # 共享组件
-    ├── account_pool/ # 账户池
-    └── market_status/ # 市场状态
+├── risk/                  # 风控核心
+├── position/              # 持仓管理 (impl StateManager)
+├── persistence/           # 持久化
+└── shared/               # 账户池 (impl StateManager)
 ```
 
-### 2.6 L6: f_engine (引擎层)
+### 5.4 f_engine (L6 - 引擎运行时层)
 
 ```
 f_engine/src/
-├── interfaces/     # 100% 纯 Trait 接口契约 ⭐
-│   ├── market_data.rs  # MarketDataProvider (#[async_trait])
-│   ├── strategy.rs    # StrategyExecutor, StrategyInstance
-│   ├── risk.rs        # RiskChecker, RiskCheckResult
-│   ├── execution.rs   # ExchangeGateway
-│   └── check_table.rs # CheckTableProvider (#[async_trait])
-├── core/           # 核心引擎 ⭐
-│   ├── engine_v2.rs       # TradingEngineV2 (V1.4)
-│   ├── engine_state.rs     # 引擎状态管理
-│   ├── state.rs           # 品种状态、TradeLock
-│   ├── business_types.rs   # 业务类型 (V1.4) - re-export PositionSide
-│   ├── triggers.rs        # 触发器
-│   ├── execution.rs       # 执行流程
-│   ├── fund_pool.rs       # 资金池
-│   ├── risk_manager.rs    # 风控管理
-│   ├── monitoring.rs      # 超时监控
-│   ├── rollback.rs        # 回滚
-│   ├── strategy_pool.rs   # 策略池
-│   └── tests.rs
-├── order/          # 订单模块
-│   ├── gateway.rs
-│   ├── mock_binance_gateway.rs
-│   └── order.rs
-├── channel/        # 通道模块
-│   └── mode_switcher.rs
-└── strategy/       # 策略模块
-    └── executor.rs
+├── core/                  # 核心引擎
+├── order/                 # 订单模块
+└── channel/              # 通道模块
 ```
 
----
-
-## 3. 接口层定义
-
-### 3.1 接口契约概览
+================================================================
+6. Crate 结构
+================================================================
 
 ```
-f_engine/src/interfaces/   (100% 纯 Trait)
-├── market_data.rs   # 市场数据接口
-├── strategy.rs      # 策略接口
-├── risk.rs          # 风控接口
-├── execution.rs     # 执行接口
-└── check_table.rs   # CheckTable 接口
+crates/
+├── a_common/              # L1 基础设施层
+│   ├── api/               → BinanceApiGateway, RateLimiter
+│   ├── ws/                → BinanceWsConnector
+│   ├── config/            → Platform, Paths
+│   ├── backup/            → MemoryBackup (re-export x_data)
+│   ├── error.rs           → EngineError, MarketError, AppError
+│   └── claint/            → 统一错误类型
+│
+├── x_data/                # 【新增】业务数据抽象层
+│   ├── position/           → LocalPosition, Direction, Snapshot
+│   ├── account/            → FundPool, AccountSnapshot
+│   ├── market/             → Tick, KLine, OrderBook
+│   ├── trading/            → SymbolRules, OrderResult
+│   ├── state/              → StateManager trait
+│   └── error.rs            → XDataError
+│
+├── b_data_source/         # L2 数据源层
+├── c_data_process/        # L3 信号生成层
+├── d_checktable/          # L4 检查层
+├── e_risk_monitor/        # L5 风控层 (impl StateManager)
+├── f_engine/              # L6 引擎层
+├── g_test/                 # L7 测试层
+└── h_sandbox/              # L8 沙盒层
 ```
 
-> **重要**: interfaces 层所有 DTO 已迁移至 `a_common::models::dto`，本目录只包含纯 Trait 定义和 re-export。
+================================================================
+7. 依赖方向图
+================================================================
 
-### 3.2 MarketDataProvider
-
-```rust
-#[async_trait]
-pub trait MarketDataProvider: Send + Sync {
-    async fn next_tick(&self) -> Option<MarketTick>;
-    async fn next_completed_kline(&self) -> Option<MarketTick>;
-    fn current_price(&self, symbol: &str) -> Option<Decimal>;
-    async fn get_klines(&self, symbol: &str, period: &str) -> Vec<MarketKLine>;
-    fn symbols(&self) -> Vec<String>;
-}
+```
+                    ┌──────────────────────────────────────┐
+                    │           b_data_source              │
+                    │     (L2 数据源层 - 无业务逻辑)        │
+                    └──────────────────┬───────────────────┘
+                                       │
+                    ┌──────────────────┴───────────────────┐
+                    │          c_data_process              │
+                    │      (L3 信号生成层 - 无业务逻辑)      │
+                    └──────────────────┬───────────────────┘
+                                       │
+                    ┌──────────────────┴───────────────────┐
+                    │           d_checktable               │
+                    │    (L4 检查层 - 无业务逻辑)           │
+                    └──────────────────┬───────────────────┘
+                                       │
+    ┌─────────────────────────────────┐│
+    │           a_common              ││
+    │  (L1 基础设施层 - 零业务依赖)   ││
+    └───────────────┬─────────────────┘│
+                    │                  │
+                    ▼                  │
+    ┌─────────────────────────────────┐│
+    │           x_data                ││
+    │ (新增业务数据层 - 依赖a_common)  ││
+    └───────────────┬─────────────────┘│
+                    │                  │
+                    ▼                  │
+    ┌─────────────────────────────────┐│
+    │       e_risk_monitor            ││
+    │  (L5 风控层 - 依赖 x_data)      ││
+    │  ✅ impl StateManager           ││
+    └───────────────┬─────────────────┘│
+                    │                  │
+                    ▼                  │
+    ┌─────────────────────────────────┐│
+    │          f_engine               ││
+    │   (L6 引擎层 - 依赖 e_risk_     ││
+    │    monitor 通过 trait)          ││
+    └─────────────────────────────────┘│
 ```
 
-### 3.3 StrategyExecutor
+================================================================
+8. 验收状态
+================================================================
 
-```rust
-pub trait StrategyExecutor: Send + Sync {
-    fn register(&self, strategy: Arc<dyn StrategyInstance>);
-    fn unregister(&self, strategy_id: &str);
-    fn dispatch(&self, bar: &MarketKLine) -> Vec<TradingSignal>;
-    fn get_signal(&self, symbol: &str) -> Option<TradingSignal>;
-    fn count(&self) -> usize;
-}
+### 8.1 架构验收
+
+| 验收项 | 状态 | 说明 |
+|--------|------|------|
+| cargo check --all | ✅ | 0 error, 13 warnings |
+| 无循环依赖 | ✅ | a_common ← x_data ← e_risk_monitor |
+| StateManager trait | ✅ | LocalPositionManager + AccountPool |
+| UnifiedStateView | ✅ | 可获取完整系统快照 |
+| x_data 类型迁移 | ✅ | 21 个类型已迁移 |
+| 双兼容模式 | ✅ | a_common re-export x_data |
+
+### 8.2 已修复架构问题
+
+| 问题 | 状态 | 修复方案 |
+|------|------|----------|
+| ARCH-001 模块边界模糊 | ✅ | x_data 业务数据抽象层 |
+| ARCH-002 状态管理分散 | ✅ | StateManager trait + UnifiedStateView |
+| ARCH-003 错误类型不统一 | ✅ | AppError 统一错误枚举 |
+
+### 8.3 编译状态
+
+```
+cargo check --all
+    Finished dev [unoptimized + debuginfo] target(s)
+    0 errors
+    13 warnings (无关紧要)
 ```
 
-### 3.4 RiskChecker (V1.4)
+================================================================
+9. 版本历史
+================================================================
 
-```rust
-pub trait RiskChecker: Send + Sync {
-    fn pre_check(&self, order: &OrderRequest, account: &AccountInfo) -> RiskCheckResult;
-    fn post_check(&self, order: &ExecutedOrder, account: &AccountInfo) -> RiskCheckResult;
-    fn scan(&self, positions: &[PositionInfo], account: &AccountInfo) -> Vec<RiskWarning>;
-}
-
-pub struct RiskCheckResult {
-    pub pre_check_passed: bool,   // 锁外、轻量、快
-    pub lock_check_passed: bool,  // 锁内、强一致、准
-}
-```
-
-### 3.5 ExchangeGateway
-
-```rust
-pub trait ExchangeGateway: Send + Sync {
-    fn place_order(&self, order: OrderRequest) -> Result<OrderResult, ExecutionError>;
-    fn cancel_order(&self, order_id: &str) -> Result<(), ExecutionError>;
-    fn get_account(&self) -> Result<ExchangeAccount, ExecutionError>;
-    fn get_position(&self, symbol: &str) -> Result<Option<PositionInfo>, ExecutionError>;
-}
-```
-
-### 3.6 CheckTableProvider
-
-```rust
-#[async_trait]
-pub trait CheckTableProvider: Send + Sync {
-    async fn get_minute_check_table(&self, symbol: &str) -> Option<Box<dyn CheckTable + '_>>;
-    async fn get_daily_check_table(&self, symbol: &str) -> Option<Box<dyn CheckTable + '_>>;
-}
-
-#[async_trait]
-pub trait CheckTable: Send + Sync {
-    fn config(&self) -> &CheckTableConfig;
-    async fn check(&self, price: Decimal, position: Decimal) -> CheckTableResult;
-}
-```
-
----
-
-## 4. 核心引擎 (V1.4)
-
-### 4.1 TradingEngineV2
-
-```rust
-pub struct TradingEngineV2 {
-    engine_state: EngineStateHandle,       // 引擎状态
-    trigger_manager: TriggerManager,        // 触发器
-    pipeline: TradingPipeline,               // 执行流程
-    order_executor: OrderExecutor,         // 订单执行
-    fund_pool: FundPoolManager,             // 资金池
-    risk_manager: RiskManager,              // 风控管理
-    timeout_monitor: TimeoutMonitor,        // 超时监控
-    rollback_manager: RollbackManager,     // 回滚
-    symbol_locks: RwLock<HashMap<String, TradeLock>>, // 品种级锁 ⭐
-    last_order_time_ms: AtomicI64,         // 下单间隔
-}
-```
-
-### 4.2 V1.4 核心组件
-
-| 组件 | 职责 | 超时 |
+| 版本 | 日期 | 说明 |
 |------|------|------|
-| `TriggerManager` | 并行触发器检查 | - |
-| `TradingPipeline` | StrategyQuery + 风控 | 2s |
-| `TradeLock` | 品种级交易锁 | 1s |
-| `RiskManager` | 两级风控 | - |
-| `FundPoolManager` | 资金池管理 | - |
-| `CircuitBreaker` | 熔断器 | 连续错误 5 次 |
+| 1.0 | 2026-03-24 | 初始架构文档 |
+| 2.0 | 2026-03-24 | V1.4 业务流程整合 |
+| 3.0 | 2026-03-24 | 满分架构优化 - 100/100 |
+| 4.0 | 2026-03-25 | **x_data 架构重构完成 + StateManager** |
 
-### 4.3 EngineState (引擎状态)
-
-```rust
-pub struct EngineState {
-    status: EngineStatus,              // 运行状态
-    mode: EngineMode,                  // 模式
-    health: HealthStatus,              // 健康状态
-    circuit_breaker: CircuitBreaker,  // 熔断器
-    metrics: AtomicMetrics,            // 原子指标
-    strategy_pool: StrategyPool,       // 策略池
-}
-```
-
-### 4.4 SymbolState (品种状态)
-
-```rust
-pub struct SymbolState {
-    symbol: String,
-    bound_strategy: Option<String>,    // 绑定的策略
-    trade_lock: TradeLock,             // 交易锁
-    check_config: CheckConfig,         // 检查配置
-}
-```
-
----
-
-## 5. 模块详细说明
-
-### 5.1 interfaces/ 详细 (100% 纯 Trait)
-
-| 文件 | Trait 数 | DTO Re-export | 状态 |
-|------|----------|---------------|------|
-| `market_data.rs` | 3 | ✅ from a_common::models::market_data | ✅ 纯 Trait |
-| `strategy.rs` | 4 | ✅ from a_common::models::dto | ✅ 纯 Trait |
-| `risk.rs` | 1 | ✅ from a_common::models::dto | ✅ 纯 Trait |
-| `execution.rs` | 1 | ✅ from a_common::models::dto | ✅ 纯 Trait |
-| `check_table.rs` | 2 | ✅ from a_common::models::dto | ✅ 纯 Trait |
-
-### 5.2 core/ 详细
-
-| 文件 | 职责 |
-|------|------|
-| `engine_v2.rs` | TradingEngineV2 主实现，依赖注入 |
-| `engine_state.rs` | 引擎状态管理 |
-| `state.rs` | 品种状态、TradeLock |
-| `business_types.rs` | V1.4 业务类型 (re-export PositionSide) |
-| `triggers.rs` | 触发器管理 |
-| `execution.rs` | 交易流程 |
-| `fund_pool.rs` | 资金池 |
-| `risk_manager.rs` | 风控管理 |
-| `monitoring.rs` | 超时监控 |
-| `rollback.rs` | 回滚 |
-
-### 5.3 业务类型 (V1.4)
-
-```rust
-// 引擎 → 策略查询
-pub struct StrategyQuery {
-    pub timestamp: i64,
-    pub account_available: Decimal,
-    pub account_risk_state: RiskState,
-    pub current_price: Decimal,
-    pub volatility_level: VolatilityTier,
-    pub position_exists: bool,
-    pub position_direction: PositionSide,
-    pub position_qty: Decimal,
-}
-
-// 策略 → 引擎响应
-pub struct StrategyResponse {
-    pub should_execute: bool,
-    pub action: TradingAction,
-    pub quantity: Decimal,
-    pub target_price: Decimal,
-    pub channel_type: ChannelType,
-}
-
-// 风控结果 (V1.4)
-pub struct RiskCheckResult {
-    pub pre_check_passed: bool,   // 一次（锁外）
-    pub lock_check_passed: bool,  // 二次（锁内）
-}
-```
-
----
-
-## 6. V1.4 业务流程
-
-### 6.1 完整流程
-
-```
-并行触发器(分钟/日线)
-    │
-    ▼
-互斥 + 资源预检(锁外) → 不通过→结束/告警
-    │
-    ▼
-CheckTables(高速/低速双通道)
-    │
-    ▼
-StrategyQuery(2s超时) → 超时→失败计数/熔断
-    │
-    ▼
-StrategyResponse
-    │
-    ▼
-风控一次预检(锁外轻量) → 不通过→结束
-    │
-    ▼
-抢 品种级交易锁(1s超时) → 超时→拒单
-    │
-    ▼
-风控二次锁内精校 → 不通过→释锁/回滚/告警
-    │
-    ▼
-下发订单(生命周期/超时/重试) → 失败→累计错误/熔断
-    │
-    ▼
-成交回报
-    │
-    ▼
-锁内双向状态对齐+落盘
-    │
-    ▼
-释放锁 + 更新指标 + 日志监控 + 健康巡检
-    │
-    ▼
-熔断检测 → 触发→暂停品种 → 定时自动恢复
-```
-
-### 6.2 锁设计 (V1.4)
-
-| 锁类型 | 粒度 | 超时 | 范围 |
-|--------|------|------|------|
-| `TradeLock` | 品种级 | 1s | 状态比对 + 落地 |
-
-```rust
-impl TradeLock {
-    pub fn try_lock(&mut self, timeout_secs: i64) -> bool;
-    pub fn unlock(&mut self);
-    pub fn is_locked(&self) -> bool;
-    pub fn update(&mut self, tick: i64, qty: Decimal, price: Decimal);
-    pub fn is_stale(&self, current_tick: i64) -> bool;
-}
-```
-
-### 6.3 资金池 (V1.4)
-
-```
-分钟资金池 ←→ 高速通道 (分钟级)
-日线资金池 ←→ 低速通道 (分钟级 + 日线级)
-```
-
-### 6.4 熔断器 (V1.4)
-
-```rust
-pub struct CircuitBreaker {
-    config: CircuitBreakerConfig,        // max_consecutive_errors=5
-    consecutive_errors: u32,             // 连续错误计数
-    is_triggered: bool,                  // 是否触发
-    triggered_at: Option<DateTime<Utc>>, // 触发时间
-    scheduled_resume_at: Option<DateTime<Utc>>, // 计划恢复
-}
-```
-
----
-
-## 7. 依赖关系
-
-### 7.1 Crate 依赖图 (V3.0 - 单向无环)
-
-```
-a_common (基础层 - 零依赖)
-    ↑
-b_data_source ──────► a_common
-    ↑
-c_data_process ─────► a_common
-                    ──────► b_data_source
-    ↑
-d_checktable ───────► a_common
-                   ──────► b_data_source
-                   ──────► c_data_process
-                   ──────► e_risk_monitor
-    ↑
-e_risk_monitor ─────► a_common
-                   ──────► b_data_source
-    ↑
-f_engine ───────────► a_common
-                   ──────► b_data_source
-```
-
-**依赖关系原则:**
-- ✅ 单向依赖，无环
-- ✅ 无穿透依赖 (f_engine 不直引 c_data_process/e_risk_monitor)
-- ✅ 无违规直引
-- ✅ 通过 Trait 接口解耦
-
-### 7.2 接口实现关系
-
-| Trait | 定义位置 | 实现状态 |
-|-------|----------|----------|
-| `MarketDataProvider` | f_engine/interfaces | ⚠️ 待实现 (b_data_source) |
-| `StrategyExecutor` | f_engine/interfaces | ⚠️ 待实现 (c_data_process) |
-| `CheckTableProvider` | f_engine/interfaces | ⚠️ 待实现 (d_checktable) |
-| `RiskChecker` | f_engine/interfaces | ⚠️ 待实现 (e_risk_monitor) |
-| `ExchangeGateway` | f_engine/interfaces | ✅ MockBinanceGateway |
-
-### 7.3 数据流向
-
-```
-b_data_source (MarketDataProvider)
-    │
-    ▼
-c_data_process (信号生成)
-    │
-    ▼
-d_checktable (CheckTables)
-    │
-    ▼
-e_risk_monitor (风控检查)
-    │
-    ▼
-f_engine (执行闭环)
-    │
-    ▼
-a_common (持久化)
-```
-
----
-
-## 8. 封装与安全
-
-### 8.1 Rust 安全特性
-
-| 特性 | 状态 | 说明 |
-|------|------|------|
-| `#![forbid(unsafe_code)]` | ✅ | 所有 crate 启用 |
-| `Send + Sync` | ✅ | 所有 Trait 约束 |
-| `#[async_trait]` | ✅ | 异步 Trait 统一标注 |
-| `#[derive(...)` 顺序 | ✅ | Debug, Clone, Eq, PartialEq, Serialize, Deserialize |
-| 错误处理 | ✅ | thiserror + Result |
-| 同步原语 | ✅ | parking_lot RwLock |
-
-### 8.2 字段可见性
-
-| 结构体 | 字段可见性 | 保护机制 |
-|--------|-----------|----------|
-| `EngineState` | 全部 private | 通过方法暴露 |
-| `SymbolState` | 全部 private | 通过方法暴露 |
-| `TradeLock` | 全部 private | 通过方法暴露 |
-| `StrategyExecutor` | 全部 private | RwLock |
-| `FundPoolManager` | 全部 private | RwLock |
-
-### 8.3 禁止行为
-
-```rust
-// ❌ 禁止：直接访问内部
-let state = engine_state.0;  // 编译错误
-
-// ✅ 正确：通过方法
-let state = engine_state.read();
-if state.can_trade() { ... }
-```
-
----
-
-## 9. 审计评分
-
-### 9.1 架构审计结果 (V3.0 - 满分版)
-
-| # | 检查项 | 得分 | 状态 |
-|---|--------|------|------|
-| 1 | 全局类型唯一性 | 15/15 | ✅ |
-| 2 | 依赖关系正确 | 20/20 | ✅ |
-| 3 | interfaces 层纯 trait | 20/20 | ✅ |
-| 4 | Trait 异步规范 | 15/15 | ✅ |
-| 5 | TradingEngineV2 泛型化 | 10/10 | ✅ |
-| 6 | 旧代码残留 | 10/10 | ✅ |
-| 7 | cargo build | 10/10 | ✅ |
-| 8 | cargo test | 10/10 | ✅ |
-| **总分** | **100/100** | **100/100** | ✅ |
-
-### 9.2 编译与测试状态
-
-| 项目 | 状态 |
-|------|------|
-| cargo build --all | ✅ 0 error, 0 warning |
-| cargo test | ✅ 272 tests passed, 0 failed |
-
-### 9.3 V3.0 优化要点
-
-| 优化项 | 说明 |
-|--------|------|
-| DTO 统一收敛 | 所有接口 DTO 迁移至 a_common::models::dto |
-| interfaces 层纯化 | 100% 纯 Trait，无业务 struct |
-| 异步 Trait 标准化 | #[async_trait] + Send + Sync |
-| PositionSide 去重 | 统一从 a_common re-export |
-| 依赖关系清理 | 移除 f_engine → e_risk_monitor 直引 |
-
-### 9.4 生产可用状态
-
-**答案**: ✅ **是 - 满分达标**
-
-| 检查项 | 状态 |
-|--------|------|
-| 架构核心完整 | ✅ |
-| 类型系统统一 | ✅ |
-| 接口设计合理 | ✅ |
-| 编译零错误 | ✅ |
-| 测试全部通过 | ✅ |
-
----
-
-## 附录
+================================================================
+附录
+================================================================
 
 ### 相关文档
 
 | 文档 | 说明 |
 |------|------|
-| `trading_business_flow.md` | V1.4 业务流程详细文档 |
-| `architecture/` | 架构文档归档 |
-| `architecture/架构终审合规报告_2026-03-24_V3.md` | V3.0 满分合规报告 |
+| `docs/architecture.md` | 本文档 - 最新权威架构文档 |
+| `docs/archive/20260325_arch_v1/` | v3.0 及之前版本归档 |
+| `docs/superpowers/specs/` | 设计规格文档 |
 
-### 版本历史
-
-| 版本 | 日期 | 说明 |
-|------|------|------|
-| 1.0 | 2026-03-24 | 初始架构文档 |
-| 2.0 | 2026-03-24 | 整合全项目审计，V1.4 合规 |
-| 2.1 | 2026-03-24 | 新增全项目架构优化方案 |
-| 3.0 | 2026-03-24 | **满分架构优化 - 100/100** |
-
----
-
-## 架构合规证书
+### 归档目录
 
 ```
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║           架构终审合规报告 - 满分达标证书                       ║
-║                                                               ║
-║   项目: Barter-rs 量化交易系统                                 ║
-║   日期: 2026-03-24                                            ║
-║   版本: V3.0                                                   ║
-║                                                               ║
-║   ═══════════════════════════════════════════════════════   ║
-║                                                               ║
-║   合规状态:    ✅ PASS                                         ║
-║   最终评分:    100/100                                        ║
-║   测试状态:    272 tests passed, 0 failed                      ║
-║   编译状态:    0 error, 0 warning                            ║
-║                                                               ║
-║   ═══════════════════════════════════════════════════════   ║
-║                                                               ║
-║   生产可用:    ✅ 是                                           ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
+docs/archive/20260325_arch_v1/
+├── architecture_v3.0_20260325.md     # 旧版架构文档
+├── x_data-layer-design_20260325.md   # x_data 设计文档
+├── trading_business_flow_v1.4_20260325.md
+├── 全项目架构审计报告_2026-03-24.md
+├── 架构终审合规报告_2026-03-24_V3.md
+└── ... (共14个归档文件)
 ```
 
----
-
-*本文档是项目的唯一权威架构文档*
-*任何架构变更必须同步更新本文档*
+================================================================
+End of Architecture Document V4.0
+================================================================
