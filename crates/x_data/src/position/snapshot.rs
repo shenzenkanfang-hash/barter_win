@@ -75,3 +75,46 @@ pub struct UnifiedPositionSnapshot {
     /// 校验和
     pub checksum: u64,
 }
+
+impl UnifiedPositionSnapshot {
+    /// 创建新的统一持仓快照
+    pub fn new(
+        symbol: String,
+        long_qty: Decimal,
+        long_avg_price: Decimal,
+        short_qty: Decimal,
+        short_avg_price: Decimal,
+        source: RecoveryPriority,
+    ) -> Self {
+        Self {
+            symbol,
+            long_qty,
+            long_avg_price,
+            short_qty,
+            short_avg_price,
+            updated_at: Utc::now(),
+            source,
+            checksum: 0,
+        }
+    }
+
+    /// 总持仓数量
+    pub fn total_qty(&self) -> Decimal {
+        self.long_qty + self.short_qty
+    }
+
+    /// 是否有多头持仓
+    pub fn has_long(&self) -> bool {
+        self.long_qty > Decimal::ZERO
+    }
+
+    /// 是否有空头持仓
+    pub fn has_short(&self) -> bool {
+        self.short_qty > Decimal::ZERO
+    }
+
+    /// 是否为空仓
+    pub fn is_flat(&self) -> bool {
+        self.long_qty == Decimal::ZERO && self.short_qty == Decimal::ZERO
+    }
+}
