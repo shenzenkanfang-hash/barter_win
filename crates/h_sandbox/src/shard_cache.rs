@@ -112,7 +112,7 @@ impl ShardFile {
         Ok(Self {
             path: path.to_path_buf(),
             start_ms,
-            end_ms: 0, // 需要通过读取文件内容确定
+            end_ms: start_ms + 50_000 * 60_000, // 50000 * 1m = 50000 * 60 * 1000 ms
         })
     }
 
