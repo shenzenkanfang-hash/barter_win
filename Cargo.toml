@@ -8,6 +8,7 @@ members = [
     "crates/f_engine",
     "crates/g_test",
     "crates/h_sandbox",
+    "crates/x_data",
 ]
 resolver = "3"
 

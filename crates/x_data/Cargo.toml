@@ -1,0 +1,27 @@
+[package]
+name = "x_data"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 数值计算
+rust_decimal = { workspace = true }
+
+# 时间处理
+chrono = { workspace = true, features = ["serde"] }
+
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 错误处理
+thiserror = { workspace = true }
+
+# 同步原语
+parking_lot = { workspace = true }
+
+# 依赖 a_common（获取 AppError 等基础设施类型）
+a_common = { path = "../a_common" }
+
+[dev-dependencies]
+tokio = { workspace = true }
