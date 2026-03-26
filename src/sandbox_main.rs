@@ -38,7 +38,6 @@ struct SandboxConfig {
     symbol: String,
     initial_fund: Decimal,
     duration_secs: u64,
-    fast_mode: bool,
     start_date: String,
     end_date: String,
 }
@@ -49,7 +48,6 @@ impl Default for SandboxConfig {
             symbol: DEFAULT_SYMBOL.to_string(),
             initial_fund: dec!(10000),
             duration_secs: DEFAULT_DURATION,
-            fast_mode: false,
             start_date: "2025-10-09".to_string(),
             end_date: "2025-10-11".to_string(),
         }
@@ -793,12 +791,6 @@ fn parse_args() -> SandboxConfig {
                 if i + 1 < args.len() {
                     config.end_date = args[i + 1].clone();
                 }
-            }
-            "--fast" => {
-                config.fast_mode = true;
-            }
-            "--slow" => {
-                config.fast_mode = false;
             }
             _ => {}
         }
