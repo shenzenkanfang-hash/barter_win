@@ -1,13 +1,9 @@
-//! h_15m - 分钟级策略
+//! h_15m - 交易容器框架
 //!
-//! 两个核心文件：
-//! - indicator.rs  指标计算 + 信号生成
-//! - trader.rs     主交易逻辑
+//! 纯框架，无业务逻辑
 
 #![forbid(unsafe_code)]
 
-pub mod indicator;
 pub mod trader;
 
-pub use indicator::{Indicator, Signal, MarketData, PositionData, MarketStatus, config};
-pub use trader::{Trader, Status, TraderHealth};
+pub use trader::{Trader, Status, Config, TraderHealth, run_loop, DataFn, OrderFn};

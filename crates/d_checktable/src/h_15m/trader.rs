@@ -1,48 +1,20 @@
-//! trader.rs - 主交易逻辑
+//! trader.rs - 交易容器框架
 //!
-//! 流程：
-//! 1. 获取市场数据 + 指标数据
-//! 2. 获取持仓数据
-//! 3. 信号生成器判断
-//! 4. 有指令 → 下单执行 → 状态更新
+//! 纯框架，无业务逻辑
+//! 业务逻辑由外部注入
 
 #![forbid(unsafe_code)]
 
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
-
-use super::indicator::{Indicator, Signal, MarketData, PositionData};
-use x_data::position::PositionSide;
-use x_data::trading::signal::{StrategySignal, TradeCommand, StrategyId};
+use std::future::Future;
+use std::pin::Pin;
+use tokio::time::{sleep, Duration};
 
 /// ==================== 状态 ====================
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Initial,
-    LongFirstOpen,
-    LongDoubleAdd,
-    LongDayAllow,
-    ShortFirstOpen,
-    ShortDoubleAdd,
-    ShortDayAllow,
-    HedgeEnter,
-    PosLocked,
-}
-
-impl Status {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Status::Initial => "Initial",
-            Status::LongFirstOpen => "LongFirstOpen",
-            Status::LongDoubleAdd => "LongDoubleAdd",
-            Status::LongDayAllow => "LongDayAllow",
-            Status::ShortFirstOpen => "ShortFirstOpen",
-            Status::ShortDoubleAdd => "ShortDoubleAdd",
-            Status::ShortDayAllow => "ShortDayAllow",
-            Status::HedgeEnter => "HedgeEnter",
-            Status::PosLocked => "PosLocked",
-        }
-    }
+    Running,
+    Stopped,
 }
 
 impl Default for Status {
@@ -51,130 +23,76 @@ impl Default for Status {
     }
 }
 
-/// ==================== 交易器 ====================
-pub struct Trader {
+/// ==================== 配置 ====================
+#[derive(Debug, Clone)]
+pub struct Config {
     pub symbol: String,
+    pub interval_ms: u64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            symbol: "BTCUSDT".to_string(),
+            interval_ms: 500,
+        }
+    }
+}
+
+/// ==================== 容器 ====================
+pub struct Trader {
+    pub config: Config,
     pub status: Status,
-    pub indicator: Indicator,
 }
 
 impl Trader {
     pub fn new(symbol: &str) -> Self {
         Self {
-            symbol: symbol.to_string(),
+            config: Config {
+                symbol: symbol.to_string(),
+                ..Default::default()
+            },
             status: Status::Initial,
-            indicator: Indicator::new(),
         }
     }
 
-    /// 执行一次交易循环
-    ///
-    /// 返回有信号时返回 StrategySignal
-    pub fn tick(
-        &mut self,
-        market: MarketData,
-        position: PositionData,
-    ) -> Option<StrategySignal> {
-        // 1. 生成信号
-        let (signal, qty) = self.indicator.generate(&market, &position);
-
-        if signal == Signal::None {
-            return None;
-        }
-
-        // 2. 构建信号
-        let strategy_signal = self.build_signal(signal, qty, market.price)?;
-
-        // 3. 更新状态
-        self.update_status(&strategy_signal);
-
-        Some(strategy_signal)
+    /// tick：业务逻辑由外部注入
+    pub fn tick(&mut self) {
+        // TODO: 业务逻辑
     }
 
-    /// 构建交易信号
-    fn build_signal(
-        &self,
-        signal: Signal,
-        qty: Decimal,
-        price: Decimal,
-    ) -> Option<StrategySignal> {
-        let (command, direction, full_close) = match signal {
-            Signal::LongOpen => (TradeCommand::Open, PositionSide::Long, false),
-            Signal::ShortOpen => (TradeCommand::Open, PositionSide::Short, false),
-            Signal::LongAdd => (TradeCommand::Add, PositionSide::Long, false),
-            Signal::ShortAdd => (TradeCommand::Add, PositionSide::Short, false),
-            Signal::LongClose => (TradeCommand::FlatPosition, PositionSide::Long, true),
-            Signal::ShortClose => (TradeCommand::FlatPosition, PositionSide::Short, true),
-            Signal::LongHedge => (TradeCommand::HedgeOpen, PositionSide::Short, false),
-            Signal::ShortHedge => (TradeCommand::HedgeOpen, PositionSide::Long, false),
-            Signal::None => return None,
-        };
-
-        // 计算数量
-        let qty = if qty == Decimal::ZERO {
-            dec!(0.05) // 默认开仓数量
-        } else {
-            qty
-        };
-
-        Some(StrategySignal {
-            command,
-            direction,
-            quantity: qty,
-            target_price: price,
-            strategy_id: StrategyId::new_pin_minute(&self.symbol),
-            position_ref: None,
-            full_close,
-            stop_loss_price: None,
-            take_profit_price: None,
-            reason: format!("{:?}", signal),
-            confidence: 80,
-            timestamp: chrono::Utc::now().timestamp(),
-        })
-    }
-
-    /// 更新状态
-    fn update_status(&mut self, signal: &StrategySignal) {
-        match signal.command {
-            TradeCommand::Open => {
-                self.status = match signal.direction {
-                    PositionSide::Long => Status::LongFirstOpen,
-                    PositionSide::Short => Status::ShortFirstOpen,
-                    _ => Status::Initial,
-                };
-            }
-            TradeCommand::Add => {
-                self.status = match signal.direction {
-                    PositionSide::Long => Status::LongDoubleAdd,
-                    PositionSide::Short => Status::ShortDoubleAdd,
-                    _ => Status::Initial,
-                };
-            }
-            TradeCommand::FlatPosition | TradeCommand::FlatAll => {
-                self.status = Status::Initial;
-            }
-            TradeCommand::HedgeOpen => {
-                self.status = Status::HedgeEnter;
-            }
-            TradeCommand::HedgeClose => {
-                self.status = Status::PosLocked;
-            }
-            _ => {}
-        }
-    }
-
-    /// 健康检查
     pub fn health(&self) -> TraderHealth {
         TraderHealth {
-            symbol: self.symbol.clone(),
-            status: self.status.as_str().to_string(),
+            symbol: self.config.symbol.clone(),
+            status: format!("{:?}", self.status),
         }
     }
 }
 
-/// 健康状态
 #[derive(Debug, Clone)]
 pub struct TraderHealth {
     pub symbol: String,
     pub status: String,
+}
+
+/// ==================== 自循环框架 ====================
+
+/// 数据获取函数
+pub type DataFn = Box<dyn Fn(&str) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+
+/// 订单发送函数
+pub type OrderFn = Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+
+/// 启动自循环
+pub async fn run_loop(symbol: &str, interval_ms: u64) {
+    let mut trader = Trader::new(symbol);
+    tracing::info!("[{}] Loop started", symbol);
+
+    loop {
+        // 1. tick
+        trader.tick();
+
+        // 2. 等待
+        sleep(Duration::from_millis(interval_ms)).await;
+    }
 }
