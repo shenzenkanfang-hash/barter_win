@@ -199,48 +199,85 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // 本地缓存未命中或不全，拉取 API 并写入缓存
             info!("本地缓存未命中，拉取 API...");
 
-            // 使用 curl 命令拉取（更稳定）
-            let url = format!(
-                "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit={}&startTime={}&endTime={}",
-                args.symbol.to_uppercase(),
-                args.limit,
-                start_ms,
-                end_ms
-            );
+            // 分页拉取：币安API每次最多1000条
+            let mut all_raw_klines: Vec<Vec<serde_json::Value>> = Vec::new();
+            let mut current_start = start_ms;
+            let max_requests = 100; // 最多请求100次 (10万条K线约69天)
+            let page_limit = 1000;
 
-            info!("请求 URL: {}", url);
+            for page in 0..max_requests {
+                let url = format!(
+                    "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit={}&startTime={}&endTime={}",
+                    args.symbol.to_uppercase(),
+                    page_limit,
+                    current_start,
+                    end_ms
+                );
 
-            let output = std::process::Command::new("curl")
-                .args(["-s", "-X", "GET", &url])
-                .output()
-                .map_err(|e| format!("curl 执行失败: {}", e))?;
+                if page == 0 {
+                    info!("请求 URL: {}", url);
+                }
 
-            // Windows curl 可能输出到 stderr
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
+                let output = std::process::Command::new("curl")
+                    .args(["-s", "-X", "GET", &url])
+                    .output()
+                    .map_err(|e| format!("curl 执行失败: {}", e))?;
 
-            info!("curl stdout: {} bytes, stderr: {} bytes", stdout.len(), stderr.len());
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let json_str = if !stdout.is_empty() { stdout } else { stderr };
 
-            let json_str = if !stdout.is_empty() { stdout } else { stderr };
+                let raw_klines: Vec<Vec<serde_json::Value>> = serde_json::from_str(&json_str)
+                    .map_err(|e| format!("JSON 解析失败: {} | Body: {}", e, json_str))?;
 
-            let raw_klines: Vec<Vec<serde_json::Value>> = serde_json::from_str(&json_str)
-                .map_err(|e| format!("JSON 解析失败: {} | Body: {}", e, json_str))?;
+                if raw_klines.is_empty() {
+                    break; // 没有更多数据
+                }
 
-            // 调试：打印第一条数据
-            if let Some(first) = raw_klines.first() {
-                info!("第一条 K线原始数据: {:?}", first);
+                let page_count = raw_klines.len();
+                all_raw_klines.extend(raw_klines);
+
+                if page == 0 {
+                    // 调试：打印第一条数据
+                    if let Some(first) = all_raw_klines.first() {
+                        info!("第一条 K线原始数据: {:?}", first);
+                    }
+                }
+
+                info!("第 {} 页: {} 条, 累计: {} 条", page + 1, page_count, all_raw_klines.len());
+
+                // 如果返回不够1000条，说明是最后一页
+                if page_count < page_limit {
+                    break;
+                }
+
+                // 用最后一条的close_time + 1毫秒作为下次startTime
+                if let Some(last) = all_raw_klines.last() {
+                    let close_time = last.get(6).and_then(|v| v.as_i64()).unwrap_or(0);
+                    if close_time > 0 {
+                        current_start = close_time + 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                // 避免无限循环
+                if page >= max_requests - 1 {
+                    info!("已达到最大请求次数限制");
+                    break;
+                }
             }
 
-            if raw_klines.is_empty() {
+            if all_raw_klines.is_empty() {
                 error!("未获取到 K线数据");
                 return Ok(());
             }
 
-            info!("获取 K线: {} 条", raw_klines.len());
+            info!("共获取 K线: {} 条", all_raw_klines.len());
 
             // 转换为内部 KLine
             let mut parsed_count = 0;
-            internal_klines = raw_klines
+            internal_klines = all_raw_klines
                 .into_iter()
                 .filter_map(|arr| {
                     // 索引 0 是 Number (open_time)
