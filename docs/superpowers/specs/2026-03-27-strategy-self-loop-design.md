@@ -40,6 +40,7 @@ Engine 管 spawn/stop/监控/重启，品种自己 loop。
 │  │   ├── 获取行情                                        │
 │  │   ├── 获取持仓                                        │
 │  │   ├── 计算信号                                        │
+│  │   ├── CheckTable 检查                                │
 │  │   ├── 下单                                            │
 │  │   ├── 保存                                            │
 │  │   ├── 更新心跳                                        │
@@ -48,11 +49,11 @@ Engine 管 spawn/stop/监控/重启，品种自己 loop。
 │  └── 退出条件: running = false                           │
 └─────────────────────────────────────────────────────────────┘
 
-三、TradeRecord (完整交易记录)
+三、传递流程
 ================================================================
 
 ┌─────────────────────────────────────────────────────────────┐
-│  TradeRecord                                              │
+│  TradeRecord (完整交易记录)                              │
 ├─────────────────────────────────────────────────────────────┤
 │  基础信息                                                  │
 │  ├── symbol: String          // 交易对                   │
@@ -62,7 +63,7 @@ Engine 管 spawn/stop/监控/重启，品种自己 loop。
 │  行情快照                                                  │
 │  ├── price: Decimal          // 当前价格                 │
 │  ├── volatility: f64          // 波动率                   │
-│  └── market_status            // 市场状态 (Pin/Trend/Range)│
+│  └── market_status           // 市场状态 (Pin/Trend/Range)│
 ├─────────────────────────────────────────────────────────────┤
 │  持仓快照                                                  │
 │  ├── 交易所持仓                                            │
@@ -88,10 +89,10 @@ Engine 管 spawn/stop/监控/重启，品种自己 loop。
 ├─────────────────────────────────────────────────────────────┤
 │  订单执行                                                  │
 │  ├── order_type             // (Open/Add/Close)         │
-│  ├── direction              // (Long/Short)            │
+│  ├── direction              // (Long/Short)              │
 │  ├── quantity: Decimal      // 数量                     │
 │  ├── price: Decimal         // 执行价格                 │
-│  ├── result                 // (Success/Failed/Rejected)│
+│  ├── result                // (Success/Failed/Rejected)│
 │  └── reason: String        // 失败原因                 │
 ├─────────────────────────────────────────────────────────────┤
 │  风控结果                                                  │
@@ -99,7 +100,25 @@ Engine 管 spawn/stop/监控/重启，品种自己 loop。
 │  └── risk_reason: String   // 拒绝原因                 │
 └─────────────────────────────────────────────────────────────┘
 
-四、Instance.loop() 流程
+四、CheckTable (检查表)
+================================================================
+
+┌─────────────────────────────────────────────────────────────┐
+│  CheckTable (检查表) - 每步 yes/no                       │
+├─────────────────────────────────────────────────────────────┤
+│  第一步: 预检 (Lock 外)                                │
+│  ├── signal_passed: bool         // 有有效信号             │
+│  ├── price_check_passed: bool   // 价格变化符合条件       │
+│  └── pre_check_passed: bool     // 风控预检通过           │
+├─────────────────────────────────────────────────────────────┤
+│  第二步: 执行 (Lock 内)                                 │
+│  ├── lock_acquired: bool        // 抢锁成功               │
+│  ├── risk_check_passed: bool   // 风控二检通过           │
+│  ├── order_executed: bool       // 下单成功               │
+│  └── saved: bool               // 保存成功                │
+└─────────────────────────────────────────────────────────────┘
+
+五、Instance.loop() 流程
 ================================================================
 
 loop:
@@ -108,13 +127,20 @@ loop:
   2. 获取行情 → 填入 TradeRecord.market
   3. 获取持仓 → 填入 TradeRecord.position
   4. Trader.execute() → 填入 TradeRecord.strategy
-  5. 风控检查 → 填入 TradeRecord.risk
-  6. 下单 → 填入 TradeRecord.order
-  7. 保存 TradeRecord 到 SQLite
-  8. 更新心跳 (last_heartbeat = now)
-  9. 等 interval → 回第1步
+  5. CheckTable 第一步 (预检):
+     - signal_check
+     - price_check
+     - pre_risk_check
+     - 任一失败 → 保存 CheckTable → 等 interval
+  6. CheckTable 第二步 (执行):
+     - lock_acquire
+     - risk_check
+     - order_execute
+     - save
+  7. 更新心跳 (last_heartbeat = now)
+  8. 等 interval → 回第1步
 
-五、Engine Monitor 机制
+六、Engine Monitor 机制
 ================================================================
 
 Monitor 协程 (每秒执行):
@@ -130,7 +156,7 @@ Monitor 协程 (每秒执行):
   3. 更新 JoinHandle + 重置 heartbeat
   4. restart_count++
 
-六、文件结构
+七、文件结构
 ================================================================
 
 新建:
