@@ -28,8 +28,24 @@ use tracing::{info, error};
 
 /// 创建带超时配置的 HTTP 客户端
 fn new_http_client() -> Result<Client, crate::claint::error::EngineError> {
-    Client::builder()
-        .timeout(Duration::from_secs(10))
+    // 从环境变量读取代理（Windows 系统代理）
+    let proxy = std::env::var("HTTP_PROXY")
+        .or_else(|_| std::env::var("http_proxy"))
+        .ok();
+
+    let mut builder = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(15))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+    if let Some(proxy_url) = proxy {
+        builder = builder.proxy(reqwest::Proxy::https(&proxy_url).unwrap_or_else(|_| {
+            reqwest::Proxy::http(&proxy_url).expect("无效代理")
+        }));
+        tracing::info!("[HttpClient] 使用系统代理: {}", proxy_url);
+    }
+
+    builder
         .build()
         .map_err(|e| crate::claint::error::EngineError::Network(format!("HTTP客户端创建失败: {}", e)))
 }

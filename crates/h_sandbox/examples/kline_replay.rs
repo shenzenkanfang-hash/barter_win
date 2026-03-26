@@ -70,7 +70,14 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(e) = run().await {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // 解析参数
     let args = Args::parse();
 
@@ -107,38 +114,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 直接从 API 拉取（跳过缓存）
         info!("no_cache=true，跳过缓存，直接拉取 API");
 
-        let api = BinanceApiGateway::new_futures();
-        let mut config = KlineFetcherConfig::new(api, &args.symbol, KlineInterval::Minute1);
-        config.start_time = Some(start_ms);
-        config.end_time = Some(end_ms);
-        config.limit = args.limit;
+        // 使用 curl 命令拉取（更稳定）
+        // 币安合约K线API路径是 /fapi/v1/klines
+        let url = format!(
+            "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit={}&startTime={}&endTime={}",
+            args.symbol.to_uppercase(),
+            args.limit,
+            start_ms,
+            end_ms
+        );
 
-        let fetcher = ApiKlineFetcher::new(config);
-        info!("正在拉取 K线...");
+        info!("请求 URL: {}", url);
 
-        let klines = fetcher.fetch_all().await
-            .map_err(|e| format!("拉取 K线失败: {}", e))?;
+        let output = std::process::Command::new("curl")
+            .args(["-s", "-X", "GET", &url])
+            .output()
+            .map_err(|e| format!("curl 执行失败: {}", e))?;
 
-        if klines.is_empty() {
+        // Windows curl 可能输出到 stderr
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        
+        info!("curl stdout: {} bytes", stdout.len());
+        info!("curl stderr: {} bytes", stderr.len());
+
+        let json_str = if !stdout.is_empty() { stdout.clone() } else { stderr.clone() };
+        
+        if json_str.is_empty() {
+            return Err("API 返回空数据".into());
+        }
+
+        let raw_klines: Vec<Vec<serde_json::Value>> = serde_json::from_str(&json_str)
+            .map_err(|e| format!("JSON 解析失败: {} | Body: {}", e, json_str))?;
+
+        if raw_klines.is_empty() {
             error!("未获取到 K线数据");
             return Ok(());
         }
 
-        info!("获取 K线: {} 条", klines.len());
+        info!("获取 K线: {} 条", raw_klines.len());
 
-        internal_klines = klines
+        internal_klines = raw_klines
             .into_iter()
-            .map(|k| {
-                b_data_source::KLine {
+            .filter_map(|arr| {
+                let open_time_str = arr.get(0)?.as_str()?;
+                let close_time_str = arr.get(6)?.as_str()?;
+                let open_time_ms: i64 = open_time_str.parse().ok()?;
+                let close_time_ms: i64 = close_time_str.parse().ok()?;
+
+                let parse_decimal = |idx: usize| -> Option<rust_decimal::Decimal> {
+                    let s = arr.get(idx)?.as_str()?;
+                    let f: f64 = s.parse().ok()?;
+                    rust_decimal::Decimal::from_f64_retain(f)
+                };
+
+                Some(b_data_source::KLine {
                     symbol: args.symbol.clone(),
                     period: b_data_source::Period::Minute(1),
-                    open: k.open,
-                    high: k.high,
-                    low: k.low,
-                    close: k.close,
-                    volume: k.volume,
-                    timestamp: k.open_time,
-                }
+                    open: parse_decimal(1)?,
+                    high: parse_decimal(2)?,
+                    low: parse_decimal(3)?,
+                    close: parse_decimal(4)?,
+                    volume: parse_decimal(5)?,
+                    timestamp: chrono::Utc.timestamp_millis_opt(open_time_ms).single()?,
+                })
             })
             .collect();
     } else {
@@ -160,40 +199,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 本地缓存未命中或不全，拉取 API 并写入缓存
             info!("本地缓存未命中，拉取 API...");
 
-            let api = BinanceApiGateway::new_futures();
-            let mut config = KlineFetcherConfig::new(api, &args.symbol, KlineInterval::Minute1);
-            config.start_time = Some(start_ms);
-            config.end_time = Some(end_ms);
-            config.limit = args.limit;
+            // 使用 curl 命令拉取（更稳定）
+            let url = format!(
+                "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit={}&startTime={}&endTime={}",
+                args.symbol.to_uppercase(),
+                args.limit,
+                start_ms,
+                end_ms
+            );
 
-            let fetcher = ApiKlineFetcher::new(config);
+            info!("请求 URL: {}", url);
 
-            let klines = fetcher.fetch_all().await
-                .map_err(|e| format!("拉取 K线失败: {}", e))?;
+            let output = std::process::Command::new("curl")
+                .args(["-s", "-X", "GET", &url])
+                .output()
+                .map_err(|e| format!("curl 执行失败: {}", e))?;
 
-            if klines.is_empty() {
+            // Windows curl 可能输出到 stderr
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            info!("curl stdout: {} bytes, stderr: {} bytes", stdout.len(), stderr.len());
+
+            let json_str = if !stdout.is_empty() { stdout } else { stderr };
+
+            let raw_klines: Vec<Vec<serde_json::Value>> = serde_json::from_str(&json_str)
+                .map_err(|e| format!("JSON 解析失败: {} | Body: {}", e, json_str))?;
+
+            // 调试：打印第一条数据
+            if let Some(first) = raw_klines.first() {
+                info!("第一条 K线原始数据: {:?}", first);
+            }
+
+            if raw_klines.is_empty() {
                 error!("未获取到 K线数据");
                 return Ok(());
             }
 
-            info!("获取 K线: {} 条", klines.len());
+            info!("获取 K线: {} 条", raw_klines.len());
 
             // 转换为内部 KLine
-            internal_klines = klines
+            let mut parsed_count = 0;
+            internal_klines = raw_klines
                 .into_iter()
-                .map(|k| {
-                    b_data_source::KLine {
+                .filter_map(|arr| {
+                    // 索引 0 是 Number (open_time)
+                    let open_time_ms = arr.get(0)?.as_i64()?;
+
+                    // 索引 1-5 是 String (价格和成交量)
+                    let parse_decimal = |idx: usize| -> Option<rust_decimal::Decimal> {
+                        let s = arr.get(idx)?.as_str()?;
+                        let f: f64 = s.parse().ok()?;
+                        rust_decimal::Decimal::from_f64_retain(f)
+                    };
+
+                    let timestamp = chrono::Utc.timestamp_millis_opt(open_time_ms).single()?;
+
+                    parsed_count += 1;
+                    Some(b_data_source::KLine {
                         symbol: args.symbol.clone(),
                         period: b_data_source::Period::Minute(1),
-                        open: k.open,
-                        high: k.high,
-                        low: k.low,
-                        close: k.close,
-                        volume: k.volume,
-                        timestamp: k.open_time,
-                    }
+                        open: parse_decimal(1)?,
+                        high: parse_decimal(2)?,
+                        low: parse_decimal(3)?,
+                        close: parse_decimal(4)?,
+                        volume: parse_decimal(5)?,
+                        timestamp,
+                    })
                 })
                 .collect();
+            
+            info!("解析 K线: 成功 {} 条", parsed_count);
 
             // 写入缓存
             if !internal_klines.is_empty() {
@@ -213,6 +289,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
+    info!("准备回放的 K线数量: {}", internal_klines.len());
 
     // 创建生成器
     let generator = StreamTickGenerator::from_loader(args.symbol.clone(), internal_klines.into_iter());
