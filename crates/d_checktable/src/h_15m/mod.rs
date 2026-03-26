@@ -6,4 +6,4 @@
 
 pub mod trader;
 
-pub use trader::{Trader, Status, Config, TraderHealth, run_loop, DataFn, OrderFn};
+pub use trader::{Trader, Status, Config, TraderHealth};

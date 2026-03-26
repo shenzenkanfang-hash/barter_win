@@ -5,9 +5,8 @@
 
 #![forbid(unsafe_code)]
 
-use std::future::Future;
-use std::pin::Pin;
-use tokio::time::{sleep, Duration};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// ==================== 状态 ====================
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +42,7 @@ impl Default for Config {
 pub struct Trader {
     pub config: Config,
     pub status: Status,
+    running: Arc<AtomicBool>,
 }
 
 impl Trader {
@@ -53,11 +53,29 @@ impl Trader {
                 ..Default::default()
             },
             status: Status::Initial,
+            running: Arc::new(AtomicBool::new(false)),
         }
     }
 
+    /// start：启动
+    pub fn start(&mut self) {
+        self.running.store(true, Ordering::SeqCst);
+        self.status = Status::Running;
+    }
+
+    /// stop：停止
+    pub fn stop(&mut self) {
+        self.running.store(false, Ordering::SeqCst);
+        self.status = Status::Stopped;
+    }
+
+    /// is_running：是否运行中
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
     /// execute：业务逻辑由外部注入
-    pub fn execute(&mut self) {
+    pub async fn execute(&mut self) {
         // TODO: 业务逻辑
     }
 
@@ -65,6 +83,7 @@ impl Trader {
         TraderHealth {
             symbol: self.config.symbol.clone(),
             status: format!("{:?}", self.status),
+            running: self.is_running(),
         }
     }
 }
@@ -73,26 +92,5 @@ impl Trader {
 pub struct TraderHealth {
     pub symbol: String,
     pub status: String,
-}
-
-/// ==================== 自循环框架 ====================
-
-/// 数据获取函数
-pub type DataFn = Box<dyn Fn(&str) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
-
-/// 订单发送函数
-pub type OrderFn = Box<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
-
-/// 启动自循环
-pub async fn run_loop(symbol: &str, interval_ms: u64) {
-    let mut trader = Trader::new(symbol);
-    tracing::info!("[{}] Loop started", symbol);
-
-    loop {
-        // 1. execute
-        trader.execute();
-
-        // 2. 等待
-        sleep(Duration::from_millis(interval_ms)).await;
-    }
+    pub running: bool,
 }
