@@ -742,59 +742,14 @@ impl Trader {
         self.account.close > 0.0
     }
 
-    /// 启动交易循环（在独立线程中运行）
-    pub fn startloop(&mut self) {
-        if self.is_running.load(Ordering::SeqCst) {
-            tracing::warn!("[{}] Trader already running", self.config.symbol);
-            return;
-        }
-
-        self.is_running.store(true, Ordering::SeqCst);
-        self.status = Status::Trading;
-        self.runtime.lock().started_at = Some(Utc::now().timestamp());
-
-        tracing::info!("[{}] Trading loop started", self.config.symbol);
-
-        // 克隆数据用于新线程
-        let is_running = self.is_running.clone();
-        let symbol = self.config.symbol.clone();
-
-        // 创建新线程
-        std::thread::spawn(move || {
-            tracing::info!("[{}] Thread started", symbol);
-
-            // TODO: 实际运行 _run_loop
-            // 由于需要 &mut self，我们改用 tokio::spawn 在 run() 中运行
-
-            tracing::info!("[{}] Thread stopped", symbol);
-        });
-    }
-
-    /// 直接运行（当前线程）
+    /// 主循环（内部方法）
     ///
-    /// 主循环：
-    /// 1. 更新交易规则
-    /// 2. 更新市场数据
-    /// 3. 设置仓位风险
-    /// 4. 余额管理
-    /// 5. 开仓/平仓逻辑
-    /// 6. 保存数据
-    pub async fn run(&mut self) {
-        if self.is_running.load(Ordering::SeqCst) {
-            tracing::warn!("[{}] Trader already running", self.config.symbol);
-            return;
-        }
+    /// 对标 Python 的 `_run_loop`，包含完整的主循环逻辑：
+    async fn _run_loop(&mut self) {
+        tracing::info!("[{}] _run_loop started", self.config.symbol);
 
-        self.is_running.store(true, Ordering::SeqCst);
-        self.status = Status::Trading;
-        self.runtime.lock().started_at = Some(Utc::now().timestamp());
-
-        tracing::info!("[{}] Trading started", self.config.symbol);
-
-        // 加载数据
+        // 初始化
         self.load_data();
-
-        // 强制更新仓位风险和余额
         self.set_position_risk(true);
         self.balance_management(true);
 
@@ -840,6 +795,56 @@ impl Trader {
             // 循环间隔
             sleep(Duration::from_millis(self.config.interval_ms)).await;
         }
+
+        tracing::info!("[{}] _run_loop stopped", self.config.symbol);
+    }
+
+    /// 启动交易循环（在独立线程中运行）
+    pub fn startloop(&mut self) {
+        if self.is_running.load(Ordering::SeqCst) {
+            tracing::warn!("[{}] Trader already running", self.config.symbol);
+            return;
+        }
+
+        self.is_running.store(true, Ordering::SeqCst);
+        self.status = Status::Trading;
+        self.runtime.lock().started_at = Some(Utc::now().timestamp());
+
+        tracing::info!("[{}] Trading loop started", self.config.symbol);
+
+        // 获取配置用于新线程
+        let symbol = self.config.symbol.clone();
+
+        // 创建新线程
+        std::thread::spawn(move || {
+            // 在新线程中创建 runtime
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let mut trader = Trader::new(&symbol);
+                trader.is_running.store(true, Ordering::SeqCst);
+                trader.status = Status::Trading;
+                trader._run_loop().await;
+            });
+        });
+    }
+
+    /// 直接运行（当前线程）
+    ///
+    /// 调用 _run_loop 主循环
+    pub async fn run(&mut self) {
+        if self.is_running.load(Ordering::SeqCst) {
+            tracing::warn!("[{}] Trader already running", self.config.symbol);
+            return;
+        }
+
+        self.is_running.store(true, Ordering::SeqCst);
+        self.status = Status::Trading;
+        self.runtime.lock().started_at = Some(Utc::now().timestamp());
+
+        tracing::info!("[{}] Trading started", self.config.symbol);
+
+        // 调用主循环
+        self._run_loop().await;
 
         tracing::info!("[{}] Trading stopped", self.config.symbol);
     }
