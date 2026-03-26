@@ -488,7 +488,124 @@ f_engine/src/
    └─ execution.rs    - ExchangeGateway
 ```
 
-### 四、技术栈
+### 四、完整架构（分层自运行）
+
+#### 4.1 四层架构
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  数据源层（后台自运行）                                            │
+│  StreamTickGenerator → push_tick → DataFeeder                     │
+│  作用：持续接收数据，存入内存，供其他组件拉取                       │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│  指标层（后台自运行）                                              │
+│  从 DataFeeder 获取 K 线 → 计算指标 → IndicatorCache               │
+│  作用：持续计算指标（RSI/EMA/波动率），供其他组件查询              │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│  引擎层（监控波动率触发任务）                                       │
+│  监控波动率 → 波动率 > 阈值 → spawn_task                         │
+│  职责：只监控波动率，不监控价格                                    │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│  策略层（每个任务独立）                                            │
+│  从 DataFeeder 获取价格                                            │
+│  从 IndicatorCache 获取指标                                        │
+│  策略计算 → 风控 → 下单                                            │
+│  平仓完成 → 设置 status=Ended → 自己退出                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### 4.2 各层职责
+
+| 层级 | 职责 | 数据来源 |
+|-----|------|---------|
+| 数据源层 | 接收数据存入内存 | StreamTickGenerator / WebSocket |
+| 指标层 | 计算指标存入缓存 | DataFeeder |
+| 引擎层 | 监控波动率触发任务 | IndicatorCache |
+| 策略层 | 策略/风控/下单 | DataFeeder + IndicatorCache |
+
+#### 4.3 引擎层职责
+
+```
+Engine
+├── 任务注册表 (tasks)
+├── 监控波动率 (check_triggers) - 波动率 > 阈值 → spawn_task
+├── 心跳检查 (check_heartbeat)
+├── 任务移除 (check_tasks) - 发现 Ended 则移除
+└── 持久化 (EngineDb) - 只在任务变化时持久化
+```
+
+#### 4.4 策略层职责
+
+```
+每个任务独立
+├── 自己的循环 (50ms / 1s)
+├── 从 DataFeeder 获取价格
+├── 从 IndicatorCache 获取指标
+├── 策略计算
+├── 风控检查
+├── 下单执行
+└── 平仓完成 → 设置 status=Ended → 自己退出
+```
+
+#### 4.5 引擎层 vs 策略层职责划分
+
+| 功能 | 引擎层 | 策略层 |
+|-----|-------|--------|
+| 波动率监控 | ✅ | ❌ |
+| 触发任务 | ✅ | ❌ |
+| 任务注册/移除 | ✅ | ❌ |
+| 心跳检查 | ✅ | ❌ |
+| 持久化 | ✅ | ❌ |
+| 获取价格 | ❌ | ✅ 从 DataFeeder |
+| 获取指标 | ❌ | ✅ 从 IndicatorCache |
+| 策略计算 | ❌ | ✅ |
+| 风控检查 | ❌ | ✅ |
+| 下单执行 | ❌ | ✅ |
+
+#### 4.6 TaskState 结构
+
+```rust
+pub struct TaskState {
+    symbol: String,
+    status: RunningStatus,  // Running/Stopped/Ended
+    last_beat: i64,
+    position_qty: Decimal,
+    position_price: Decimal,
+    forbid_until: Option<i64>,
+    trade_count: u32,
+    done_reason: Option<String>,
+    interval_ms: u64,
+}
+```
+
+#### 4.7 异步任务模式
+
+- 不是子线程，是 `tokio::spawn` 的协程
+- 引擎 spawn 任务，任务自己循环
+- 任务结束自己退出，引擎发现后移除
+
+#### 4.8 与 Python TradeManager 对应
+
+| Python TradeManager | Rust Engine |
+|--------------------|-------------|
+| `instances` | `tasks` |
+| `start_instance()` | `spawn_task()` |
+| `run_once()` | 策略层自己的循环 |
+| `monitor()` | `check_heartbeat()` |
+| `scan_volatile()` | 监控波动率 |
+
+#### 4.9 实现文件
+
+- `crates/f_engine/src/core/engine.rs` - Engine, TaskState, RunningStatus
+- `src/sandbox_main.rs` - IndicatorCache, 完整沙盒实现
+
+### 五、技术栈
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
@@ -499,7 +616,7 @@ f_engine/src/
 | 时间处理 | chrono | DateTime<Utc> |
 | 错误处理 | thiserror | 禁用panic! |
 
-### 五、关键优化点
+### 六、关键优化点
 
 - ✅ 高频路径无锁（Tick接收、指标更新、策略判断）
 - ✅ O(1) 增量计算（EMA/SMA/RSI/MACD）
@@ -514,3 +631,4 @@ f_engine/src/
 | 2026-03-26 | 初始版本 | Droid |
 | 2026-03-26 | 更新为最终架构（异步任务模式） | Droid |
 | 2026-03-26 | 添加完整架构图（从 architecture_full.md） | Droid |
+| 2026-03-26 | 添加 TradeManager 架构（引擎/策略层职责划分） | Droid |
