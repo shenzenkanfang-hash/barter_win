@@ -1,32 +1,34 @@
 //! Sandbox Mode Main Entry - 沙盒模式启动器
 //!
-//! 集成：模拟 WS + ShadowGateway 订单拦截 + ShadowRiskChecker 风控
+//! TradeManager 架构：
+//! - 引擎层：触发器扫描、任务注册、心跳检查、持久化
+//! - 策略层：每个任务独立循环（策略计算 + 风控 + 下单）
 //!
 //! 运行:
-//!   cargo run --bin sandbox -- --symbol POWERUSDT --fund 10000 --duration 300
-//!   cargo run --bin sandbox -- --fast  # 快速模式
+//!   cargo run --bin sandbox -- --symbol HOTUSDT --fund 10000 --duration 300
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock as TokioRwLock};
+use tokio::time::sleep;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 
-use b_data_source::{DataFeeder, Tick};
+use b_data_source::{DataFeeder, KLine, Period, Tick};
 use h_sandbox::{
     ShadowBinanceGateway, ShadowRiskChecker,
     historical_replay::StreamTickGenerator,
 };
+use f_engine::core::engine::{TaskState, RunningStatus};
 use f_engine::types::{OrderRequest, OrderType, Side};
 use f_engine::RiskChecker;
-use a_common::exchange::ExchangeAccount;
 
 const DEFAULT_SYMBOL: &str = "HOTUSDT";
 const DEFAULT_FUND: f64 = 10000.0;
-const DEFAULT_DURATION: u64 = 300; // 5分钟
+const DEFAULT_DURATION: u64 = 300;
 
 #[derive(Debug, Clone)]
 struct SandboxConfig {
@@ -68,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = parse_args();
 
     tracing::info!("========================================");
-    tracing::info!("  沙盒模式启动器");
+    tracing::info!("  沙盒模式启动器 (TradeManager 架构)");
     tracing::info!("========================================");
     tracing::info!("配置:");
     tracing::info!("  品种: {}", config.symbol);
@@ -78,248 +80,260 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  模式: {}", if config.fast_mode { "快速" } else { "实时" });
     tracing::info!("========================================\n");
 
-    // 1. 创建 DataFeeder
+    // ========================================
+    // 1. 创建共享组件
+    // ========================================
+    
+    // DataFeeder - 行情缓存
     let data_feeder = Arc::new(DataFeeder::new());
     tracing::info!("✅ 1. DataFeeder 创建成功");
 
-    // 2. 创建 ShadowBinanceGateway（订单拦截/模拟成交）
-    let gateway = ShadowBinanceGateway::with_default_config(config.initial_fund);
-    let gateway = Arc::new(gateway);
-    tracing::info!("✅ 2. ShadowGateway 创建成功 (初始资金: {})", config.initial_fund);
+    // ShadowBinanceGateway - 订单拦截
+    let gateway = Arc::new(ShadowBinanceGateway::with_default_config(config.initial_fund));
+    tracing::info!("✅ 2. ShadowGateway 创建成功");
 
-    // 3. 创建 ShadowRiskChecker
-    let risk_checker = ShadowRiskChecker::new();
+    // ShadowRiskChecker - 风控检查
+    let risk_checker = Arc::new(ShadowRiskChecker::new());
     tracing::info!("✅ 3. ShadowRiskChecker 创建成功");
 
-    // 4. 从API拉取K线数据
-    tracing::info!("✅ 4. 正在从币安API拉取历史K线...");
+    // ========================================
+    // 2. 从API拉取K线数据
+    // ========================================
+    tracing::info!("正在从币安API拉取历史K线...");
     let klines = fetch_klines_from_api(&config.symbol, &config.start_date, &config.end_date).await?;
     let kline_count = klines.len();
     tracing::info!("✅ 4. K线数据准备完成 ({} 根)", kline_count);
 
-    // 5. 创建 TickGenerator
+    // ========================================
+    // 3. 创建 TickGenerator
+    // ========================================
     let tick_gen = StreamTickGenerator::from_loader(config.symbol.clone(), klines.into_iter());
-    let total_ticks = kline_count * 60; // 每K线60 ticks
+    let total_ticks = kline_count * 60;
     tracing::info!("✅ 5. TickGenerator 创建成功 (预计 {} ticks)", total_ticks);
 
-    // 打印初始账户信息
-    print_account_info(&gateway);
+    // ========================================
+    // 4. 创建 TradeManager 引擎
+    // ========================================
+    let engine = Arc::new(TradeManagerEngine::new(
+        Arc::clone(&data_feeder),
+        Arc::clone(&gateway),
+        risk_checker,
+    ));
+    tracing::info!("✅ 6. TradeManager 引擎创建成功");
 
     // ========================================
-    // 主循环：模拟 WS + 订单处理
+    // 5. 创建 Tick 通道
     // ========================================
-    tracing::info!("\n========================================");
-    tracing::info!("  开始模拟交易循环");
-    tracing::info!("========================================\n");
-
-    let start = Instant::now();
-    let mut tick_count = 0u64;
-    let mut order_count = 0u64;
-    let mut signal_count = 0u64;
-    let mut last_order_tick = 0u64;
-
-    // 策略参数
-    let signal_interval = 10; // 每10个tick检测一次
-    let max_orders = 10; // 最多10笔订单
-    let mut last_signal_price = Decimal::ZERO;
-
-    // 创建 ticker 用于实时模式延迟
-    let tick_interval = if config.fast_mode {
-        Duration::from_millis(0)
-    } else {
-        Duration::from_millis(16) // ~60fps
-    };
-
-    // 创建 channel 用于 TickGenerator 异步迭代
-    let (tx, mut rx) = mpsc::channel::<Tick>(1000);
+    let (tx, mut rx) = mpsc::channel::<(u64, Tick)>(1000);
 
     // TickGenerator 运行在独立任务
-    let tick_gen_handle = tokio::spawn(async move {
+    let tick_gen_handle = tokio::spawn({
         let mut generator = tick_gen;
-        while let Some(tick_data) = generator.next() {
-            // 用 SimulatedTick 数据构建 KLine，模拟正常WS推送的完整K线数据
-            let kline_1m = b_data_source::KLine {
-                symbol: tick_data.symbol.clone(),
-                period: b_data_source::Period::Minute(1),
-                open: tick_data.open,
-                high: tick_data.high,
-                low: tick_data.low,
-                close: tick_data.price,
-                volume: tick_data.volume,
-                timestamp: tick_data.kline_timestamp,
-            };
+        let gateway_for_tick = Arc::clone(&gateway);
+        
+        async move {
+            let mut tick_idx = 0u64;
+            
+            while let Some(tick_data) = generator.next() {
+                // 更新网关价格
+                gateway_for_tick.update_price(&tick_data.symbol, tick_data.price);
+                
+                // 构建 KLine
+                let kline_1m = KLine {
+                    symbol: tick_data.symbol.clone(),
+                    period: Period::Minute(1),
+                    open: tick_data.open,
+                    high: tick_data.high,
+                    low: tick_data.low,
+                    close: tick_data.price,
+                    volume: tick_data.volume,
+                    timestamp: tick_data.kline_timestamp,
+                };
 
-            let tick = Tick {
-                symbol: tick_data.symbol,
-                price: tick_data.price,
-                qty: tick_data.qty,
-                timestamp: tick_data.timestamp,
-                kline_1m: Some(kline_1m),
-                kline_15m: None,
-                kline_1d: None,
-            };
+                // 构建 Tick
+                let tick = Tick {
+                    symbol: tick_data.symbol,
+                    price: tick_data.price,
+                    qty: tick_data.qty,
+                    timestamp: tick_data.timestamp,
+                    kline_1m: Some(kline_1m),
+                    kline_15m: None,
+                    kline_1d: None,
+                };
 
-            if tx.send(tick).await.is_err() {
-                tracing::warn!("Tick channel closed");
-                break;
+                tick_idx += 1;
+
+                // 发送 Tick
+                if tx.send((tick_idx, tick)).await.is_err() {
+                    tracing::warn!("Tick channel closed");
+                    break;
+                }
             }
+            
+            tracing::info!("TickGenerator 完成，共 {} ticks", tick_idx);
         }
-        tracing::info!("TickGenerator 完成");
     });
 
-    // 主循环：处理 tick
-    let max_ticks = if config.fast_mode { total_ticks as u64 } else { u64::MAX };
+    // ========================================
+    // 6. 创建策略监控任务
+    // ========================================
+    let strategy_handle = tokio::spawn({
+        let config = config.clone();
+        let engine = Arc::clone(&engine);
+        
+        async move {
+            let mut last_signal_price = Decimal::ZERO;
+            let signal_interval = 10u64; // 每10个tick检测一次
+            let max_orders = 10u32;
+            let min_tick_gap = 50u64;
+            let mut last_order_tick = 0u64;
+            let mut order_count = 0u32;
 
-    loop {
-        // 检查超时
-        if !config.fast_mode && start.elapsed().as_secs() >= config.duration_secs {
-            tracing::info!("达到指定时长 {}s，退出", config.duration_secs);
-            break;
-        }
-
-        // 检查是否收到 tick
-        let tick = match tokio::time::timeout(tick_interval, rx.recv()).await {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                tracing::info!("Tick 流结束");
-                break;
-            }
-            Err(_) => {
-                // 超时，继续（快速模式）
-                tokio::task::yield_now().await;
-                continue;
-            }
-        };
-
-        // 更新网关价格（用于计算未实现盈亏）
-        gateway.update_price(&config.symbol, tick.price);
-        tick_count += 1;
-
-        // 策略信号检测
-        if tick_count % signal_interval == 0 {
-            signal_count += 1;
-
-            // 简单策略：价格变化 > 0.1% 且订单数未满时下单
-            let price_change = if last_signal_price.is_zero() {
-                Decimal::ZERO
-            } else {
-                ((tick.price - last_signal_price) / last_signal_price).abs()
-            };
-
-            if price_change > dec!(0.001) && order_count < max_orders && tick_count - last_order_tick >= 50 {
-                // 决定方向
-                let side = if tick.price > last_signal_price {
-                    Side::Buy
-                } else {
-                    Side::Sell
+            loop {
+                // 等待下一个 tick
+                let (tick_idx, tick) = match rx.recv().await {
+                    Some(t) => t,
+                    None => {
+                        tracing::info!("Tick 流结束，策略退出");
+                        break;
+                    }
                 };
 
-                // 风控检查
-                let order_req = OrderRequest {
-                    symbol: config.symbol.clone(),
-                    side: side.clone(),
-                    order_type: OrderType::Market,
-                    qty: dec!(0.01),
-                    price: Some(tick.price),
-                };
+                // 更新 DataFeeder
+                engine.data_feeder.push_tick(tick.clone());
 
-                // 前置风控检查
-                let account = gateway.get_account().unwrap_or_else(|_| ExchangeAccount {
-                    account_id: "UNKNOWN".to_string(),
-                    total_equity: dec!(0),
-                    available: dec!(0),
-                    frozen_margin: dec!(0),
-                    unrealized_pnl: dec!(0),
-                    update_ts: 0,
-                });
+                // 更新引擎的最新价格
+                engine.update_price(&config.symbol, tick.price);
 
-                if risk_checker.pre_check(&order_req, &account).pre_failed() {
-                    tracing::warn!("[Tick {:04}] 风控拦截", tick_count);
-                } else {
-                    // 下单
-                    match gateway.place_order(order_req.clone()) {
-                        Ok(result) => {
-                            order_count += 1;
-                            last_order_tick = tick_count;
-                            tracing::info!(
-                                "[Tick {:04}] 📝 {} @ {} (qty: {}, price_change: {:.2}%)",
-                                tick_count,
-                                if side == Side::Buy { "买入" } else { "卖出" },
+                // 策略信号检测
+                if tick_idx % signal_interval == 0 {
+                    // 计算价格变化
+                    let price_change = if last_signal_price.is_zero() {
+                        Decimal::ZERO
+                    } else {
+                        ((tick.price - last_signal_price) / last_signal_price).abs()
+                    };
+
+                    // 触发条件：价格变化 > 0.1% 且未超过最大订单数 且间隔足够
+                    if price_change > dec!(0.001) 
+                        && order_count < max_orders 
+                        && tick_idx - last_order_tick >= min_tick_gap 
+                    {
+                        // 检查任务是否已存在
+                        if !engine.has_task_sync(&config.symbol) {
+                            // 创建新任务
+                            engine.spawn_strategy_task(
+                                config.symbol.clone(),
                                 tick.price,
-                                result.filled_qty,
+                                50, // 50ms 间隔
+                            ).await;
+                            
+                            order_count += 1;
+                            last_order_tick = tick_idx;
+                            tracing::info!(
+                                "[Tick {:04}] 📝 触发策略 @ {} (change: {:.2}%)",
+                                tick_idx,
+                                tick.price,
                                 price_change * dec!(100)
                             );
                         }
-                        Err(e) => {
-                            tracing::error!("[Tick {:04}] ❌ 下单失败: {:?}", tick_count, e);
-                        }
                     }
+
+                    last_signal_price = tick.price;
                 }
 
-                last_signal_price = tick.price;
+                // 检查是否达到最大 tick 数
+                if config.fast_mode && tick_idx >= total_ticks as u64 {
+                    tracing::info!("达到最大 tick 数，策略退出");
+                    break;
+                }
             }
         }
+    });
 
-        // 推送 tick 到 DataFeeder（可选，用于其他组件订阅）
-        data_feeder.push_tick(tick.clone());
+    // ========================================
+    // 7. 引擎主循环
+    // ========================================
+    let engine_handle = tokio::spawn({
+        let config = config.clone();
+        let engine = Arc::clone(&engine);
+        
+        async move {
+            tracing::info!("引擎主循环启动");
+            
+            loop {
+                // 1. 检查任务状态
+                engine.check_tasks().await;
+                
+                // 2. 检查心跳
+                engine.check_heartbeat().await;
+                
+                // 3. 检查是否全部任务结束
+                if engine.is_empty().await {
+                    tracing::info!("所有任务已结束");
+                    break;
+                }
+                
+                // 4. 打印状态
+                let count = engine.task_count().await;
+                if count > 0 {
+                    tracing::debug!("引擎状态: {} 个任务运行中", count);
+                }
 
-        // 打印进度
-        if tick_count % 500 == 0 {
-            let elapsed = start.elapsed();
-            let rate = tick_count as f64 / elapsed.as_secs_f64().max(0.001);
-            tracing::info!(
-                "进度: {} ticks | 速率: {:.0}/s | 订单: {} | 信号: {}",
-                tick_count,
-                rate,
-                order_count,
-                signal_count
-            );
-
-            // 每 500 ticks 打印账户信息
-            print_account_brief(&gateway);
+                sleep(Duration::from_secs(1)).await;
+            }
+            
+            tracing::info!("引擎主循环结束");
         }
+    });
 
-        // 检查是否达到最大 tick 数
-        if tick_count >= max_ticks {
-            tracing::info!("达到最大 tick 数 {}，退出", max_ticks);
-            break;
+    // ========================================
+    // 8. 等待结束
+    // ========================================
+    let max_duration = if config.fast_mode {
+        Some(Duration::from_secs(config.duration_secs))
+    } else {
+        None
+    };
+
+    tokio::select! {
+        _ = tick_gen_handle => {
+            tracing::info!("TickGenerator 已结束");
         }
+        _ = strategy_handle => {
+            tracing::info!("策略任务已结束");
+        }
+        _ = engine_handle => {
+            tracing::info!("引擎已结束");
+        }
+        _ = async {
+            if let Some(dur) = max_duration {
+                sleep(dur).await;
+                tracing::info!("达到最大时长 {}s", config.duration_secs);
+            }
+        } => {}
     }
 
-    // 等待 TickGenerator 完成
-    let _ = tick_gen_handle.await;
-
     // ========================================
-    // 输出测试结果
+    // 9. 输出结果
     // ========================================
-    let elapsed = start.elapsed();
-
     tracing::info!("\n========================================");
-    tracing::info!("  测试完成");
+    tracing::info!("  测试结果");
     tracing::info!("========================================");
-    tracing::info!("耗时: {:.2}s", elapsed.as_secs_f64());
-    tracing::info!("总 ticks: {}", tick_count);
-    tracing::info!("触发信号: {}", signal_count);
-    tracing::info!("成交订单: {}", order_count);
-    tracing::info!("平均速率: {:.0} ticks/s", tick_count as f64 / elapsed.as_secs_f64().max(0.001));
-
-    // 打印最终账户信息
+    
+    // 打印账户信息
     print_account_info(&gateway);
+    
+    // 打印最终统计
+    engine.print_stats().await;
 
-    // 测试 DataFeeder 查询
+    // 测试 DataFeeder
     tracing::info!("\n========================================");
     tracing::info!("  DataFeeder 查询测试");
     tracing::info!("========================================");
-    let latest = data_feeder.ws_get_1m(&config.symbol);
-    match latest {
-        Some(kline) => {
-            tracing::info!("✅ DataFeeder 查询成功");
-            tracing::info!("  最新K线: O={} H={} L={} C={}",
-                kline.open, kline.high, kline.low, kline.close);
-        }
-        None => {
-            tracing::warn!("⚠️  DataFeeder 查询返回 None");
-        }
+    if let Some(kline) = data_feeder.ws_get_1m(&config.symbol) {
+        tracing::info!("✅ DataFeeder: O={} H={} L={} C={}",
+            kline.open, kline.high, kline.low, kline.close);
     }
 
     tracing::info!("\n========================================");
@@ -329,7 +343,334 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// 解析命令行参数
+// ============================================================================
+// TradeManager 引擎
+// ============================================================================
+
+/// 任务 Map 类型
+type TaskMap = std::collections::HashMap<String, Arc<TokioRwLock<TaskState>>>;
+type PriceMap = std::collections::HashMap<String, Decimal>;
+
+/// TradeManager 引擎 - 精简版
+/// 
+/// 引擎层职责：
+/// - 任务注册表
+/// - 心跳检查
+/// - 任务移除
+/// - 持久化（这里只打印日志）
+/// 
+/// 策略层职责：
+/// - 策略计算
+/// - 风控检查
+/// - 下单执行
+/// - 平仓完成 → 自己退出
+struct TradeManagerEngine {
+    /// DataFeeder
+    data_feeder: Arc<DataFeeder>,
+    /// 网关
+    gateway: Arc<ShadowBinanceGateway>,
+    /// 风控
+    risk_checker: Arc<ShadowRiskChecker>,
+    
+    /// 任务注册表
+    tasks: Arc<TokioRwLock<TaskMap>>,
+    /// 最新价格
+    prices: Arc<TokioRwLock<PriceMap>>,
+    /// 心跳超时（秒）
+    heartbeat_timeout: i64,
+    /// 全局锁（下单时使用）
+    global_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 统计
+    stats: Arc<TokioRwLock<EngineStats>>,
+}
+
+#[derive(Debug, Default)]
+struct EngineStats {
+    total_orders: u32,
+    total_trades: u32,
+    total_errors: u32,
+}
+
+impl TradeManagerEngine {
+    fn new(
+        data_feeder: Arc<DataFeeder>,
+        gateway: Arc<ShadowBinanceGateway>,
+        risk_checker: Arc<ShadowRiskChecker>,
+    ) -> Self {
+        Self {
+            data_feeder,
+            gateway,
+            risk_checker,
+            tasks: Arc::new(TokioRwLock::new(std::collections::HashMap::new())),
+            prices: Arc::new(TokioRwLock::new(std::collections::HashMap::new())),
+            heartbeat_timeout: 90,
+            global_lock: Arc::new(tokio::sync::Mutex::new(())),
+            stats: Arc::new(TokioRwLock::new(EngineStats::default())),
+        }
+    }
+
+    /// 更新价格
+    fn update_price(&self, symbol: &str, price: Decimal) {
+        let symbol = symbol.to_string();
+        let prices = Arc::clone(&self.prices);
+        tokio::spawn(async move {
+            prices.write().await.insert(symbol, price);
+        });
+    }
+
+    /// 同步检查任务是否存在
+    fn has_task_sync(&self, _symbol: &str) -> bool {
+        // 简化：允许重复创建
+        // 实际应该检查任务表
+        false
+    }
+
+    /// 获取任务数量
+    async fn task_count(&self) -> usize {
+        self.tasks.read().await.len()
+    }
+
+    /// 检查是否为空
+    async fn is_empty(&self) -> bool {
+        self.tasks.read().await.is_empty()
+    }
+
+    /// 打印统计
+    async fn print_stats(&self) {
+        let stats = self.stats.read().await;
+        tracing::info!("引擎统计:");
+        tracing::info!("  总订单: {}", stats.total_orders);
+        tracing::info!("  总交易: {}", stats.total_trades);
+        tracing::info!("  总错误: {}", stats.total_errors);
+    }
+
+    /// 启动策略任务
+    async fn spawn_strategy_task(&self, symbol: String, current_price: Decimal, interval_ms: u64) {
+        // 检查是否已存在
+        {
+            let tasks = self.tasks.read().await;
+            if tasks.contains_key(&symbol) {
+                return;
+            }
+        }
+
+        // 创建任务状态
+        let state = Arc::new(TokioRwLock::new(TaskState::new(symbol.clone(), interval_ms)));
+        
+        // 注册
+        {
+            let mut tasks = self.tasks.write().await;
+            tasks.insert(symbol.clone(), Arc::clone(&state));
+        }
+
+        // 克隆引用用于任务
+        let data_feeder = Arc::clone(&self.data_feeder);
+        let gateway = Arc::clone(&self.gateway);
+        let risk_checker = Arc::clone(&self.risk_checker);
+        let prices = Arc::clone(&self.prices);
+        let global_lock = Arc::clone(&self.global_lock);
+        let tasks_ref = Arc::clone(&self.tasks);
+        let stats = Arc::clone(&self.stats);
+
+        tracing::info!("[Engine] 启动策略任务: {} (interval: {}ms)", symbol, interval_ms);
+
+        // Spawn 异步任务
+        tokio::spawn(async move {
+            // 策略参数
+            let mut has_position = false;
+            let mut entry_price = Decimal::ZERO;
+            let mut signal_count = 0i64;
+            
+            // 任务循环
+            loop {
+                // 1. 检查禁止
+                {
+                    let s = state.read().await;
+                    if s.is_forbidden() {
+                        sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
+                    if s.status == RunningStatus::Ended {
+                        break;
+                    }
+                }
+
+                // 2. 获取全局锁
+                let _lock = global_lock.lock().await;
+
+                // 3. 获取当前价格
+                let current_price = {
+                    let prices = prices.read().await;
+                    prices.get(&symbol).copied().unwrap_or(current_price)
+                };
+
+                // 4. 策略计算
+                let should_open = !has_position && signal_count % 20 == 10;
+                let should_close = has_position && signal_count % 30 == 20;
+
+                // 5. 执行交易
+                if should_open {
+                    // 风控检查
+                    let account = match gateway.get_account() {
+                        Ok(acc) => acc,
+                        Err(_) => {
+                            let mut s = stats.write().await;
+                            s.total_errors += 1;
+                            drop(_lock);
+                            sleep(Duration::from_millis(interval_ms)).await;
+                            signal_count += 1;
+                            state.write().await.heartbeat();
+                            continue;
+                        }
+                    };
+
+                    let order_req = OrderRequest {
+                        symbol: symbol.clone(),
+                        side: Side::Buy,
+                        order_type: OrderType::Market,
+                        qty: dec!(0.01),
+                        price: Some(current_price),
+                    };
+
+                    if risk_checker.pre_check(&order_req, &account).pre_failed() {
+                        tracing::debug!("[{}] 风控拦截开仓", symbol);
+                    } else {
+                        // 下单
+                        match gateway.place_order(order_req) {
+                            Ok(result) => {
+                                has_position = true;
+                                entry_price = current_price;
+                                
+                                let mut s = stats.write().await;
+                                s.total_orders += 1;
+                                s.total_trades += 1;
+                                
+                                tracing::info!(
+                                    "[{}] 开仓 @ {} (qty: {})",
+                                    symbol, current_price, result.filled_qty
+                                );
+                            }
+                            Err(e) => {
+                                let mut s = stats.write().await;
+                                s.total_errors += 1;
+                                tracing::warn!("[{}] 开仓失败: {:?}", symbol, e);
+                            }
+                        }
+                    }
+                }
+
+                if should_close && has_position {
+                    // 风控检查
+                    let account = match gateway.get_account() {
+                        Ok(acc) => acc,
+                        Err(_) => {
+                            drop(_lock);
+                            sleep(Duration::from_millis(interval_ms)).await;
+                            signal_count += 1;
+                            state.write().await.heartbeat();
+                            continue;
+                        }
+                    };
+
+                    let order_req = OrderRequest {
+                        symbol: symbol.clone(),
+                        side: Side::Sell,
+                        order_type: OrderType::Market,
+                        qty: dec!(0.01),
+                        price: Some(current_price),
+                    };
+
+                    if risk_checker.pre_check(&order_req, &account).pre_failed() {
+                        tracing::debug!("[{}] 风控拦截平仓", symbol);
+                    } else {
+                        // 下单
+                        match gateway.place_order(order_req) {
+                            Ok(result) => {
+                                let pnl = (current_price - entry_price) * result.filled_qty;
+                                has_position = false;
+                                
+                                let mut s = stats.write().await;
+                                s.total_orders += 1;
+                                
+                                tracing::info!(
+                                    "[{}] 平仓 @ {} (qty: {}, PnL: {})",
+                                    symbol, current_price, result.filled_qty, pnl
+                                );
+                                
+                                // 平仓完成，退出任务
+                                state.write().await.end("TradeComplete".to_string());
+                                break;
+                            }
+                            Err(e) => {
+                                let mut s = stats.write().await;
+                                s.total_errors += 1;
+                                tracing::warn!("[{}] 平仓失败: {:?}", symbol, e);
+                            }
+                        }
+                    }
+                }
+
+                // 6. 更新心跳
+                state.write().await.heartbeat();
+
+                // 7. 释放锁
+                drop(_lock);
+
+                // 8. 信号计数
+                signal_count += 1;
+
+                // 9. 等待下一个周期
+                sleep(Duration::from_millis(interval_ms)).await;
+            }
+
+            // 10. 从注册表移除
+            let mut tasks = tasks_ref.write().await;
+            tasks.remove(&symbol);
+            
+            tracing::info!("[Engine] 策略任务结束: {}", symbol);
+        });
+    }
+
+    /// 检查任务
+    async fn check_tasks(&self) {
+        let mut to_remove: Vec<String> = Vec::new();
+
+        let tasks = self.tasks.read().await;
+        for (symbol, state_arc) in tasks.iter() {
+            let s = state_arc.read().await;
+            if s.status == RunningStatus::Ended {
+                to_remove.push(symbol.clone());
+                tracing::info!("[Engine] 移除已结束任务: {}", symbol);
+            }
+        }
+        drop(tasks);
+
+        if !to_remove.is_empty() {
+            let mut tasks = self.tasks.write().await;
+            for symbol in &to_remove {
+                tasks.remove(symbol);
+            }
+        }
+    }
+
+    /// 检查心跳
+    async fn check_heartbeat(&self) {
+        let now = Utc::now().timestamp();
+
+        let tasks = self.tasks.read().await;
+        for (symbol, state_arc) in tasks.iter() {
+            let s = state_arc.read().await;
+            if s.status == RunningStatus::Running && s.last_beat < now - self.heartbeat_timeout {
+                tracing::warn!("[Engine] 任务心跳超时: {} (last_beat: {})", symbol, s.last_beat);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// 辅助函数
+// ============================================================================
+
 fn parse_args() -> SandboxConfig {
     let args: Vec<String> = std::env::args().collect();
     let mut config = SandboxConfig::default();
@@ -368,22 +709,8 @@ fn parse_args() -> SandboxConfig {
             "--fast" => {
                 config.fast_mode = true;
             }
-            "--help" => {
-                println!("沙盒模式启动器");
-                println!();
-                println!("用法: sandbox [选项]");
-                println!("选项:");
-                println!("  --symbol <品种>   测试品种 (默认: {})", DEFAULT_SYMBOL);
-                println!("  --fund <金额>     初始资金 USDT (默认: {})", DEFAULT_FUND);
-                println!("  --duration <秒>  测试时长 (默认: {})", DEFAULT_DURATION);
-                println!("  --start <日期>    起始日期 YYYY-MM-DD (默认: {})", config.start_date);
-                println!("  --end <日期>      结束日期 YYYY-MM-DD (默认: {})", config.end_date);
-                println!("  --fast            快速模式 (无延迟)");
-                println!("  --help            显示帮助");
-                println!();
-                println!("示例:");
-                println!("  cargo run --bin sandbox -- --symbol HOTUSDT --start 2025-10-09 --end 2025-10-11 --fast");
-                std::process::exit(0);
+            "--slow" => {
+                config.fast_mode = false;
             }
             _ => {}
         }
@@ -392,12 +719,12 @@ fn parse_args() -> SandboxConfig {
     config
 }
 
-/// 从币安API拉取历史K线
+/// 从币安API拉取K线
 async fn fetch_klines_from_api(
     symbol: &str,
     start_date: &str,
     end_date: &str,
-) -> Result<Vec<b_data_source::KLine>, Box<dyn std::error::Error>> {
+) -> Result<Vec<KLine>, Box<dyn std::error::Error>> {
     use b_data_source::Period;
 
     // 解析日期
@@ -411,10 +738,9 @@ async fn fetch_klines_from_api(
     let start_ms = chrono::Utc.from_utc_datetime(&start_dt).timestamp_millis();
     let end_ms = chrono::Utc.from_utc_datetime(&end_dt).timestamp_millis();
 
-    tracing::info!("从API拉取 {} {} -> {} ({} -> {})",
-        symbol, start_date, end_date, start_ms, end_ms);
+    tracing::info!("从API拉取 {} {} -> {}", symbol, start_date, end_date);
 
-    // 分页拉取：币安API每次最多1000条
+    // 分页拉取
     let mut all_raw_klines: Vec<Vec<serde_json::Value>> = Vec::new();
     let mut current_start = start_ms;
     let max_requests = 100;
@@ -442,13 +768,10 @@ async fn fetch_klines_from_api(
         let page_count = raw_klines.len();
         all_raw_klines.extend(raw_klines);
 
-        tracing::info!("第 {} 页: {} 条, 累计: {}", page + 1, page_count, all_raw_klines.len());
-
         if page_count < page_limit {
             break;
         }
 
-        // 下一页
         if let Some(last) = all_raw_klines.last() {
             if let Some(close_time) = last.get(6).and_then(|v| v.as_i64()) {
                 current_start = close_time + 1;
@@ -458,7 +781,6 @@ async fn fetch_klines_from_api(
         }
 
         if page >= max_requests - 1 {
-            tracing::warn!("已达到最大请求次数限制");
             break;
         }
     }
@@ -467,10 +789,10 @@ async fn fetch_klines_from_api(
         return Err("未获取到K线数据".into());
     }
 
-    tracing::info!("共获取K线: {} 条，开始解析...", all_raw_klines.len());
+    tracing::info!("共获取K线: {} 条", all_raw_klines.len());
 
     // 转换为内部 KLine 格式
-    let klines: Vec<b_data_source::KLine> = all_raw_klines
+    let klines: Vec<KLine> = all_raw_klines
         .into_iter()
         .filter_map(|arr| {
             let open_time_ms = arr.get(0)?.as_i64()?;
@@ -482,7 +804,7 @@ async fn fetch_klines_from_api(
                 Decimal::from_f64_retain(f)
             };
 
-            Some(b_data_source::KLine {
+            Some(KLine {
                 symbol: symbol.to_string(),
                 period: Period::Minute(1),
                 open: parse_decimal(1)?,
@@ -528,17 +850,5 @@ fn print_account_info(gateway: &Arc<ShadowBinanceGateway>) {
         Err(e) => {
             tracing::error!("获取持仓信息失败: {:?}", e);
         }
-    }
-}
-
-/// 打印账户简要信息
-fn print_account_brief(gateway: &Arc<ShadowBinanceGateway>) {
-    if let Ok(account) = gateway.get_account() {
-        tracing::info!(
-            "账户 | 权益: {} | 可用: {} | 浮盈: {}",
-            account.total_equity,
-            account.available,
-            account.unrealized_pnl
-        );
     }
 }
