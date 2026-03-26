@@ -1,11 +1,11 @@
 ================================================================
-品种协程自循环设计方案（详细版·架构评审后）
+品种协程自循环设计方案（详细版·第二轮评审后）
 ================================================================
 Author: 软件架构师
 Date: 2026-03-27
 Status: 待实现
 Based on: pin_main.py (Python) + h_15m/ (Rust)
-Review: 架构评审 v1（并发安全 + 事务一致性）
+Review: 架构评审 v2（阻塞性语法 + 逻辑修正）
 ================================================================
 
 一、核心设计原则
@@ -26,7 +26,7 @@ Engine 管 spawn/stop/监控/重启，Trader 自己 loop。
 ┌─────────────────────────────────────────────────────────────────┐
 │  Engine                                                          │
 │  ├── InstanceMap: HashMap<symbol, TraderHandle>                 │
-│  ├── spawn(symbol) → tokio::spawn(trader.start())              │
+│  ├── spawn(symbol) → tokio::spawn(trader.start(handle))         │
 │  ├── Monitor 协程（心跳检测 + 指数退避重启）                      │
 │  └── stop(symbol)                                               │
 └─────────────────────────────────────────────────────────────────┘
@@ -34,6 +34,7 @@ Engine 管 spawn/stop/监控/重启，Trader 自己 loop。
 ┌─────────────────────────────────────────────────────────────────┐
 │  h_15m::Trader.loop()                                       │
 │  loop:                                                           │
+│    handle.heartbeat()            -- 更新心跳（P0: 监控链路）       │
 │    1. record = TradeRecord.new()  -- 预创建 pending 记录        │
 │    2. repository.save_pending(record)     -- WAL: 先写日志       │
 │    3. record.market = get_market()                              │
@@ -55,7 +56,7 @@ Engine 管 spawn/stop/监控/重启，Trader 自己 loop。
 │  signal.rs         # 信号生成器（7条件Pin）✅ 已有              │
 │  status.rs         # 状态机（PinStatus）✅ 已有                │
 │  executor.rs       # 下单网关 [改造：仅保留 send_order]         │
-│  repository.rs     # 数据持久化 + WAL [新建]                     │
+│  repository.rs     # 数据持久化 + WAL [新建]                   │
 │  mod.rs            # 模块导出                                     │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -64,7 +65,7 @@ Engine 管 spawn/stop/监控/重启，Trader 自己 loop。
 - repository.rs: SQLite 读写 + WAL 事务管理 + 崩溃恢复
 - trader.rs: 流程编排（协调 executor + repository）
 
-四、TradeRecord 设计（评审后·WAL 模式）
+四、TradeRecord 设计（WAL 模式）
 ================================================================
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -107,12 +108,12 @@ Engine 管 spawn/stop/监控/重启，Trader 自己 loop。
 │  record_saved        INTEGER  -- 0/1                           │
 └─────────────────────────────────────────────────────────────────┘
 
-status 字段状态机（P0 一致性保证）：
+status 字段状态机（WAL 一致性保证）：
   PENDING   → 下单前预写，幂等性保证
   CONFIRMED → 下单成功后确认
   FAILED    → 下单失败标记
 
-五、executor.rs 设计（评审后）
+五、executor.rs 设计（评审后·第二轮修正）
 ================================================================
 
 5.1 职责
@@ -120,9 +121,9 @@ status 字段状态机（P0 一致性保证）：
 ┌─────────────────────────────────────────────────────────────────┐
 │  Executor（线程安全：Arc<dyn ExchangeGateway>）                  │
 ├─────────────────────────────────────────────────────────────────┤
-│  send_order(signal, order_type) → Result<OrderResult, Error>   │
+│  send_order(signal, order_type, current_qty, current_side)      │
 │  rate_limit_check(interval_ms) → bool   【原子操作 P0】        │
-│  calculate_order_qty(order_type) → Decimal 【Decimal精度 P1】   │
+│  calculate_order_qty(...) → Decimal 【Decimal精度 P1】           │
 └─────────────────────────────────────────────────────────────────┘
 
 5.2 rate_limit_check（评审后·原子操作）
@@ -186,7 +187,7 @@ impl Executor {
 }
 ```
 
-5.3 calculate_order_qty（评审后·Decimal 精度）
+5.3 calculate_order_qty（评审后·修正 PositionSide 参数）
 
 ```rust
 use rust_decimal::Decimal;
@@ -202,14 +203,19 @@ pub enum OrderType {
 }
 
 impl Executor {
-    /// 计算下单数量（P1: 全程 Decimal 精度）
+    /// 计算下单数量（P1: 全程 Decimal 精度，修正 PositionSide 参数）
     ///
     /// 对齐 Python place_order 中的 open_qty 计算逻辑
+    ///
+    /// 参数说明：
+    /// - order_type: 下单类型
+    /// - current_qty: 当前持仓数量（带符号：多头正，空头负）
+    /// - current_side: 当前持仓方向（用于判断是否已有持仓）
     pub fn calculate_order_qty(
         &self,
         order_type: OrderType,
         current_qty: Decimal,
-        position_side: PositionSide,
+        current_side: Option<PositionSide>,
     ) -> Decimal {
         match order_type {
             OrderType::InitialOpen => {
@@ -217,12 +223,17 @@ impl Executor {
                 self.config.initial_ratio
             }
             OrderType::HedgeOpen => {
-                // 对冲：反向持仓数量（取绝对值）
-                current_qty.abs()
+                // 对冲：需要当前持仓方向来计算反向数量
+                // 如果 current_qty > 0（有持仓），返回当前数量作为对冲量
+                if current_qty.abs() > Decimal::ZERO {
+                    current_qty.abs()
+                } else {
+                    Decimal::ZERO
+                }
             }
             OrderType::DoubleAdd => {
                 // 翻倍加仓：当前数量 * 0.5
-                current_qty * dec!(0.5)
+                current_qty.abs() * dec!(0.5)
             }
             OrderType::DoubleClose | OrderType::DayClose => {
                 // 平仓：全部同向持仓
@@ -237,7 +248,7 @@ impl Executor {
 }
 ```
 
-5.4 send_order 完整逻辑
+5.4 send_order 完整逻辑（评审后·修正参数签名）
 
 ```rust
 impl Executor {
@@ -253,18 +264,19 @@ impl Executor {
         &self,
         signal: &StrategySignal,
         order_type: OrderType,
-        current_position_qty: Decimal,
+        current_qty: Decimal,
+        current_side: Option<PositionSide>,
     ) -> Result<OrderResult, ExecutorError> {
         // 1. 频率限制（原子，无竞态）
         if !self.rate_limit_check(self.config.order_interval_ms) {
             return Err(ExecutorError::RateLimited);
         }
 
-        // 2. 计算下单数量
+        // 2. 计算下单数量（使用正确的 current_side 参数）
         let qty = self.calculate_order_qty(
             order_type,
-            current_position_qty,
-            signal.direction,
+            current_qty,
+            current_side,
         );
 
         if qty <= Decimal::ZERO {
@@ -297,22 +309,97 @@ impl Executor {
 }
 ```
 
-六、repository.rs 设计（评审后·WAL 模式）
+5.5 Error 类型定义（评审后·新增）
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutorError {
+    #[error("频率限制")]
+    RateLimited,
+
+    #[error("数量为零")]
+    ZeroQuantity,
+
+    #[error("风控拒绝: {0}")]
+    RiskCheckFailed(String),
+
+    #[error("网关错误: {0}")]
+    Gateway(#[from] GatewayError),
+
+    #[error("超时: {0}")]
+    Timeout(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RepoError {
+    #[error("数据库错误: {0}")]
+    Database(#[from] rusqlite::Error),
+
+    #[error("记录不存在")]
+    NotFound,
+
+    #[error("唯一约束冲突")]
+    UniqueViolation,
+
+    #[error("序列化错误: {0}")]
+    Serialization(String),
+}
+```
+
+六、repository.rs 设计（评审后·WAL + ID 生命周期）
 ================================================================
 
 6.1 职责
 
 ┌─────────────────────────────────────────────────────────────────┐
-│  Repository（P0: WAL 事务一致性）                                 │
+│  Repository（WAL 事务一致性 + 连接池）                            │
 ├─────────────────────────────────────────────────────────────────┤
-│  save_pending(record)  → 保存 PENDING 记录（幂等）             │
-│  confirm_record(id)    → 更新为 CONFIRMED                       │
-│  mark_failed(id, msg)  → 更新为 FAILED + 错误信息               │
-│  load_latest(symbol)   → 崩溃恢复：加载最新记录                  │
-│  gc_pending()         → 清理超时的 PENDING 记录（兜底）         │
+│  save_pending(record)     → 保存 PENDING 记录（幂等）             │
+│  confirm_record(id, res)  → 更新为 CONFIRMED                       │
+│  mark_failed(id, msg)    → 更新为 FAILED + 错误信息               │
+│  load_latest(symbol)     → 崩溃恢复：加载最新记录                 │
+│  get_by_timestamp()      → P0: 幂等冲突处理（新增）              │
+│  gc_pending()            → 清理超时的 PENDING 记录                │
 └─────────────────────────────────────────────────────────────────┘
 
-6.2 WAL 事务流程（评审后·P0 一致性）
+6.2 连接池配置（评审后·P2 新增）
+
+```rust
+// 使用 r2d2 连接池，支持多品种并发
+
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+
+pub struct Repository {
+    pool: Arc<Pool<SqliteConnectionManager>>,  // 共享连接池
+    symbol: String,
+}
+
+impl Repository {
+    pub fn new(symbol: &str, db_path: &str) -> Result<Self, RepoError> {
+        let manager = SqliteConnectionManager::file(db_path);
+        let pool = Pool::builder()
+            .max_size(10)  // 连接池大小，根据品种数调整
+            .build(manager)?;
+
+        // 初始化表
+        Self::init_schema(&pool)?;
+
+        Ok(Self {
+            pool: Arc::new(pool),
+            symbol: symbol.to_string(),
+        })
+    }
+
+    fn init_schema(pool: &Pool<SqliteConnectionManager>) -> Result<(), RepoError> {
+        let conn = pool.get()?;
+        conn.execute_batch(SCHEMA)?;
+        Ok(())
+    }
+}
+```
+
+6.3 WAL 事务流程（评审后·修正 ID 生命周期）
 
 ```rust
 impl Repository {
@@ -389,10 +476,34 @@ impl Repository {
 
         Ok(())
     }
+
+    /// P0: 按 symbol + timestamp 查询（幂等冲突处理）
+    ///
+    /// 用于 save_pending 遇到 UNIQUE 约束冲突时，获取已有记录的 id
+    pub fn get_by_timestamp(
+        &self,
+        symbol: &str,
+        timestamp: i64,
+    ) -> Result<Option<TradeRecord>, RepoError> {
+        let sql = r#"
+            SELECT * FROM trade_records
+            WHERE symbol = ? AND timestamp = ?
+            LIMIT 1
+        "#;
+
+        let mut stmt = self.prepare(sql)?;
+        let mut rows = stmt.query(rusqlite::params![symbol, timestamp])?;
+
+        if let Some(row) = rows.next()? {
+            Ok(Some(self.row_to_record(row)?))
+        } else {
+            Ok(None)
+        }
+    }
 }
 ```
 
-6.3 崩溃恢复（对应 Python _load_data）
+6.4 崩溃恢复（对应 Python _load_data）
 
 ```rust
 impl Repository {
@@ -447,9 +558,13 @@ impl Repository {
 
     /// 兜底清理：超时 PENDING 记录（定时任务）
     ///
-    /// 超时时间：5 分钟（TIMEOUT_PERIOD 对应 Python 的 60*60*24*5）
-    pub fn gc_pending(&self, timeout_secs: i64) -> Result<usize, RepoError> {
-        let cutoff = chrono::Utc::now().timestamp() - timeout_secs;
+    /// 超时时间：5 分钟（评审后修正：与 Python 的 5 天区分）
+    /// Python TIMEOUT_PERIOD = 60*60*24*5（5天）是历史数据记录超时
+    /// 此处 PENDING_TIMEOUT_SECS 是 WAL 预写记录超时，应较短
+    pub const PENDING_TIMEOUT_SECS: i64 = 300;  // 5 分钟
+
+    pub fn gc_pending(&self) -> Result<usize, RepoError> {
+        let cutoff = chrono::Utc::now().timestamp() - Self::PENDING_TIMEOUT_SECS;
 
         let sql = r#"
             UPDATE trade_records
@@ -485,30 +600,30 @@ CREATE TABLE IF NOT EXISTS trade_records (
     market_status       TEXT,
     -- 持仓快照
     exchange_position   TEXT,
-    local_position      TEXT,
+    local_position     TEXT,
     -- 策略状态
     trader_status       TEXT,
-    signal_json         TEXT,
+    signal_json        TEXT,
     confidence          INTEGER,
     -- 账户状态
     realized_pnl        TEXT,
     unrealized_pnl      TEXT,
-    available_balance   TEXT,
-    used_margin         TEXT,
+    available_balance  TEXT,
+    used_margin        TEXT,
     -- 订单执行
     order_type          INTEGER,
-    order_direction     TEXT,
-    order_quantity      TEXT,
-    order_result        TEXT,
-    order_timestamp     INTEGER,
+    order_direction    TEXT,
+    order_quantity     TEXT,
+    order_result       TEXT,
+    order_timestamp    INTEGER,
     -- 检查表
-    check_passed        INTEGER DEFAULT 0,
-    signal_passed       INTEGER DEFAULT 0,
-    price_check_passed  INTEGER DEFAULT 0,
-    risk_check_passed   INTEGER DEFAULT 0,
-    lock_acquired       INTEGER DEFAULT 0,
-    order_executed      INTEGER DEFAULT 0,
-    record_saved        INTEGER DEFAULT 0,
+    check_passed       INTEGER DEFAULT 0,
+    signal_passed      INTEGER DEFAULT 0,
+    price_check_passed INTEGER DEFAULT 0,
+    risk_check_passed  INTEGER DEFAULT 0,
+    lock_acquired      INTEGER DEFAULT 0,
+    order_executed     INTEGER DEFAULT 0,
+    record_saved       INTEGER DEFAULT 0,
     UNIQUE(symbol, timestamp)
 );
 
@@ -525,32 +640,38 @@ CREATE INDEX IF NOT EXISTS idx_status
     ON trade_records(status, timestamp DESC);
 ```
 
-八、trader.rs 改造（评审后）
+八、trader.rs 改造（评审后·第二轮修正）
 ================================================================
 
 8.1 字段（评审后）
 
 ```rust
 use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::RwLock;  // tokio 异步锁
 
 pub struct Trader {
     config: TraderConfig,
-    status_machine: RwLock<PinStatusMachine>,
+    status_machine: RwLock<PinStatusMachine>,  // tokio 异步锁
     signal_generator: MinSignalGenerator,
-    position: RwLock<Option<LocalPosition>>,
+    position: RwLock<Option<LocalPosition>>,  // tokio 异步锁
     executor: Arc<Executor>,        // 下单执行器
     repository: Arc<Repository>,     // 数据持久化
-    last_order_ms: AtomicU64,        // P0: 原子操作替代 RwLock
-    is_running: RwLock<bool>,
+    last_order_ms: AtomicU64,       // P0: 原子操作
+    is_running: RwLock<bool>,       // tokio 异步锁
 }
 ```
 
-8.2 主循环（评审后·WAL 整合）
+8.2 主循环（评审后·修正 RwLock 语法 + 心跳调用）
 
 ```rust
 impl Trader {
-    pub async fn start(&self) {
-        *self.is_running = true;
+    /// P0: Trader 启动（修正 RwLock 语法）
+    ///
+    /// 参数说明：
+    /// - handle: TraderHandle 引用，用于心跳更新
+    pub async fn start(&self, handle: Arc<TraderHandle>) {
+        // P0: RwLock 需要 .write().await 解引用
+        *self.is_running.write().await = true;
         tracing::info!(symbol = %self.config.symbol, "Trader 启动");
 
         // 崩溃恢复
@@ -564,7 +685,11 @@ impl Trader {
             self.restore_from_record(&record);
         }
 
-        while *self.is_running.read() {
+        // P0: 主循环必须调用 heartbeat，否则 Monitor 会误判超时
+        while *self.is_running.read().await {
+            // 更新心跳（P0: 监控链路完整）
+            handle.heartbeat();
+
             self.execute_once_wal().await;
             sleep(Duration::from_millis(self.config.interval_ms)).await;
         }
@@ -572,19 +697,38 @@ impl Trader {
         tracing::info!(symbol = %self.config.symbol, "Trader 已停止");
     }
 
-    /// WAL 模式执行一次（评审后·P0 一致性）
+    /// WAL 模式执行一次（评审后·P0 一致性 + ID 生命周期）
     async fn execute_once_wal(&self) {
         // 1. 预创建记录（不依赖下单结果）
         let mut record = self.build_pending_record();
-        let pending_id = match self.repository.save_pending(&record) {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::error!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "预写记录失败，跳过本次下单"
-                );
-                return;
+
+        // P0: ID 获取带幂等处理
+        let pending_id = loop {
+            match self.repository.save_pending(&record) {
+                Ok(id) => break id,
+                Err(RepoError::UniqueViolation) => {
+                    // 幂等冲突：同 symbol+timestamp 已存在
+                    if let Some(existing) = self.repository
+                        .get_by_timestamp(&record.symbol, record.timestamp)
+                        .ok()
+                        .flatten()
+                    {
+                        tracing::warn!(
+                            symbol = %record.symbol,
+                            id = existing.id,
+                            "发现重复记录，使用已有 ID"
+                        );
+                        break existing.id;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        symbol = %self.config.symbol,
+                        error = %e,
+                        "预写记录失败，跳过本次下单"
+                    );
+                    return;
+                }
             }
         };
 
@@ -610,10 +754,19 @@ impl Trader {
             }
         };
 
-        // 4. 执行下单（同步阻塞，或 tokio::spawn_blocking）
-        match self.executor.send_order(&signal, order_type, self.current_position_qty()) {
+        // 4. 获取当前持仓状态（用于 calculate_order_qty）
+        let current_side = self.current_position_side();
+        let current_qty = self.current_position_qty();
+
+        // 5. 执行下单（传入正确的参数）
+        match self.executor.send_order(
+            &signal,
+            order_type,
+            current_qty,
+            current_side,
+        ) {
             Ok(result) => {
-                // 5. WAL 确认
+                // 6. WAL 确认
                 let result_str = serde_json::to_string(&result).unwrap_or_default();
                 if let Err(e) = self.repository.confirm_record(pending_id, &result_str) {
                     // P0: 确认失败需要告警
@@ -625,11 +778,49 @@ impl Trader {
                     );
                 }
 
-                // 6. 更新 Trader 内部持仓状态
+                // 7. 更新 Trader 内部持仓状态
                 self.update_position_from_result(&result);
             }
             Err(e) => {
                 self.repository.mark_failed(pending_id, &format!("ORDER_FAILED: {}", e)).ok();
+            }
+        }
+    }
+}
+```
+
+8.3 状态恢复（评审后·新增）
+
+```rust
+impl Trader {
+    /// 从 SQLite 记录恢复 Trader 内部状态
+    ///
+    /// 评审后新增：恢复 last_order_ms 防止重启后频率限制被绕过
+    pub fn restore_from_record(&self, record: &TradeRecord) {
+        // 1. 恢复状态机
+        if let Ok(status) = serde_json::from_str::<PinStatus>(&record.trader_status) {
+            *self.status_machine.write().await = PinStatusMachine::from(status);
+        }
+
+        // 2. 恢复持仓
+        if let Ok(position) = serde_json::from_str::<LocalPosition>(&record.local_position) {
+            *self.position.write().await = Some(position);
+        }
+
+        // 3. 恢复 last_order_ms（P0: 防止重启后频率限制被绕过）
+        if let Some(ts) = record.order_timestamp {
+            // 如果上次下单时间在 5 分钟内，恢复频率限制
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            if now - (ts as u64) < (Self::RATE_LIMIT_INTERVAL_MS as u64) {
+                self.last_order_ms.store(ts as u64, Ordering::Relaxed);
+                tracing::info!(
+                    symbol = %self.config.symbol,
+                    last_order_ms = ts,
+                    "已恢复下单频率限制"
+                );
             }
         }
     }
@@ -645,7 +836,7 @@ impl Trader {
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 pub struct TraderHandle {
-    pub join_handle: JoinHandle<()>,
+    pub join_handle: Mutex<Option<JoinHandle<()>>>,  // 包装为 Option 支持 take()
     pub last_heartbeat_ms: AtomicU64,
     pub restart_count: AtomicU32,      // 原子计数
     pub max_restart_count: u32,       // 最大重启次数
@@ -653,9 +844,9 @@ pub struct TraderHandle {
 }
 
 impl TraderHandle {
-    pub fn new(symbol: String, handle: JoinHandle<()>) -> Self {
+    pub fn new(symbol: String) -> Self {
         Self {
-            join_handle: handle,
+            join_handle: Mutex::new(None),
             last_heartbeat_ms: AtomicU64::new(current_time_ms()),
             restart_count: AtomicU32::new(0),
             max_restart_count: 10,  // 超过后停止重启，告警
@@ -673,6 +864,18 @@ impl TraderHandle {
         let elapsed = current_time_ms() - self.last_heartbeat_ms.load(Ordering::Relaxed);
         elapsed > timeout_ms
     }
+
+    /// 替换 JoinHandle（用于 restart 时）
+    pub fn set_join_handle(&self, handle: JoinHandle<()>) {
+        let mut guard = self.join_handle.lock().unwrap();
+        *guard = Some(handle);
+    }
+
+    /// 检查是否已结束
+    pub fn is_finished(&self) -> bool {
+        let guard = self.join_handle.lock().unwrap();
+        guard.as_ref().map(|h| h.is_finished()).unwrap_or(false)
+    }
 }
 
 fn current_time_ms() -> u64 {
@@ -683,7 +886,40 @@ fn current_time_ms() -> u64 {
 }
 ```
 
-9.2 Monitor 协程（评审后·指数退避）
+9.2 Engine spawn（评审后·传递 handle）
+
+```rust
+impl Engine {
+    /// 启动 Trader 协程（评审后·传递 TraderHandle）
+    pub async fn spawn(&self, symbol: &str) {
+        let trader = Arc::new(Trader::new(TraderConfig {
+            symbol: symbol.to_string(),
+            ..Default::default()
+        }));
+
+        let handle = Arc::new(TraderHandle::new(symbol.to_string()));
+
+        // P0: 将 handle 传入 start()，保证心跳链路完整
+        let trader_clone = trader.clone();
+        let handle_clone = handle.clone();
+
+        let join_handle = tokio::spawn(async move {
+            trader_clone.start(handle_clone).await;
+        });
+
+        // 保存 JoinHandle
+        handle.set_join_handle(join_handle);
+
+        // 存入实例映射
+        let mut instances = self.instances.write().await;
+        instances.insert(symbol.to_string(), handle);
+
+        tracing::info!(symbol = symbol, "Trader 协程已启动");
+    }
+}
+```
+
+9.3 Monitor 协程（评审后·指数退避）
 
 ```rust
 impl Engine {
@@ -696,9 +932,9 @@ impl Engine {
             interval.tick().await;
             let mut to_restart = Vec::new();
 
-            for (symbol, handle) in self.instances.iter() {
+            for (symbol, handle) in self.instances.read().await.iter() {
                 // 检查 JoinHandle 是否已退出
-                if handle.join_handle.is_finished() {
+                if handle.is_finished() {
                     tracing::error!(
                         symbol = %symbol,
                         "协程已退出但未清理，触发重启"
@@ -711,6 +947,7 @@ impl Engine {
                 if handle.is_stale(heartbeat_timeout_ms) {
                     tracing::warn!(
                         symbol = %symbol,
+                        elapsed_ms = current_time_ms() - handle.last_heartbeat_ms.load(Ordering::Relaxed),
                         "心跳超时，触发重启"
                     );
                     to_restart.push(symbol.clone());
@@ -729,8 +966,8 @@ impl Engine {
     /// 重启间隔：2^restart_count 秒，最大 32 秒
     /// 超过 max_restart_count 次后停止重启，告警
     async fn restart_with_backoff(&self, symbol: &str) {
-        let handle = match self.instances.get(symbol) {
-            Some(h) => h,
+        let handle = match self.instances.read().await.get(symbol) {
+            Some(h) => h.clone(),
             None => return,
         };
 
@@ -775,6 +1012,27 @@ impl Engine {
             "重启完成"
         );
     }
+
+    /// 停止 Trader
+    async fn stop(&self, symbol: &str) {
+        // 从实例映射中获取
+        let handle = match self.instances.read().await.get(symbol) {
+            Some(h) => h.clone(),
+            None => return,
+        };
+
+        // 等待 JoinHandle 结束
+        let join_handle = {
+            let mut guard = handle.join_handle.lock().unwrap();
+            guard.take()
+        };
+
+        if let Some(handle) = join_handle {
+            let _ = handle.await;
+        }
+
+        tracing::info!(symbol = symbol, "Trader 协程已停止");
+    }
 }
 ```
 
@@ -785,12 +1043,12 @@ impl Engine {
 │  新建 / 修改                                                     │
 ├─────────────────────────────────────────────────────────────────┤
 │  [新建] crates/d_checktable/src/h_15m/                         │
-│  [新建]   ├── repository.rs     # WAL 持久化 + 崩溃恢复         │
-│  [改造]   ├── executor.rs       # 仅保留下单网关                 │
-│  [改造]   ├── trader.rs         # 整合 WAL + 原子频率控制        │
-│  [改造]   └── mod.rs            # 导出 Repository               │
+│  [新建]   ├── repository.rs     # WAL 持久化 + 连接池           │
+│  [改造]   ├── executor.rs       # 仅保留下单网关 + Error 定义   │
+│  [改造]   ├── trader.rs         # 整合 WAL + 心跳 + 状态恢复   │
+│  [改造]   └── mod.rs            # 导出 Repository              │
 │  [改造] crates/f_engine/src/core/                               │
-│  [改造]   └── strategy_loop.rs  # 心跳监控 + 指数退避重启        │
+│  [改造]   └── strategy_loop.rs  # 心跳监控 + 指数退避重启       │
 └─────────────────────────────────────────────────────────────────┘
 
 十一、测试策略
@@ -806,8 +1064,9 @@ impl Engine {
 ├─────────────────────────────────────────────────────────────────┤
 │  repository_test.rs                                             │
 │  ├── save_pending 幂等性：同一 symbol+timestamp 多次插入        │
+│  ├── get_by_timestamp 幂等冲突处理                              │
 │  ├── confirm_record 正常流程                                    │
-│  ├── load_latest 崩溃恢复：PENDING → FAILED                     │
+│  ├── load_latest 崩溃恢复：PENDING → FAILED                    │
 │  └── gc_pending 清理超时记录                                    │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -819,18 +1078,21 @@ impl Engine {
 | 交易所超时 | mock gateway 延迟 30s | WAL 保证记录不丢失 |
 | 并发下单 | 多线程同时 rate_limit_check | 仅一线程通过 |
 | 崩溃恢复 | 进程 kill 后重启 | load_latest 恢复 PENDING 标记为 FAILED |
+| 心跳超时 | Trader 循环中不调用 heartbeat | Monitor 触发重启 |
 
-十二、优先级总结（评审后）
+十二、优先级总结（第二轮评审后）
 ================================================================
 
 | 优先级 | 问题 | 状态 |
 |--------|------|------|
-| P0 | 事务一致性（WAL 模式） | 文档已更新 ✓ |
-| P0 | 原子竞态（AtomicU64 rate_limit） | 文档已更新 ✓ |
-| P1 | Executor 职责拆分（executor + repository） | 文档已更新 ✓ |
-| P1 | Decimal 精度（数量计算） | 文档已更新 ✓ |
-| P2 | 心跳重启策略细化（指数退避） | 文档已更新 ✓ |
-| P2 | 数据归档策略（定期 GC） | 文档已更新 ✓ |
+| P0 | RwLock 语法（.read().await/.write().await） | 文档已修正 ✓ |
+| P0 | 心跳监控链路（handle.heartbeat() 调用） | 文档已修正 ✓ |
+| P0 | WAL ID 生命周期（幂等冲突处理） | 文档已修正 ✓ |
+| P1 | PositionSide 参数混淆（current_side） | 文档已修正 ✓ |
+| P1 | GC 时间配置不一致（5分钟 vs 5天） | 文档已修正 ✓ |
+| P2 | SQLite 连接池（r2d2 Pool） | 文档已修正 ✓ |
+| P2 | Error 类型定义缺失 | 文档已修正 ✓ |
+| P2 | 状态恢复粒度（last_order_ms） | 文档已修正 ✓ |
 
 ================================================================
 End of Document
