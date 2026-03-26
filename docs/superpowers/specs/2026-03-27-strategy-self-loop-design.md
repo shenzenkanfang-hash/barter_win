@@ -11,70 +11,131 @@ Status: 待实现
 
 一个品种 = 一个协程 = 一个 Instance
 
-Engine 只管 spawn / stop，品种自己 loop。
+Engine 管 spawn/stop/监控/重启，品种自己 loop。
 
 二、架构图
 ================================================================
 
 ┌─────────────────────────────────────────────────────────────┐
 │  Engine                                                   │
-│  ├── spawn(symbol) → tokio::spawn(async move {           │
-│  │       let instance = Instance::new(symbol);           │
-│  │       instance.loop().await;                          │
-│  │   })                                                  │
-│  ├── stop(symbol) → abort(JoinHandle)                   │
-│  └── 只持有 JoinHandle，不参与 loop                      │
+│  ├── InstanceMap: HashMap<symbol, InstanceHandle>        │
+│  │   ├── JoinHandle         // 重启用                      │
+│  │   ├── last_heartbeat     // 最后心跳时间               │
+│  │   └── restart_count      // 重启次数                   │
+│  │                                                       │
+│  ├── spawn(symbol) → 创建 Instance + 注册                │
+│  ├── Monitor 协程 → 检测心跳，超时自动重启                │
+│  └── stop(symbol) → 停止 + 移除注册                      │
 └─────────────────────────────────────────────────────────────┘
 
-三、三张表
+┌─────────────────────────────────────────────────────────────┐
+│  Instance                                                  │
+│  ├── symbol: String                                      │
+│  ├── running: bool                                       │
+│  ├── interval_ms: u64                                    │
+│  ├── last_heartbeat: AtomicI64                           │
+│  ├── trader: Trader                                      │
+│  │                                                       │
+│  ├── loop()                                              │
+│  │   ├── 获取行情                                        │
+│  │   ├── 获取持仓                                        │
+│  │   ├── 计算信号                                        │
+│  │   ├── 下单                                            │
+│  │   ├── 保存                                            │
+│  │   ├── 更新心跳                                        │
+│  │   └── 等 interval                                    │
+│  │                                                       │
+│  └── 退出条件: running = false                           │
+└─────────────────────────────────────────────────────────────┘
+
+三、TradeRecord (完整交易记录)
 ================================================================
 
 ┌─────────────────────────────────────────────────────────────┐
-│  StateTable (状态表)                                       │
-│  ├── symbol: String                                      │
-│  ├── market: MarketData        // 行情                  │
-│  └── position: PositionData      // 持仓                  │
-└─────────────────────────────────────────────────────────────┘
-                            ↓ 填入
-┌─────────────────────────────────────────────────────────────┐
-│  SignalTable (信号表)                                      │
-│  ├── signal: StrategySignal       // Trader 计算结果       │
-│  └── confidence: u8                                     │
-└─────────────────────────────────────────────────────────────┘
-                            ↓ 合并
-┌─────────────────────────────────────────────────────────────┐
-│  StrategyTable (策略表)                                   │
-│  ├── state: StateTable           // 包含所有状态          │
-│  ├── signal: SignalTable         // 包含信号              │
-│  ├── order_result: OrderResult   // 下单结果              │
-│  └── timestamp: i64                                      │
+│  TradeRecord                                              │
+├─────────────────────────────────────────────────────────────┤
+│  基础信息                                                  │
+│  ├── symbol: String          // 交易对                   │
+│  ├── timestamp: i64          // 时间戳                    │
+│  └── interval_ms: u64        // 循环间隔                 │
+├─────────────────────────────────────────────────────────────┤
+│  行情快照                                                  │
+│  ├── price: Decimal          // 当前价格                 │
+│  ├── volatility: f64          // 波动率                   │
+│  └── market_status            // 市场状态 (Pin/Trend/Range)│
+├─────────────────────────────────────────────────────────────┤
+│  持仓快照                                                  │
+│  ├── 交易所持仓                                            │
+│  │   ├── long_qty                                    │
+│  │   ├── long_price                                  │
+│  │   ├── short_qty                                   │
+│  │   └── short_price                                  │
+│  └── 本地持仓记录 (SQLite)                               │
+│      ├── local_open_price                              │
+│      ├── local_open_qty                                 │
+│      ├── local_orders_history                           │
+│      └── last_saved_at                                  │
+├─────────────────────────────────────────────────────────────┤
+│  策略状态                                                  │
+│  ├── trader_status           // (Initial/LongFirstOpen...) │
+│  ├── signal                 // 信号                      │
+│  └── confidence: u8          // 信心度                   │
+├─────────────────────────────────────────────────────────────┤
+│  账户状态                                                  │
+│  ├── available: Decimal      // 可用资金                 │
+│  ├── used_margin: Decimal    // 已用保证金               │
+│  └── unrealized_pnl         // 未实现盈亏               │
+├─────────────────────────────────────────────────────────────┤
+│  订单执行                                                  │
+│  ├── order_type             // (Open/Add/Close)         │
+│  ├── direction              // (Long/Short)            │
+│  ├── quantity: Decimal      // 数量                     │
+│  ├── price: Decimal         // 执行价格                 │
+│  ├── result                 // (Success/Failed/Rejected)│
+│  └── reason: String        // 失败原因                 │
+├─────────────────────────────────────────────────────────────┤
+│  风控结果                                                  │
+│  ├── risk_passed: bool     // 是否通过                  │
+│  └── risk_reason: String   // 拒绝原因                 │
 └─────────────────────────────────────────────────────────────┘
 
 四、Instance.loop() 流程
 ================================================================
 
 loop:
-  1. 行情 = get_market(symbol)           → 填入 state.market
-  2. 持仓 = get_position(symbol)         → 填入 state.position
-  3. 信号 = Trader.execute(state)        → 填入 signal.signal
-  4. 策略表 = 合并(state + signal)
-  5. 有信号 → 下单(策略表)               → 填入 order_result
-  6. 保存(策略表) → SQLite
-  7. 等 interval → 回第1步
+  1. 检查 running = true？
+     - false → 退出 loop
+  2. 获取行情 → 填入 TradeRecord.market
+  3. 获取持仓 → 填入 TradeRecord.position
+  4. Trader.execute() → 填入 TradeRecord.strategy
+  5. 风控检查 → 填入 TradeRecord.risk
+  6. 下单 → 填入 TradeRecord.order
+  7. 保存 TradeRecord 到 SQLite
+  8. 更新心跳 (last_heartbeat = now)
+  9. 等 interval → 回第1步
 
-五、退出机制
+五、Engine Monitor 机制
 ================================================================
 
-Engine.stop(symbol):
-  → abort(JoinHandle)
-  → 协程强制结束
+Monitor 协程 (每秒执行):
+  1. 遍历所有 InstanceHandle
+  2. 检查 now - last_heartbeat > 超时阈值？
+     - 是 → 重启 Instance
+  3. 检查 restart_count >= 最大次数？
+     - 是 → 标记为 Dead，不再重启
+
+重启流程:
+  1. abort(JoinHandle)
+  2. spawn 新的协程
+  3. 更新 JoinHandle + 重置 heartbeat
+  4. restart_count++
 
 六、文件结构
 ================================================================
 
 新建:
   crates/f_engine/src/core/
-    └── strategy_loop.rs      # Instance + loop + 三张表
+    └── strategy_loop.rs      # Instance + Engine + Monitor
 
 修改:
   crates/f_engine/src/core/
