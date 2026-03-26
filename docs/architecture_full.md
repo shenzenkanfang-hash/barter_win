@@ -46,10 +46,11 @@ Status: 生产可用
                                 ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        b_data_source (L2)                             │
-│  ┌─────────────┬──────────────┬──────────────┬───────────────────┐  │
-│  │   ws/       │    api/      │   models/    │  symbol_rules/    │  │
-│  │ WebSocket   │  REST API    │  KLine/Tick  │  交易对规则服务   │  │
-│  └─────────────┴──────────────┴──────────────┴───────────────────┘  │
+│  ┌─────────────┬──────────────┬──────────────┬───────────┬─────────┐│
+│  │   ws/       │    api/      │   store/     │ models/   │symbol_  ││
+│  │ WebSocket   │  REST API    │ 数据存储接口  │ KLine/    │rules/   ││
+│  │ 行情订阅    │  REST API    │ 统一存储     │ Tick      │交易对   ││
+│  └─────────────┴──────────────┴──────────────┴───────────┴─────────┘│
 └────────────────────────────────────┬───────────────────────────────────┘
                                      │
                                      ▼
@@ -725,6 +726,135 @@ pub struct TaskState {
 ### 实现文件
 
 - `crates/f_engine/src/core/engine.rs` - Engine, TaskState, RunningStatus
+
+================================================================
+十五、MarketDataStore 统一存储接口
+================================================================
+
+### 15.1 设计目标
+
+| 目标 | 说明 |
+|------|------|
+| 统一接口 | WS 和模拟器共用同一存储接口 |
+| 分区管理 | 实时分区（当前K线/订单簿）+ 历史分区（已闭合K线） |
+| 内存+磁盘 | 内存存热点数据，磁盘同步持久化 |
+| 波动率计算 | 每次写入K线触发波动率计算（不管是否闭合） |
+
+### 15.2 核心接口
+
+```rust
+// crates/b_data_source/src/store/trait.rs
+pub trait MarketDataStore: Send + Sync {
+    // ========== 写入 ==========
+    /// 写入K线数据
+    /// - 每次调用触发波动率计算
+    /// - is_closed=true 时同时写入历史分区
+    fn write_kline(&self, symbol: &str, kline: KlineData, is_closed: bool);
+    
+    /// 写入订单簿
+    fn write_orderbook(&self, symbol: &str, orderbook: OrderBookData);
+    
+    // ========== 查询 ==========
+    fn get_current_kline(&self, symbol: &str) -> Option<KlineData>;
+    fn get_orderbook(&self, symbol: &str) -> Option<OrderBookData>;
+    fn get_history_klines(&self, symbol: &str) -> Vec<KlineData>;
+    fn get_history_orderbooks(&self, symbol: &str) -> Vec<OrderBookData>;
+}
+```
+
+### 15.3 模块结构
+
+```
+crates/b_data_source/src/store/
+├── mod.rs           # 模块导出
+├── trait.rs         # MarketDataStore trait 定义
+├── memory_store.rs  # 实时分区（内存）
+├── history_store.rs # 历史分区（内存+磁盘同步）
+├── volatility.rs    # 波动率计算
+└── impl.rs          # 默认实现
+```
+
+### 15.4 组件设计
+
+| 组件 | 职责 |
+|------|------|
+| `MemoryStore` | 实时分区：当前K线 + 订单簿（内存 HashMap） |
+| `HistoryStore` | 历史分区：已闭合K线 + 订单簿（内存 Vec + 磁盘同步） |
+| `VolatilityManager` | 波动率计算（每次K线写入触发） |
+| `MarketDataStoreImpl` | 组合以上组件，实现 trait |
+
+### 15.5 数据流
+
+```
+WS 数据 / 模拟器数据
+    │
+    ▼
+write_kline(symbol, kline, is_closed)
+    │
+    ├─► 1. memory.klines[symbol] = kline  (实时分区)
+    │
+    ├─► 2. volatility.update(symbol, kline)  (每次都计算)
+    │
+    └─► 3. if is_closed {
+           history.klines[symbol].push(kline)  (历史分区)
+           history.sync_to_disk()  (磁盘同步)
+         }
+
+write_orderbook(symbol, book)
+    │
+    └─► memory.orderbooks[symbol] = book  (实时分区)
+```
+
+### 15.6 波动率计算时机
+
+```rust
+fn write_kline(&self, symbol: &str, kline: KlineData, is_closed: bool) {
+    // 1. 写入实时分区
+    self.memory.write_kline(symbol, kline.clone());
+    
+    // 2. 触发波动率计算（每次都计算，不管是否闭合）
+    self.volatility.update(symbol, &kline);
+    
+    if is_closed {
+        // 3. 闭合时写入历史分区
+        self.history.append_kline(symbol, kline.clone());
+    }
+}
+```
+
+### 15.7 启动恢复
+
+```
+启动
+  │
+  ├─► 检查内存盘 → 加载到 MemoryStore
+  │
+  ├─► 检查磁盘 → 加载到 HistoryStore
+  │
+  └─► 合并恢复：HistoryStore 最新K线 → MemoryStore
+```
+
+### 15.8 WS/模拟器集成
+
+```rust
+// WS 回调
+fn on_kline(&self, data: KlineData) {
+    self.store.write_kline(&data.symbol, data, data.is_closed);
+}
+
+// 模拟器注入
+fn inject_kline(&self, kline: KlineData) {
+    self.store.write_kline(&kline.symbol, kline, true);
+}
+```
+
+### 15.9 优势
+
+| 优势 | 说明 |
+|------|------|
+| 测试友好 | 模拟器可注入特定数据验证存储逻辑 |
+| 行为一致 | WS 和模拟器使用同一存储，行为统一 |
+| 可切换 | 可注入 MockStore 用于单元测试 |
 
 ================================================================
 十四、版本历史
