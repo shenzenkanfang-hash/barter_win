@@ -60,3 +60,45 @@ pub use history::{DataIssue, DataSource, HistoryError, HistoryRequest, HistoryRe
 // Re-exports - MarketDataStore (统一存储接口)
 pub mod store;
 pub use store::{MarketDataStore, MarketDataStoreImpl, OrderBookData, VolatilityData};
+
+// ============================================================================
+// 默认存储实例（全局单例，供真实 WS 使用）
+// 模拟器/回测请创建独立实例
+// ============================================================================
+
+use std::sync::Arc;
+use once_cell::sync::OnceCell;
+
+static DEFAULT_STORE: OnceCell<Arc<MarketDataStoreImpl>> = OnceCell::new();
+
+/// 获取默认存储实例
+///
+/// 真实 WS 使用此实例写入数据
+/// 策略通过此实例读取数据
+pub fn default_store() -> &'static Arc<MarketDataStoreImpl> {
+    DEFAULT_STORE.get_or_init(|| Arc::new(MarketDataStoreImpl::new()))
+}
+
+/// 便捷宏：写入K线
+#[macro_export]
+macro_rules! store_write_kline {
+    ($symbol:expr, $kline:expr, $closed:expr) => {
+        $crate::default_store().write_kline($symbol, $kline, $closed)
+    };
+}
+
+/// 便捷宏：读取当前K线
+#[macro_export]
+macro_rules! store_get_kline {
+    ($symbol:expr) => {
+        $crate::default_store().get_current_kline($symbol)
+    };
+}
+
+/// 便捷宏：读取波动率
+#[macro_export]
+macro_rules! store_get_volatility {
+    ($symbol:expr) => {
+        $crate::default_store().get_volatility($symbol)
+    };
+}
