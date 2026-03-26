@@ -20,7 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod signal;
-pub mod status;
+pub mod c_status;
 pub mod quantity_calculator;
 pub mod a_market_data;
 pub mod b_signal_generator;
@@ -29,7 +29,7 @@ pub mod e_trader_flow;
 pub mod f_trader;
 
 pub use signal::MinSignalGenerator;
-pub use status::{PinStatus, PinStatusMachine};
+pub use c_status::{PinStatus, PinStatusMachine};
 pub use quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
 pub use a_market_data::{MarketData, KlineSnapshot, read_market_data, get_price, get_volatility};
 pub use b_signal_generator::SignalGenerator;
