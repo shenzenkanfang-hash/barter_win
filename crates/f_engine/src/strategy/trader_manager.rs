@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use d_checktable::h_15m::{Trader, TraderConfig};
+use d_checktable::h_15m::Trader;
 
 /// 策略类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,16 +66,8 @@ impl TraderManager {
             }
         }
 
-        // 创建配置
-        let config = TraderConfig {
-            symbol: symbol.clone(),
-            interval_ms: 100,
-            max_position: rust_decimal_macros::dec!(0.15),
-            initial_ratio: rust_decimal_macros::dec!(0.05),
-        };
-
-        // 创建 Trader
-        let trader = Arc::new(Trader::new(config));
+        // 创建 Trader（自动从 SQLite 加载配置）
+        let trader = Arc::new(Trader::new(&symbol));
 
         // 启动自循环协程
         let trader_clone = trader.clone();

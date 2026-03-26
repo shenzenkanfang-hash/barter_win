@@ -57,6 +57,22 @@ impl PinStatus {
             PinStatus::ShortDayAllow => "ShortDayAllow",
         }
     }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "HedgeEnter" => PinStatus::HedgeEnter,
+            "PosLocked" => PinStatus::PosLocked,
+            "LongInitial" => PinStatus::LongInitial,
+            "LongFirstOpen" => PinStatus::LongFirstOpen,
+            "LongDoubleAdd" => PinStatus::LongDoubleAdd,
+            "LongDayAllow" => PinStatus::LongDayAllow,
+            "ShortInitial" => PinStatus::ShortInitial,
+            "ShortFirstOpen" => PinStatus::ShortFirstOpen,
+            "ShortDoubleAdd" => PinStatus::ShortDoubleAdd,
+            "ShortDayAllow" => PinStatus::ShortDayAllow,
+            _ => PinStatus::Initial,
+        }
+    }
 }
 
 /// Pin状态机

@@ -1,9 +1,11 @@
 //! h_15m/trader.rs - 品种交易主循环
 //!
 //! 自循环运行，从 MarketDataStore 读取数据，生成交易信号
+//! 配置自动读写 SQLite
 
 #![forbid(unsafe_code)]
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use b_data_source::{default_store, MarketDataStore};
@@ -11,6 +13,7 @@ use chrono::Utc;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use rusqlite::{Connection, params};
 use tokio::time::sleep;
 
 use crate::types::{MinSignalInput, VolatilityTier};
@@ -18,13 +21,23 @@ use crate::h_15m::{MinSignalGenerator, PinStatusMachine, PinStatus};
 use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategySignal, TradeCommand, StrategyId};
 
+/// 数据库路径
+fn get_db_path() -> PathBuf {
+    let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("trading_data");
+    std::fs::create_dir_all(&path).ok();
+    path.push("trader_config.db");
+    path
+}
+
 /// 品种交易器配置
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TraderConfig {
     pub symbol: String,
     pub interval_ms: u64,
     pub max_position: Decimal,
     pub initial_ratio: Decimal,
+    pub status: String,
 }
 
 impl Default for TraderConfig {
@@ -34,28 +47,111 @@ impl Default for TraderConfig {
             interval_ms: 100,
             max_position: dec!(0.15),
             initial_ratio: dec!(0.05),
+            status: "Initial".to_string(),
         }
     }
 }
 
 /// 品种交易器（自循环）
 pub struct Trader {
-    config: TraderConfig,
+    config: RwLock<TraderConfig>,
     status_machine: RwLock<PinStatusMachine>,
     signal_generator: MinSignalGenerator,
     position: RwLock<Option<LocalPosition>>,
     is_running: RwLock<bool>,
+    db_path: PathBuf,
 }
 
 impl Trader {
-    pub fn new(config: TraderConfig) -> Self {
-        Self {
-            config,
+    /// 创建 Trader（从 SQLite 加载配置，没有用默认）
+    pub fn new(symbol: &str) -> Self {
+        let db_path = get_db_path();
+        let config = Self::load_from_sqlite(&db_path, symbol)
+            .unwrap_or_else(|| {
+                tracing::info!("[Trader {}] No config in SQLite, using default", symbol);
+                TraderConfig {
+                    symbol: symbol.to_string(),
+                    ..Default::default()
+                }
+            });
+
+        let mut trader = Self {
+            config: RwLock::new(config),
             status_machine: RwLock::new(PinStatusMachine::new()),
             signal_generator: MinSignalGenerator::new(),
             position: RwLock::new(None),
             is_running: RwLock::new(false),
+            db_path,
+        };
+
+        // 从配置恢复状态机状态
+        let status = PinStatus::from_str(&trader.config.read().status);
+        trader.status_machine.write().set_status(status);
+
+        trader
+    }
+
+    /// 从 SQLite 加载配置
+    fn load_from_sqlite(db_path: &PathBuf, symbol: &str) -> Option<TraderConfig> {
+        let conn = Connection::open(db_path).ok()?;
+        
+        // 确保表存在
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS trader_config (
+                symbol TEXT PRIMARY KEY,
+                interval_ms INTEGER,
+                max_position TEXT,
+                initial_ratio TEXT,
+                status TEXT
+            )",
+            [],
+        ).ok()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT symbol, interval_ms, max_position, initial_ratio, status FROM trader_config WHERE symbol = ?"
+        ).ok()?;
+
+        let config = stmt.query_row(params![symbol], |row| {
+            Ok(TraderConfig {
+                symbol: row.get(0)?,
+                interval_ms: row.get(1)?,
+                max_position: row.get::<_, String>(2)?.parse().unwrap_or(dec!(0.15)),
+                initial_ratio: row.get::<_, String>(3)?.parse().unwrap_or(dec!(0.05)),
+                status: row.get(4)?,
+            })
+        }).ok()?;
+
+        Some(config)
+    }
+
+    /// 保存配置到 SQLite
+    pub fn save_config(&self) {
+        let config = self.config.read();
+        if let Ok(conn) = Connection::open(&self.db_path) {
+            conn.execute(
+                "INSERT OR REPLACE INTO trader_config 
+                 (symbol, interval_ms, max_position, initial_ratio, status) 
+                 VALUES (?, ?, ?, ?, ?)",
+                params![
+                    config.symbol,
+                    config.interval_ms,
+                    config.max_position.to_string(),
+                    config.initial_ratio.to_string(),
+                    config.status,
+                ],
+            ).ok();
         }
+    }
+
+    /// 获取配置
+    pub fn get_config(&self) -> TraderConfig {
+        self.config.read().clone()
+    }
+
+    /// 更新配置
+    pub fn update_config(&self, config: TraderConfig) {
+        *self.config.write() = config.clone();
+        self.save_config();
     }
 
     /// 检查是否运行中
@@ -70,18 +166,21 @@ impl Trader {
 
     /// 执行自循环（对外方法）
     pub async fn execute(&self) {
+        // 先读取配置，避免在 async 函数中持有 RwLockReadGuard
+        let symbol = self.config.read().symbol.clone();
+        let interval_ms = self.config.read().interval_ms;
+        
         *self.is_running.write() = true;
-        tracing::info!("[Trader {}] Started", self.config.symbol);
+        tracing::info!("[Trader {}] Started", symbol);
         
         while *self.is_running.read() {
             if let Some(signal) = self.run_once_internal() {
-                tracing::info!("[Trader {}] Signal: {:?}", self.config.symbol, signal);
-                // TODO: 发送到 OrderExecutor 执行下单
+                tracing::info!("[Trader {}] Signal: {:?}", symbol, signal);
             }
-            sleep(Duration::from_millis(self.config.interval_ms)).await;
+            sleep(Duration::from_millis(interval_ms)).await;
         }
         
-        tracing::info!("[Trader {}] Stopped", self.config.symbol);
+        tracing::info!("[Trader {}] Stopped", symbol);
     }
 
     /// 停止交易
@@ -91,12 +190,12 @@ impl Trader {
 
     /// 从 Store 获取当前K线
     pub fn get_current_kline(&self) -> Option<b_data_source::ws::kline_1m::ws::KlineData> {
-        default_store().get_current_kline(&self.config.symbol)
+        default_store().get_current_kline(&self.config.read().symbol)
     }
 
     /// 从 Store 获取波动率
     pub fn get_volatility(&self) -> Option<b_data_source::store::VolatilityData> {
-        default_store().get_volatility(&self.config.symbol)
+        default_store().get_volatility(&self.config.read().symbol)
     }
 
     /// 获取当前价格
@@ -250,7 +349,7 @@ impl Trader {
             direction: side,
             quantity: qty,
             target_price: Decimal::ZERO,
-            strategy_id: StrategyId::new_pin_minute(&self.config.symbol),
+            strategy_id: StrategyId::new_pin_minute(&self.config.read().symbol),
             position_ref: None,
             full_close: false,
             stop_loss_price: None,
@@ -270,7 +369,7 @@ impl Trader {
             direction: side,
             quantity: qty,
             target_price: Decimal::ZERO,
-            strategy_id: StrategyId::new_pin_minute(&self.config.symbol),
+            strategy_id: StrategyId::new_pin_minute(&self.config.read().symbol),
             position_ref: None,
             full_close: false,
             stop_loss_price: None,
@@ -293,7 +392,7 @@ impl Trader {
             direction: side,
             quantity: qty,
             target_price: Decimal::ZERO,
-            strategy_id: StrategyId::new_pin_minute(&self.config.symbol),
+            strategy_id: StrategyId::new_pin_minute(&self.config.read().symbol),
             position_ref: None,
             full_close: true,
             stop_loss_price: None,
@@ -318,7 +417,7 @@ impl Trader {
             direction: hedge_side,
             quantity: qty,
             target_price: Decimal::ZERO,
-            strategy_id: StrategyId::new_pin_minute(&self.config.symbol),
+            strategy_id: StrategyId::new_pin_minute(&self.config.read().symbol),
             position_ref: None,
             full_close: false,
             stop_loss_price: None,
@@ -331,7 +430,7 @@ impl Trader {
 
     /// 计算初始开仓数量
     fn calculate_initial_qty(&self) -> Decimal {
-        self.config.initial_ratio
+        self.config.read().initial_ratio
     }
 
     /// 计算加仓数量
@@ -339,7 +438,7 @@ impl Trader {
         self.position.read()
             .as_ref()
             .map(|p| p.qty * dec!(0.5))
-            .unwrap_or(self.config.initial_ratio)
+            .unwrap_or(self.config.read().initial_ratio)
     }
 
     /// 计算对冲数量
@@ -347,7 +446,7 @@ impl Trader {
         self.position.read()
             .as_ref()
             .map(|p| p.qty * dec!(0.3))
-            .unwrap_or(self.config.initial_ratio * dec!(0.3))
+            .unwrap_or(self.config.read().initial_ratio * dec!(0.3))
     }
 
     /// 更新持仓
@@ -363,7 +462,7 @@ impl Trader {
     /// 健康检查
     pub fn health(&self) -> TraderHealth {
         TraderHealth {
-            symbol: self.config.symbol.clone(),
+            symbol: self.config.read().symbol.clone(),
             is_running: *self.is_running.read(),
             status: self.status_machine.read().current_status().as_str().to_string(),
             price: self.current_price().map(|p| p.to_string()),
@@ -384,6 +483,6 @@ pub struct TraderHealth {
 
 impl Default for Trader {
     fn default() -> Self {
-        Self::new(TraderConfig::default())
+        Self::new("BTCUSDT")
     }
 }
