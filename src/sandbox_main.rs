@@ -31,7 +31,7 @@ use f_engine::RiskChecker;
 
 const DEFAULT_SYMBOL: &str = "HOTUSDT";
 const DEFAULT_FUND: f64 = 10000.0;
-const DEFAULT_DURATION: u64 = 300;
+const DEFAULT_DURATION: u64 = 60; // 缩短测试时间
 
 #[derive(Debug, Clone)]
 struct SandboxConfig {
@@ -200,6 +200,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         async move {
             tracing::info!("引擎主循环启动");
             
+            // 记录启动时间
+            let start_time = std::time::Instant::now();
+            
             // 波动率阈值
             let volatility_threshold = dec!(0.02); // 2%
             
@@ -207,8 +210,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // 1. 获取波动率
                 let volatility = engine.get_volatility(&config.symbol).await;
                 
-                // 2. 检查是否超过阈值
-                if volatility > volatility_threshold {
+                // 打印波动率（始终打印）
+                tracing::info!(
+                    "[Engine] {} 波动率: {} (阈值: {})",
+                    config.symbol, volatility, volatility_threshold
+                );
+                
+                // 2. 简化：始终尝试触发任务（如果还没触发）
+                if !engine.has_task(&config.symbol).await {
                     // 3. 检查任务是否已存在
                     if !engine.has_task(&config.symbol).await {
                         // 4. 触发策略任务
@@ -230,9 +239,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // 6. 检查心跳
                 engine.check_heartbeat().await;
                 
-                // 7. 检查是否全部任务结束
-                if engine.is_empty().await {
-                    tracing::info!("所有任务已结束");
+                // 7. 持续运行直到超时或数据源结束
+                let elapsed = start_time.elapsed().as_secs();
+                if elapsed >= config.duration_secs {
+                    tracing::info!("达到最大时长 {}s，所有任务已结束", config.duration_secs);
                     break;
                 }
 
@@ -246,23 +256,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========================================
     // 8. 等待结束
     // ========================================
-    let max_duration = if config.fast_mode {
-        Some(Duration::from_secs(config.duration_secs))
-    } else {
-        None
-    };
-
+    let duration = Duration::from_secs(config.duration_secs);
+    let start_wait = std::time::Instant::now();
+    
     tokio::select! {
         _ = engine_handle => {
             tracing::info!("引擎已结束");
         }
-        _ = async {
-            if let Some(dur) = max_duration {
-                sleep(dur).await;
-                tracing::info!("达到最大时长 {}s", config.duration_secs);
-            }
-        } => {}
+        _ = sleep(duration) => {
+            tracing::info!("达到最大时长 {}s", config.duration_secs);
+        }
     }
+    
+    tracing::info!("等待耗时: {}s", start_wait.elapsed().as_secs());
 
     // ========================================
     // 9. 输出结果
@@ -525,6 +531,9 @@ impl TradeManagerEngine {
             
             // 任务循环
             loop {
+                // 调试：打印心跳
+                tracing::debug!("[Strategy] {} 任务执行中, has_position={}", symbol, has_position);
+                
                 // 1. 检查禁止
                 {
                     let s = state.read().await;
@@ -550,16 +559,44 @@ impl TradeManagerEngine {
                 // 4. 从 IndicatorCache 获取指标
                 let indicators = indicator_cache.get(&symbol).await;
 
-                // 5. 策略计算
-                let should_open = !has_position 
-                    && signal_count % 20 == 10
-                    && indicators.as_ref()
-                        .and_then(|i| i.rsi)
-                        .map(|rsi| rsi < dec!(70))
-                        .unwrap_or(false);
+                // 5. 策略计算：基于 EMA 金叉/死叉
+                let should_open = if !has_position && !current_price.is_zero() {
+                    if let Some(ind) = indicators.as_ref() {
+                        // EMA5 > EMA20 且 RSI < 70 → 开多
+                        if let (Some(ema5), Some(ema20)) = (ind.ema5, ind.ema20) {
+                            if let Some(rsi) = ind.rsi {
+                                ema5 > ema20 && rsi < dec!(70) && rsi > dec!(30)
+                            } else {
+                                ema5 > ema20
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 
-                let should_close = has_position 
-                    && signal_count % 30 == 20;
+                let should_close = if has_position {
+                    if let Some(ind) = indicators.as_ref() {
+                        // EMA5 < EMA20 或 RSI > 70 → 平仓
+                        if let (Some(ema5), Some(ema20)) = (ind.ema5, ind.ema20) {
+                            if let Some(rsi) = ind.rsi {
+                                ema5 < ema20 || rsi > dec!(70)
+                            } else {
+                                ema5 < ema20
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
 
                 // 6. 执行交易
                 if should_open && !current_price.is_zero() {
