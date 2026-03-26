@@ -10,8 +10,8 @@ Status: 待实现
 ================================================================
 
 1. 策略自主循环
-   - 策略启动后自动循环执行 tick()
-   - 退出条件: status=Ended 或连续错误超限
+   - 策略启动后自动循环执行 execute()
+   - 退出条件: stop() 或连续错误超限
 
 2. 引擎协程管理
    - TradingEngineV2 统一管理策略生命周期
@@ -86,7 +86,7 @@ Status: 待实现
 ```rust
 pub struct StrategyLoopConfig {
     /// 循环间隔 (ms)
-    pub tick_interval_ms: u64,
+    pub interval_ms: u64,
     /// 最大连续错误数
     pub max_consecutive_errors: u32,
     /// 心跳超时 (s)
@@ -96,7 +96,7 @@ pub struct StrategyLoopConfig {
 impl Default for StrategyLoopConfig {
     fn default() -> Self {
         Self {
-            tick_interval_ms: 500,
+            interval_ms: 500,
             max_consecutive_errors: 3,
             heartbeat_timeout_secs: 30,
         }
@@ -136,6 +136,8 @@ pub struct StrategyLoop<S, P, O> {
     pub running_state: Arc<parking_lot::RwLock<RunningState>>,
     /// 连续错误计数
     consecutive_errors: u32,
+    /// 交易器
+    trader: Option<Trader>,
 }
 
 impl<S, P, O> StrategyLoop<S, P, O> {
@@ -240,7 +242,7 @@ use tracing::{info, warn, error};
 #[derive(Debug, Clone)]
 pub struct StrategyLoopConfig {
     /// 循环间隔 (ms)
-    pub tick_interval_ms: u64,
+    pub interval_ms: u64,
     /// 最大连续错误数
     pub max_consecutive_errors: u32,
     /// 心跳超时 (s)
@@ -250,7 +252,7 @@ pub struct StrategyLoopConfig {
 impl Default for StrategyLoopConfig {
     fn default() -> Self {
         Self {
-            tick_interval_ms: 500,
+            interval_ms: 500,
             max_consecutive_errors: 3,
             heartbeat_timeout_secs: 30,
         }
@@ -380,7 +382,7 @@ where
             };
 
             // 3. 计算信号
-            if let Some(signal) = trader.tick(market, position) {
+            if let Some(signal) = trader.execute(market, position) {
                 info!("[{}] Signal: {:?}, sending order...", self.symbol, signal.command);
 
                 // 4. 下单
@@ -398,7 +400,7 @@ where
 
     /// 等待 interval
     async fn sleep(&self) {
-        tokio::time::sleep(Duration::from_millis(self.config.tick_interval_ms)).await;
+        tokio::time::sleep(Duration::from_millis(self.config.interval_ms)).await;
     }
 
     /// 处理错误
@@ -427,7 +429,7 @@ where
             .map_err(|e| StrategyLoopError::PositionError(e.to_string()))?;
 
         // 3. 执行策略
-        if let Some(signal) = trader.tick(market, position) {
+        if let Some(signal) = trader.execute(market, position) {
             info!("[{}] Signal generated: {:?}", self.symbol, signal.command);
 
             // 4. 发送订单
@@ -696,7 +698,7 @@ mod tests {
             Arc::new(position_source),
             Arc::new(order_sender),
             StrategyLoopConfig {
-                tick_interval_ms: 100,
+                interval_ms: 100,
                 max_consecutive_errors: 3,
                 heartbeat_timeout_secs: 5,
             },
