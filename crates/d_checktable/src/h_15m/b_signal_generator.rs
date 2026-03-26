@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use crate::types::{MinSignalInput, VolatilityTier};
-use super::market_data::MarketData;
+use super::a_market_data::MarketData;
 use super::{MinSignalGenerator, PinStatusMachine, PinStatus};
 use x_data::position::PositionSide;
 use x_data::trading::signal::{StrategySignal, TradeCommand, StrategyId};

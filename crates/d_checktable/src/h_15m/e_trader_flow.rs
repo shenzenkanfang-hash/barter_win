@@ -10,9 +10,9 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 use super::PinStatus;
-use super::market_data;
-use super::signal_generator::SignalGenerator;
-use super::order_executor::OrderExecutor;
+use super::a_market_data;
+use super::b_signal_generator::SignalGenerator;
+use super::d_order_executor::OrderExecutor;
 use x_data::trading::signal::StrategySignal;
 
 /// 交易流程
@@ -46,7 +46,7 @@ impl TraderFlow {
     /// 执行一次交易流程
     pub fn execute(&mut self) -> Option<StrategySignal> {
         // 1. 读取市场数据
-        let market = market_data::read_market_data(&self.symbol)?;
+        let market = a_market_data::read_market_data(&self.symbol)?;
 
         // 2. 生成信号
         let signal = self.signal_gen.generate(&market)?;
