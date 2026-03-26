@@ -1,25 +1,23 @@
+//! Sandbox - 沙盒测试模块
+//!
+//! 保留功能:
+//! 1. historical_replay - K线转Tick推WS内存
+//! 2. gateway/interceptor - 拦截API下单/账户/持仓
+//! 3. simulator - 完整交易流程(账户/订单/风控)
+
 #![forbid(unsafe_code)]
 
 pub mod config;
 pub mod simulator;
 pub mod gateway;
-pub mod tick_generator;
-pub mod perf_test;
-pub mod backtest;
 pub mod historical_replay;
 
 pub use config::ShadowConfig;
 pub use simulator::{Account, OrderEngine, Position, Side, ShadowRiskChecker};
 pub use gateway::ShadowBinanceGateway;
-pub use tick_generator::{TickGenerator, TickDriver, SimulatedTick, KLineInput};
-pub use perf_test::{
-    PerfTestConfig, PerfTestResult, PerformanceTracker,
-    TickDriver as PerfTickDriver, EngineDriver, Reporter,
-};
-pub use backtest::{BacktestStrategy, BacktestTick, MaCrossStrategy, Signal};
 pub use historical_replay::{
     StreamTickGenerator,
     MemoryInjector, MemoryInjectorConfig, SharedMarketData,
     ReplayController, ReplayConfig, ReplayState, ReplayStats, ReplayError,
-    TickToWsConverter,
+    TickToWsConverter, ShardCache, ShardReader, ShardReaderChain, ShardWriter,
 };
