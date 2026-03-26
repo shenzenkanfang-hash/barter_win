@@ -424,6 +424,9 @@ pub struct Trader {
 
     /// 运行时信息
     runtime: Mutex<RuntimeInfo>,
+
+    /// 是否已启动
+    started: bool,
 }
 
 impl Default for Trader {
@@ -453,6 +456,7 @@ impl Trader {
             },
             balance: None,
             runtime: Mutex::new(RuntimeInfo::default()),
+            started: false,
         };
 
         // 初始化账户信息中的价格
@@ -460,6 +464,37 @@ impl Trader {
         trader.account.most_short = 0.0;
 
         trader
+    }
+
+    /// 启动并返回 Arc<Mutex<Self>>
+    ///
+    /// 对标 Python 的 `startloop()`，但返回 Arc 以便外部管理生命周期
+    pub fn start(self) -> Arc<Mutex<Self>> {
+        let trader = Arc::new(Mutex::new(self));
+        let trader_clone = trader.clone();
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                // 初始化状态
+                {
+                    let mut t = trader_clone.lock();
+                    t.is_running.store(true, Ordering::SeqCst);
+                    t.status = Status::Trading;
+                    t.runtime.lock().started_at = Some(Utc::now().timestamp());
+                }
+                // 运行主循环
+                trader_clone.lock()._run_loop().await;
+            });
+        });
+
+        trader
+    }
+
+    /// 停止交易
+    pub fn stop(&mut self) {
+        self.is_running.store(false, Ordering::SeqCst);
+        self.status = Status::Stopped;
     }
 
     /// 更新交易规则
@@ -800,32 +835,20 @@ impl Trader {
     }
 
     /// 启动交易循环（在独立线程中运行）
-    pub fn startloop(&mut self) {
-        if self.is_running.load(Ordering::SeqCst) {
-            tracing::warn!("[{}] Trader already running", self.config.symbol);
-            return;
-        }
-
-        self.is_running.store(true, Ordering::SeqCst);
-        self.status = Status::Trading;
-        self.runtime.lock().started_at = Some(Utc::now().timestamp());
-
-        tracing::info!("[{}] Trading loop started", self.config.symbol);
-
-        // 获取配置用于新线程
-        let symbol = self.config.symbol.clone();
-
-        // 创建新线程
-        std::thread::spawn(move || {
-            // 在新线程中创建 runtime
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async {
-                let mut trader = Trader::new(&symbol);
-                trader.is_running.store(true, Ordering::SeqCst);
-                trader.status = Status::Trading;
-                trader._run_loop().await;
-            });
-        });
+    ///
+    /// 对标 Python 的 `startloop()`
+    /// 
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let trader = Trader::new("BTCUSDT");
+    /// let trader_arc = trader.startloop();
+    ///
+    /// // 外部可通过 Arc 控制
+    /// trader_arc.lock().unwrap().stoploop();
+    /// ```
+    pub fn startloop(self) -> Arc<Mutex<Self>> {
+        self.start()
     }
 
     /// 直接运行（当前线程）
@@ -850,10 +873,10 @@ impl Trader {
     }
 
     /// 停止交易循环
+    ///
+    /// 对标 Python 的 `stoploop()`
     pub fn stoploop(&mut self) {
-        self.is_running.store(false, Ordering::SeqCst);
-        self.status = Status::Stopped;
-        tracing::info!("[{}] Stop requested", self.config.symbol);
+        self.stop();
     }
 
     /// 检查是否运行中

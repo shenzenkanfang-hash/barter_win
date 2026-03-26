@@ -5,7 +5,8 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -25,7 +26,8 @@ pub enum StrategyType {
 /// Trader 实例包装
 struct TraderInstance {
     trader: Arc<Mutex<Trader>>,
-    handle: tokio::task::JoinHandle<()>,
+    /// 线程句柄（用于跟踪）
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 
 /// Trader 管理器
@@ -62,24 +64,19 @@ impl TraderManager {
             }
         }
 
-        // 创建 Trader
-        let trader = Arc::new(Mutex::new(Trader::new(&symbol)));
+        // 创建 Trader 并启动
+        let trader = Trader::new(&symbol);
+        let trader_arc = trader.startloop();
 
-        // 启动自循环协程
-        let trader_clone = trader.clone();
-        let symbol_clone = symbol.clone();
-        
-        let handle = tokio::spawn(async move {
-            // TODO: 实际自循环逻辑
-            info!("Trader for {} running", symbol_clone);
-            // trader_clone.lock().unwrap().execute().await;
-        });
+        info!("Started trader for {}", symbol);
 
         // 存储实例
         let mut instances = self.instances.write().await;
-        instances.insert(symbol.clone(), TraderInstance { trader, handle });
+        instances.insert(symbol.clone(), TraderInstance { 
+            trader: trader_arc.clone(), 
+            handle: None, // handle 在线程内部，不单独保存
+        });
 
-        info!("Started trader for {}", symbol);
         Ok(())
     }
 
@@ -88,8 +85,10 @@ impl TraderManager {
         let mut instances = self.instances.write().await;
         
         if let Some(instance) = instances.remove(symbol) {
-            instance.trader.lock().unwrap().stoploop();
-            instance.handle.abort();
+            instance.trader.lock().stop();
+            if let Some(handle) = instance.handle {
+                handle.join().ok();
+            }
             info!("Stopped trader for {}", symbol);
             Ok(())
         } else {
@@ -103,8 +102,10 @@ impl TraderManager {
         let mut instances = self.instances.write().await;
         
         for (symbol, instance) in instances.drain() {
-            instance.trader.lock().unwrap().stoploop();
-            instance.handle.abort();
+            instance.trader.lock().stop();
+            if let Some(handle) = instance.handle {
+                handle.join().ok();
+            }
             info!("Stopped trader for {}", symbol);
         }
     }
@@ -124,7 +125,7 @@ impl TraderManager {
     /// 获取 Trader 健康状态
     pub async fn health_check(&self, symbol: &str) -> Option<d_checktable::h_15m::HealthCheck> {
         let instances = self.instances.read().await;
-        instances.get(symbol).map(|i| i.trader.lock().unwrap().health_check())
+        instances.get(symbol).map(|i| i.trader.lock().health_check())
     }
 }
 
