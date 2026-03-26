@@ -56,3 +56,7 @@ pub use replay_source::{KLineSource, ReplayError, ReplaySource};
 // Re-exports - HistoryDataManager (历史数据管理)
 pub use history::{HistoryDataManager, HistoryDataProvider};
 pub use history::{DataIssue, DataSource, HistoryError, HistoryRequest, HistoryResponse, KlineMetadata};
+
+// Re-exports - MarketDataStore (统一存储接口)
+pub mod store;
+pub use store::{MarketDataStore, MarketDataStoreImpl, OrderBookData, VolatilityData};
