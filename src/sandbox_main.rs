@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::sync::mpsc;
@@ -24,7 +24,7 @@ use f_engine::types::{OrderRequest, OrderType, Side};
 use f_engine::RiskChecker;
 use a_common::exchange::ExchangeAccount;
 
-const DEFAULT_SYMBOL: &str = "POWERUSDT";
+const DEFAULT_SYMBOL: &str = "HOTUSDT";
 const DEFAULT_FUND: f64 = 10000.0;
 const DEFAULT_DURATION: u64 = 300; // 5分钟
 
@@ -34,7 +34,8 @@ struct SandboxConfig {
     initial_fund: Decimal,
     duration_secs: u64,
     fast_mode: bool,
-    kline_count: usize,
+    start_date: String,
+    end_date: String,
 }
 
 impl Default for SandboxConfig {
@@ -44,7 +45,8 @@ impl Default for SandboxConfig {
             initial_fund: dec!(10000),
             duration_secs: DEFAULT_DURATION,
             fast_mode: false,
-            kline_count: 100,
+            start_date: "2025-10-09".to_string(),
+            end_date: "2025-10-11".to_string(),
         }
     }
 }
@@ -70,10 +72,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("========================================");
     tracing::info!("配置:");
     tracing::info!("  品种: {}", config.symbol);
+    tracing::info!("  时间段: {} -> {}", config.start_date, config.end_date);
     tracing::info!("  初始资金: {}", config.initial_fund);
     tracing::info!("  测试时长: {}s", config.duration_secs);
     tracing::info!("  模式: {}", if config.fast_mode { "快速" } else { "实时" });
-    tracing::info!("  K线数量: {}", config.kline_count);
     tracing::info!("========================================\n");
 
     // 1. 创建 DataFeeder
@@ -89,8 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let risk_checker = ShadowRiskChecker::new();
     tracing::info!("✅ 3. ShadowRiskChecker 创建成功");
 
-    // 4. 准备 K线数据
-    let klines = generate_mock_klines(&config.symbol, config.kline_count);
+    // 4. 从API拉取K线数据
+    tracing::info!("✅ 4. 正在从币安API拉取历史K线...");
+    let klines = fetch_klines_from_api(&config.symbol, &config.start_date, &config.end_date).await?;
     let kline_count = klines.len();
     tracing::info!("✅ 4. K线数据准备完成 ({} 根)", kline_count);
 
@@ -352,11 +355,14 @@ fn parse_args() -> SandboxConfig {
                     }
                 }
             }
-            "--klines" => {
+            "--start" => {
                 if i + 1 < args.len() {
-                    if let Ok(k) = args[i + 1].parse::<usize>() {
-                        config.kline_count = k;
-                    }
+                    config.start_date = args[i + 1].clone();
+                }
+            }
+            "--end" => {
+                if i + 1 < args.len() {
+                    config.end_date = args[i + 1].clone();
                 }
             }
             "--fast" => {
@@ -370,13 +376,13 @@ fn parse_args() -> SandboxConfig {
                 println!("  --symbol <品种>   测试品种 (默认: {})", DEFAULT_SYMBOL);
                 println!("  --fund <金额>     初始资金 USDT (默认: {})", DEFAULT_FUND);
                 println!("  --duration <秒>  测试时长 (默认: {})", DEFAULT_DURATION);
-                println!("  --klines <数量>   K线数量 (默认: 100)");
+                println!("  --start <日期>    起始日期 YYYY-MM-DD (默认: {})", config.start_date);
+                println!("  --end <日期>      结束日期 YYYY-MM-DD (默认: {})", config.end_date);
                 println!("  --fast            快速模式 (无延迟)");
                 println!("  --help            显示帮助");
                 println!();
                 println!("示例:");
-                println!("  cargo run --bin sandbox");
-                println!("  cargo run --bin sandbox -- --symbol BTCUSDT --fund 50000 --fast");
+                println!("  cargo run --bin sandbox -- --symbol HOTUSDT --start 2025-10-09 --end 2025-10-11 --fast");
                 std::process::exit(0);
             }
             _ => {}
@@ -386,37 +392,110 @@ fn parse_args() -> SandboxConfig {
     config
 }
 
-/// 生成模拟 K线数据
-fn generate_mock_klines(symbol: &str, count: usize) -> Vec<b_data_source::KLine> {
+/// 从币安API拉取历史K线
+async fn fetch_klines_from_api(
+    symbol: &str,
+    start_date: &str,
+    end_date: &str,
+) -> Result<Vec<b_data_source::KLine>, Box<dyn std::error::Error>> {
     use b_data_source::Period;
 
-    let mut klines = Vec::new();
-    let base_price = 5.0;
-    let mut current_price = base_price;
-    let now = Utc::now();
+    // 解析日期
+    let start_dt = chrono::NaiveDateTime::parse_from_str(
+        &format!("{} 00:00:00", start_date), "%Y-%m-%d %H:%M:%S"
+    )?;
+    let end_dt = chrono::NaiveDateTime::parse_from_str(
+        &format!("{} 00:00:00", end_date), "%Y-%m-%d %H:%M:%S"
+    )?;
 
-    for i in 0..count {
-        let open = current_price;
-        // 模拟波动
-        let change = ((i as f64 % 20.0) - 10.0) / 1000.0;
-        let close = current_price * (1.0 + change);
-        let high = (open.max(close)) * 1.002;
-        let low = (open.min(close)) * 0.998;
-        current_price = close;
+    let start_ms = chrono::Utc.from_utc_datetime(&start_dt).timestamp_millis();
+    let end_ms = chrono::Utc.from_utc_datetime(&end_dt).timestamp_millis();
 
-        klines.push(b_data_source::KLine {
-            symbol: symbol.to_string(),
-            period: Period::Minute(1),
-            open: Decimal::try_from(open).unwrap_or(dec!(5.0)),
-            high: Decimal::try_from(high).unwrap_or(dec!(5.0)),
-            low: Decimal::try_from(low).unwrap_or(dec!(5.0)),
-            close: Decimal::try_from(close).unwrap_or(dec!(5.0)),
-            volume: dec!(100),
-            timestamp: now + chrono::Duration::minutes(i as i64),
-        });
+    tracing::info!("从API拉取 {} {} -> {} ({} -> {})",
+        symbol, start_date, end_date, start_ms, end_ms);
+
+    // 分页拉取：币安API每次最多1000条
+    let mut all_raw_klines: Vec<Vec<serde_json::Value>> = Vec::new();
+    let mut current_start = start_ms;
+    let max_requests = 100;
+    let page_limit = 1000;
+
+    let client = reqwest::Client::new();
+
+    for page in 0..max_requests {
+        let url = format!(
+            "https://fapi.binance.com/fapi/v1/klines?symbol={}&interval=1m&limit={}&startTime={}&endTime={}",
+            symbol.to_uppercase(),
+            page_limit,
+            current_start,
+            end_ms
+        );
+
+        let response = client.get(&url).send().await?.text().await?;
+        let raw_klines: Vec<Vec<serde_json::Value>> = serde_json::from_str(&response)
+            .map_err(|e| format!("JSON解析失败: {} | Body: {}", e, response))?;
+
+        if raw_klines.is_empty() {
+            break;
+        }
+
+        let page_count = raw_klines.len();
+        all_raw_klines.extend(raw_klines);
+
+        tracing::info!("第 {} 页: {} 条, 累计: {}", page + 1, page_count, all_raw_klines.len());
+
+        if page_count < page_limit {
+            break;
+        }
+
+        // 下一页
+        if let Some(last) = all_raw_klines.last() {
+            if let Some(close_time) = last.get(6).and_then(|v| v.as_i64()) {
+                current_start = close_time + 1;
+            } else {
+                break;
+            }
+        }
+
+        if page >= max_requests - 1 {
+            tracing::warn!("已达到最大请求次数限制");
+            break;
+        }
     }
 
-    klines
+    if all_raw_klines.is_empty() {
+        return Err("未获取到K线数据".into());
+    }
+
+    tracing::info!("共获取K线: {} 条，开始解析...", all_raw_klines.len());
+
+    // 转换为内部 KLine 格式
+    let klines: Vec<b_data_source::KLine> = all_raw_klines
+        .into_iter()
+        .filter_map(|arr| {
+            let open_time_ms = arr.get(0)?.as_i64()?;
+            let timestamp = chrono::Utc.timestamp_millis_opt(open_time_ms).single()?;
+
+            let parse_decimal = |idx: usize| -> Option<Decimal> {
+                let s = arr.get(idx)?.as_str()?;
+                let f: f64 = s.parse().ok()?;
+                Decimal::from_f64_retain(f)
+            };
+
+            Some(b_data_source::KLine {
+                symbol: symbol.to_string(),
+                period: Period::Minute(1),
+                open: parse_decimal(1)?,
+                high: parse_decimal(2)?,
+                low: parse_decimal(3)?,
+                close: parse_decimal(4)?,
+                volume: parse_decimal(5)?,
+                timestamp,
+            })
+        })
+        .collect();
+
+    Ok(klines)
 }
 
 /// 打印账户详细信息

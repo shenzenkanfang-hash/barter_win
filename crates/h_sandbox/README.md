@@ -64,61 +64,92 @@
 
 ## 沙盒职责
 
-**沙盒 = WS模拟器**
+**沙盒模拟真实交易所环境，中间业务层完全不变**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     沙盒 (h_sandbox)                            │
-│   职责: 模拟WS推送 (替代 Kline1mStream)                         │
-│   - StreamTickGenerator: 生成模拟K线数据                        │
-│   - TickToWsConverter: 转换为 WS 格式 (BinanceKlineMsg)       │
-│   - 填充 Tick.kline_1m: 用模拟数据构建完整K线                   │
-│   - push_tick: 存入 DataFeeder (与正常WS相同接口)               │
+│              正常业务层 (c/d/e/f_engine)                        │
+│   TradingEngineV2 → 策略 → 风控 → 订单执行                      │
+│   以为在和真实交易所通信，实际被两端拦截                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ 上行请求
+┌─────────────────────────────────────────────────────────────────┐
+│         ShadowBinanceGateway (h_sandbox/gateway)               │
+│   职责: 拦截订单/账户/持仓请求                                    │
+│   - place_order() → 模拟成交                                     │
+│   - get_account() → 返回沙盒账户余额                             │
+│   - get_position() → 返回沙盒持仓                                │
+│   - 推送模拟 Tick 到 DataFeeder                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              ↑ 下行响应
+┌─────────────────────────────────────────────────────────────────┐
+│         StreamTickGenerator (h_sandbox/historical_replay)       │
+│   职责: 模拟WS推送数据                                           │
+│   - 从API拉取历史K线 (--start --end)                            │
+│   - 生成模拟 Tick流                                             │
+│   - 填充 kline_1m → push_tick → DataFeeder                      │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                     DataFeeder                                  │
+│                     DataFeeder (b_data_source)                  │
 │   latest_ticks: HashMap<Symbol, Tick>                           │
-│   Tick.kline_1m: 包含完整的 O/H/L/C/V 数据                     │
+│   正常业务层通过 ws_get_1m() 按需拉取                            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**沙盒注入数据后，所有计算逻辑都是正常项目的正常代码**
+### 两端拦截模式
 
-**沙盒与正常WS的对比：**
+| 方向 | 组件 | 职责 |
+|-----|------|------|
+| **前端拦截** | ShadowBinanceGateway | 拦截下行请求（订单/账户/持仓），返回模拟响应 |
+| **后端注入** | StreamTickGenerator | 注入上行数据（K线/Tick），模拟WS推送 |
 
-| 步骤 | 正常WS | 沙盒 |
-|-----|-------|-----|
-| 数据源 | 币安fstream.binance.com | StreamTickGenerator |
-| 格式转换 | 原始WS→解析 | SimulatedTick→TickToWsConverter |
-| 填充kline_1m | WS消息自带 | 需手动构建 |
-| 存入DataFeeder | 不经过DataFeeder | push_tick |
-| 消费者拉取 | ws_get_1m() | ws_get_1m() |
+### 沙盒与正常模式的对比
 
-**关键点：沙盒必须用模拟数据填充 `Tick.kline_1m`，然后调用 `push_tick`，这样消费者才能通过 `ws_get_1m()` 拉取到数据。**
+| 层级 | 正常模式 | 沙盒模式 |
+|-----|---------|---------|
+| WS数据源 | 币安fstream.binance.com | StreamTickGenerator → push_tick |
+| 订单执行 | 币安API | ShadowBinanceGateway.place_order() |
+| 账户查询 | 币安API | ShadowBinanceGateway.get_account() |
+| 持仓查询 | 币安API | ShadowBinanceGateway.get_position() |
+| 业务逻辑 | c/d/e/f_engine (不变) | c/d/e/f_engine (不变) |
+
+### 关键点
+
+1. **ShadowBinanceGateway** 替代真实交易所API，业务层无感知
+2. **StreamTickGenerator → push_tick** 替代真实WS推送，业务层无感知
+3. 中间的 c/d/e/f_engine **完全不变**，按正常逻辑运行
 
 ### 沙盒功能
 
 1. **拉取历史K线**（用于模拟）
-   - 从币安API拉取K线数据
-   - 分页拼接 (支持 >1000 条)
-   - 缓存到本地 ShardCache
+   ```
+   --symbol HOTUSDT --start 2025-10-09 --end 2025-10-11
+   ```
+   - 从币安API (`fapi.binance.com/fapi/v1/klines`) 拉取K线数据
+   - 分页拼接 (每次最多1000条)
+   - 转换为内部 KLine 格式
 
 2. **模拟WS推送**
    ```
    KLine数据 → StreamTickGenerator → 60 ticks/K线
                                   ↓
-                           TickToWsConverter → WS格式输出
-                                  ↓
                            填充 kline_1m → push_tick → DataFeeder
    ```
    - 每根K线生成60个模拟Tick
-   - 每条Tick转换后填充 `kline_1m`
-   - 调用 `push_tick` 存入共享内存
-   - 消费者通过 `ws_get_1m()` 按需拉取
+   - 每条Tick包含当前K线状态 (open/high/low/close/volume)
+   - 调用 `push_tick` 存入 DataFeeder
+   - 正常业务层通过 `ws_get_1m()` 按需拉取
 
-3. **数据格式**
-   - WS消息格式: BinanceKlineMsg (与真实WS一致)
+3. **API请求拦截**
+   ```
+   TradingEngine → place_order() → ShadowBinanceGateway → 模拟成交
+   TradingEngine → get_account() → ShadowBinanceGateway → 返回账户
+   TradingEngine → get_position() → ShadowBinanceGateway → 返回持仓
+   ```
+
+4. **数据格式**
+   - WS格式: BinanceKlineMsg (与真实WS一致)
    - 内存格式: Tick { kline_1m: Some(KLine), kline_15m: None, kline_1d: None }
 
 ## 测试场景设计
