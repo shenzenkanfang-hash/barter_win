@@ -4,6 +4,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+use parking_lot::RwLock;
 use rust_decimal::Decimal;
 
 use crate::core::fund_pool::FundPoolManager;
@@ -52,6 +54,7 @@ impl RollbackResult {
 }
 
 /// 回滚管理器
+#[derive(Clone)]
 pub struct RollbackManager {
     fund_pool_manager: FundPoolManager,
 }

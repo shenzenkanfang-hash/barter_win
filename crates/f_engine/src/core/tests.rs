@@ -245,7 +245,7 @@ mod triggers_tests {
     #[test]
     fn test_trigger_config_default() {
         let config = TriggerConfig::default();
-        assert_eq!(config.minute_volatility_threshold, dec!(13));
+        assert_eq!(config.minute_volatility_threshold, dec!(0.05)); // 5%
         assert_eq!(config.daily_entry_low_threshold, dec!(30));
         assert_eq!(config.daily_entry_high_threshold, dec!(70));
         assert_eq!(config.max_running_symbols, 10);
@@ -257,12 +257,12 @@ mod triggers_tests {
         let trigger = MinuteTrigger::new(config);
         let engine_state = EngineStateHandle::new(EngineMode::Simulation);
 
-        // 波动率未超过阈值
-        let result = trigger.check("BTC-USDT", dec!(10), &engine_state);
+        // 波动率未超过阈值 (0.04 < 0.05)
+        let result = trigger.check("BTC-USDT", dec!(0.04), &engine_state);
         assert!(!result.precheck_passed);
 
-        // 波动率超过阈值
-        let result = trigger.check("BTC-USDT", dec!(15), &engine_state);
+        // 波动率超过阈值 (0.06 > 0.05)
+        let result = trigger.check("BTC-USDT", dec!(0.06), &engine_state);
         assert!(result.precheck_passed);
     }
 
@@ -651,11 +651,9 @@ mod rollback_tests {
 
     #[test]
     fn test_rollback_manager_concurrent() {
-        use std::sync::Arc;
-
-        // 创建资金池和回滚管理器
-        let fund_pool = Arc::new(FundPoolManager::new(dec!(100000), dec!(200000)));
-        let manager = Arc::new(RollbackManager::new(fund_pool.clone()));
+        // 创建资金池和回滚管理器（FundPoolManager 本身线程安全）
+        let fund_pool = FundPoolManager::new(dec!(100000), dec!(200000));
+        let manager = RollbackManager::new(fund_pool.clone());
 
         // 初始冻结10000资金
         fund_pool.freeze(ChannelType::HighSpeed, dec!(10000));
@@ -664,8 +662,7 @@ mod rollback_tests {
         // 并发执行 10 次回滚
         let mut handles = vec![];
         for i in 0..10 {
-            let m = manager.clone();
-            let fp = fund_pool.clone();
+            let m = RollbackManager::new(fund_pool.clone());
             let handle = std::thread::spawn(move || {
                 // 每次回滚1000
                 let result = m.rollback_order(ChannelType::HighSpeed, dec!(1000));

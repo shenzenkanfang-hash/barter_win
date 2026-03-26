@@ -18,7 +18,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::
 use b_data_source::{DataFeeder, Tick};
 use h_sandbox::{
     ShadowBinanceGateway, ShadowRiskChecker,
-    tick_generator::{TickGenerator, TICKS_PER_1M},
+    historical_replay::StreamTickGenerator,
 };
 use f_engine::types::{OrderRequest, OrderType, Side};
 use f_engine::RiskChecker;
@@ -91,11 +91,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. 准备 K线数据
     let klines = generate_mock_klines(&config.symbol, config.kline_count);
-    tracing::info!("✅ 4. K线数据准备完成 ({} 根)", klines.len());
+    let kline_count = klines.len();
+    tracing::info!("✅ 4. K线数据准备完成 ({} 根)", kline_count);
 
     // 5. 创建 TickGenerator
-    let tick_gen = TickGenerator::from_klines(config.symbol.clone(), klines);
-    let total_ticks = tick_gen.total_klines() * TICKS_PER_1M as usize;
+    let tick_gen = StreamTickGenerator::from_loader(config.symbol.clone(), klines.into_iter());
+    let total_ticks = kline_count * 60; // 每K线60 ticks
     tracing::info!("✅ 5. TickGenerator 创建成功 (预计 {} ticks)", total_ticks);
 
     // 打印初始账户信息
@@ -132,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TickGenerator 运行在独立任务
     let tick_gen_handle = tokio::spawn(async move {
         let mut generator = tick_gen;
-        while let Some(tick_data) = generator.next_tick() {
+        while let Some(tick_data) = generator.next() {
             let tick = Tick {
                 symbol: tick_data.symbol,
                 price: tick_data.price,
