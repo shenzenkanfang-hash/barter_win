@@ -2,40 +2,17 @@
 //!
 //! 分片订阅: 每批50个symbol，间隔500ms发送
 
+use crate::default_store;
+use crate::store::MarketDataStore;
+use crate::ws::kline_1m::ws::KlineData;
 use a_common::Paths;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-
-/// Kline 数据
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KlineData {
-    #[serde(rename = "t")]
-    pub kline_start_time: i64,
-    #[serde(rename = "T")]
-    pub kline_close_time: i64,
-    #[serde(rename = "s")]
-    pub symbol: String,
-    #[serde(rename = "i")]
-    pub interval: String,
-    #[serde(rename = "o")]
-    pub open: String,
-    #[serde(rename = "c")]
-    pub close: String,
-    #[serde(rename = "h")]
-    pub high: String,
-    #[serde(rename = "l")]
-    pub low: String,
-    #[serde(rename = "v")]
-    pub volume: String,
-    #[serde(rename = "x")]
-    pub is_closed: bool,
-}
 
 /// 1d K线 WebSocket 流管理器
 pub struct Kline1dStream {
@@ -296,6 +273,21 @@ impl Kline1dStream {
                     serde_json::to_string(&kline).ok(),
                     kline.get("x").and_then(|v| v.as_bool()),
                 ) {
+                    // 写入统一存储（供策略读取）
+                    let kline_data = KlineData {
+                        kline_start_time: kline.get("t").and_then(|v| v.as_i64()).unwrap_or(0),
+                        kline_close_time: kline.get("T").and_then(|v| v.as_i64()).unwrap_or(0),
+                        symbol: symbol.to_string(),
+                        interval: kline.get("i").and_then(|v| v.as_str()).unwrap_or("1d").to_string(),
+                        open: kline.get("o").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                        close: kline.get("c").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                        high: kline.get("h").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                        low: kline.get("l").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                        volume: kline.get("v").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                        is_closed,
+                    };
+                    default_store().write_kline(symbol, kline_data, is_closed);
+
                     // K线闭合时，写入历史目录（结构化格式）
                     if is_closed {
                         let _ = self.write_to_history(symbol, kline);

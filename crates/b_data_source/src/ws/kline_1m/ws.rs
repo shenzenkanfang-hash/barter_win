@@ -2,6 +2,8 @@
 //!
 //! 分片订阅: 每批50个symbol，间隔500ms发送
 
+use crate::default_store;
+use crate::store::MarketDataStore;
 use crate::ws::volatility::VolatilityManager;
 use a_common::Paths;
 use a_common::volatility::KLineInput;
@@ -387,6 +389,21 @@ impl Kline1mStream {
 
                         // 检查是否需要输出每分钟汇总
                         self.volatility_manager.check_and_log_summary();
+
+                        // 写入统一存储（供策略读取）
+                        let kline_data = KlineData {
+                            kline_start_time: kline.get("t").and_then(|v| v.as_i64()).unwrap_or(0),
+                            kline_close_time: kline.get("T").and_then(|v| v.as_i64()).unwrap_or(0),
+                            symbol: symbol.to_string(),
+                            interval: kline.get("i").and_then(|v| v.as_str()).unwrap_or("1m").to_string(),
+                            open: kline.get("o").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                            close: kline.get("c").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                            high: kline.get("h").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                            low: kline.get("l").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                            volume: kline.get("v").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+                            is_closed,
+                        };
+                        default_store().write_kline(symbol, kline_data, is_closed);
                     }
 
                     // K线闭合时，写入历史目录（结构化格式）

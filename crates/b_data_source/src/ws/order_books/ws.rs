@@ -2,10 +2,13 @@
 //!
 //! 默认只订阅 BTC 维护连接，高波动时扩展
 
+use crate::default_store;
+use crate::store::{MarketDataStore, OrderBookData};
 use super::orderbook::OrderBook;
 use a_common::Paths;
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -207,9 +210,22 @@ impl DepthStream {
                                 .unwrap_or(0);
 
                             let mut orderbook = OrderBook::new(symbol.to_string());
-                            orderbook.update(last_update_id, bids, asks);
+                            orderbook.update(last_update_id, bids.clone(), asks.clone());
 
                             self.latest_orderbooks.insert(symbol.to_lowercase(), orderbook);
+
+                            // 写入统一存储（供策略读取）
+                            let orderbook_data = OrderBookData {
+                                symbol: symbol.to_string(),
+                                bids: bids.iter()
+                                    .map(|(p, q)| (p.to_f64().unwrap_or(0.0), q.to_f64().unwrap_or(0.0)))
+                                    .collect(),
+                                asks: asks.iter()
+                                    .map(|(p, q)| (p.to_f64().unwrap_or(0.0), q.to_f64().unwrap_or(0.0)))
+                                    .collect(),
+                                timestamp_ms: last_update_id as i64,
+                            };
+                            default_store().write_orderbook(symbol, orderbook_data);
                         }
                     }
                 }
