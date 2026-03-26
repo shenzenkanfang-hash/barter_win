@@ -17,6 +17,7 @@ pub mod engine_state;
 pub mod state;
 pub mod strategy_pool;
 pub mod engine_v2;  // TradingEngineV2 - V1.4 完整实现
+pub mod engine;  // TradingEngine - TradeManager 模式
 pub mod business_types;  // 业务数据类型
 pub mod triggers;  // 触发器模块
 pub mod execution;  // 执行流程模块
@@ -34,6 +35,9 @@ pub use crate::types::{StrategyId, TradingDecision, OrderRequest, Side, OrderTyp
 
 // engine_v2 导出（TradingEngineV2 是唯一的主引擎）
 pub use engine_v2::{TradingEngineV2, TradingEngineConfig};
+
+// engine 导出（TradeManager 模式）
+pub use engine::{Engine, EngineDb, TaskState, RunningStatus};
 
 // engine_state 导出
 pub use engine_state::{
