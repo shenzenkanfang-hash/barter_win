@@ -25,6 +25,7 @@ pub mod replay_source;    // 历史数据回放
 pub mod ws;      // WebSocket 数据接口
 pub mod api;     // REST API 数据接口
 pub mod symbol_rules; // 交易对规则服务
+pub mod history; // 历史数据管理层
 
 // Re-exports - Models (业务数据类型)
 pub use models::{MarketStream, MockMarketStream};
@@ -51,3 +52,7 @@ pub use trader_pool::{SymbolMeta, TradingStatus, TraderPool};
 
 // Re-exports - ReplaySource (历史数据回放)
 pub use replay_source::{KLineSource, ReplayError, ReplaySource};
+
+// Re-exports - HistoryDataManager (历史数据管理)
+pub use history::{HistoryDataManager, HistoryDataProvider};
+pub use history::{DataIssue, DataSource, HistoryError, HistoryRequest, HistoryResponse, KlineMetadata};
