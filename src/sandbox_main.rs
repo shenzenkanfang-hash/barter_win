@@ -134,12 +134,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tick_gen_handle = tokio::spawn(async move {
         let mut generator = tick_gen;
         while let Some(tick_data) = generator.next() {
+            // 用 SimulatedTick 数据构建 KLine，模拟正常WS推送的完整K线数据
+            let kline_1m = b_data_source::KLine {
+                symbol: tick_data.symbol.clone(),
+                period: b_data_source::Period::Minute(1),
+                open: tick_data.open,
+                high: tick_data.high,
+                low: tick_data.low,
+                close: tick_data.price,
+                volume: tick_data.volume,
+                timestamp: tick_data.kline_timestamp,
+            };
+
             let tick = Tick {
                 symbol: tick_data.symbol,
                 price: tick_data.price,
                 qty: tick_data.qty,
                 timestamp: tick_data.timestamp,
-                kline_1m: None,
+                kline_1m: Some(kline_1m),
                 kline_15m: None,
                 kline_1d: None,
             };
