@@ -55,5 +55,4 @@ pub use x_data::trading::signal::{
 
 // Re-exports - CheckTable (dual-cycle)
 pub use d_checktable::h_15m::Trader;
-pub use d_checktable::l_1d::{DayQuantityCalculator, DayQuantityConfig};
 pub use d_checktable::types::CheckChainContext;

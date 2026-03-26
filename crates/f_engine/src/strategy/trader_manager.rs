@@ -88,7 +88,7 @@ impl TraderManager {
         let mut instances = self.instances.write().await;
         
         if let Some(instance) = instances.remove(symbol) {
-            instance.trader.lock().unwrap().stop();
+            instance.trader.lock().unwrap().stoploop();
             instance.handle.abort();
             info!("Stopped trader for {}", symbol);
             Ok(())
@@ -103,7 +103,7 @@ impl TraderManager {
         let mut instances = self.instances.write().await;
         
         for (symbol, instance) in instances.drain() {
-            instance.trader.lock().unwrap().stop();
+            instance.trader.lock().unwrap().stoploop();
             instance.handle.abort();
             info!("Stopped trader for {}", symbol);
         }
@@ -122,9 +122,9 @@ impl TraderManager {
     }
 
     /// 获取 Trader 健康状态
-    pub async fn health(&self, symbol: &str) -> Option<d_checktable::h_15m::TraderHealth> {
+    pub async fn health_check(&self, symbol: &str) -> Option<d_checktable::h_15m::HealthCheck> {
         let instances = self.instances.read().await;
-        instances.get(symbol).map(|i| i.trader.lock().unwrap().health())
+        instances.get(symbol).map(|i| i.trader.lock().unwrap().health_check())
     }
 }
 
