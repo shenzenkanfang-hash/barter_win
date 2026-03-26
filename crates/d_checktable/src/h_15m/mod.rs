@@ -24,12 +24,18 @@ pub mod status;
 pub mod quantity_calculator;
 pub mod trader;
 pub mod trader_flow;
+pub mod market_data;
+pub mod signal_generator;
+pub mod order_executor;
 
 pub use signal::MinSignalGenerator;
 pub use status::{PinStatus, PinStatusMachine};
 pub use quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
 pub use trader::{Trader, TraderConfig, TraderHealth};
-pub use trader_flow::TraderFlow;
+pub use trader_flow::{TraderFlow, TraderFlowHealth};
+pub use market_data::{MarketData, KlineSnapshot, read_market_data, get_price, get_volatility};
+pub use signal_generator::SignalGenerator;
+pub use order_executor::{OrderExecutor, OrderResult, OrderError};
 
 use crate::types::{CheckChainContext, MinSignalInput, VolatilityTier};
 use x_data::trading::signal::{PositionSide, StrategySignal};
