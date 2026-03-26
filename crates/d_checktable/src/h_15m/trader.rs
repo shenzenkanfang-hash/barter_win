@@ -56,8 +56,8 @@ impl Trader {
         }
     }
 
-    /// tick：业务逻辑由外部注入
-    pub fn tick(&mut self) {
+    /// execute：业务逻辑由外部注入
+    pub fn execute(&mut self) {
         // TODO: 业务逻辑
     }
 
@@ -89,8 +89,8 @@ pub async fn run_loop(symbol: &str, interval_ms: u64) {
     tracing::info!("[{}] Loop started", symbol);
 
     loop {
-        // 1. tick
-        trader.tick();
+        // 1. execute
+        trader.execute();
 
         // 2. 等待
         sleep(Duration::from_millis(interval_ms)).await;
