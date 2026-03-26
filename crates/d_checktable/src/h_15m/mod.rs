@@ -23,11 +23,15 @@ pub mod signal;
 pub mod status;
 pub mod quantity_calculator;
 pub mod trader;
+pub mod executor;
+pub mod repository;
 
 pub use signal::MinSignalGenerator;
 pub use status::{PinStatus, PinStatusMachine};
 pub use quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
 pub use trader::{Trader, TraderConfig, TraderHealth};
+pub use executor::{Executor, ExecutorConfig, ExecutorError, OrderType};
+pub use repository::{Repository, TradeRecord, RecordStatus, RepoError, PENDING_TIMEOUT_SECS};
 
 use crate::types::{CheckChainContext, MinSignalInput, VolatilityTier};
 use x_data::trading::signal::{PositionSide, StrategySignal};
