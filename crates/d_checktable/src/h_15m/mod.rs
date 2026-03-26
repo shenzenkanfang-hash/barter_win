@@ -5,14 +5,16 @@
 //! - 7条件Pin模式
 //! - 数量计算
 //! - 状态机管理
+//! - 品种交易主循环
 //!
 //! ```text
-//! 目录结构（简化后）：
+//! 目录结构：
 //! h_15m/
 //! ├── mod.rs              入口 + 双通道分发 + 数量计算
 //! ├── signal.rs           7条件Pin模式 + 双通道信号生成
 //! ├── status.rs           PinStatus状态机
-//! └── quantity_calculator.rs 数量计算
+//! ├── quantity_calculator.rs 数量计算
+//! └── trader.rs          品种交易主循环
 //! ```
 
 #![forbid(unsafe_code)]
@@ -20,10 +22,12 @@
 pub mod signal;
 pub mod status;
 pub mod quantity_calculator;
+pub mod trader;
 
 pub use signal::MinSignalGenerator;
 pub use status::{PinStatus, PinStatusMachine};
 pub use quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
+pub use trader::{Trader, TraderConfig, TraderHealth};
 
 use crate::types::{CheckChainContext, MinSignalInput, VolatilityTier};
 use x_data::trading::signal::{PositionSide, StrategySignal};
