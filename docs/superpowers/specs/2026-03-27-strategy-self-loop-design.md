@@ -36,10 +36,11 @@ Status: 待实现
 │       │                                                    │
 │       ▼                                                    │
 │  StrategyLoop (Future)                                     │
+│       ├── running_state: RwLock<RunningState>            │
 │       ├── tick_interval: 500ms                            │
 │       ├── trader.tick(market, position)                   │
 │       ├── 有信号 → order_sender.send_order()              │
-│       └── 退出条件: should_exit || max_errors             │
+│       └── 退出条件: !is_running || max_errors             │
 └─────────────────────────────────────────────────────────────┘
 
 数据流:
@@ -101,7 +102,26 @@ impl Default for StrategyLoopConfig {
 }
 ```
 
-4.2 StrategyLoop - 策略自循环
+4.2 RunningState - 运行状态
+
+```rust
+/// 策略运行状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunningState {
+    /// 运行中
+    Running,
+    /// 已停止
+    Stopped,
+}
+
+impl Default for RunningState {
+    fn default() -> Self {
+        RunningState::Stopped
+    }
+}
+```
+
+4.3 StrategyLoop - 策略自循环
 
 ```rust
 pub struct StrategyLoop<S, P, O> {
@@ -110,8 +130,27 @@ pub struct StrategyLoop<S, P, O> {
     pub position_source: Arc<P>,
     pub order_sender: Arc<O>,
     pub config: StrategyLoopConfig,
+    /// 运行状态
+    pub running_state: Arc<parking_lot::RwLock<RunningState>>,
+    /// 连续错误计数
     consecutive_errors: u32,
-    should_exit: bool,
+}
+
+impl<S, P, O> StrategyLoop<S, P, O> {
+    /// 启动策略
+    pub fn start(&self) {
+        *self.running_state.write() = RunningState::Running;
+    }
+
+    /// 停止策略
+    pub fn stop(&self) {
+        *self.running_state.write() = RunningState::Stopped;
+    }
+
+    /// 检查是否运行中
+    pub fn is_running(&self) -> bool {
+        *self.running_state.read() == RunningState::Running
+    }
 }
 ```
 
@@ -192,6 +231,7 @@ pub fn stop_all_strategies(&self);
 use d_checktable::h_15m::{Indicator, MarketData, PositionData, Status, Trader};
 use tokio::time::{interval, Duration};
 use std::sync::Arc;
+use parking_lot::RwLock;
 use tracing::{info, warn, error};
 
 /// 策略自循环配置
@@ -215,6 +255,21 @@ impl Default for StrategyLoopConfig {
     }
 }
 
+/// 策略运行状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunningState {
+    /// 运行中
+    Running,
+    /// 已停止
+    Stopped,
+}
+
+impl Default for RunningState {
+    fn default() -> Self {
+        RunningState::Stopped
+    }
+}
+
 /// 策略自循环 Future
 ///
 /// 使用方式:
@@ -226,6 +281,7 @@ impl Default for StrategyLoopConfig {
 ///     order_sender: Arc::new(...),
 ///     config: StrategyLoopConfig::default(),
 /// );
+/// task.start();
 /// tokio::spawn(task.run());
 /// ```
 pub struct StrategyLoop<S, P, O> {
@@ -239,10 +295,10 @@ pub struct StrategyLoop<S, P, O> {
     pub order_sender: Arc<O>,
     /// 配置
     pub config: StrategyLoopConfig,
-    /// 内部状态
+    /// 运行状态
+    pub running_state: Arc<RwLock<RunningState>>,
+    /// 连续错误计数
     consecutive_errors: u32,
-    /// 退出标志
-    should_exit: bool,
 }
 
 impl<S, P, O> StrategyLoop<S, P, O>
@@ -265,18 +321,29 @@ where
             position_source,
             order_sender,
             config,
+            running_state: Arc::new(RwLock::new(RunningState::Stopped)),
             consecutive_errors: 0,
-            should_exit: false,
         }
     }
 
-    /// 标记退出
-    pub fn stop(&mut self) {
-        self.should_exit = true;
+    /// 启动策略
+    pub fn start(&self) {
+        *self.running_state.write() = RunningState::Running;
+    }
+
+    /// 停止策略
+    pub fn stop(&self) {
+        *self.running_state.write() = RunningState::Stopped;
+    }
+
+    /// 检查是否运行中
+    pub fn is_running(&self) -> bool {
+        *self.running_state.read() == RunningState::Running
     }
 
     /// 运行自循环
     pub async fn run(mut self) {
+        self.start();
         info!("[{}] Strategy loop started", self.symbol);
 
         let mut trader = Trader::new(&self.symbol);
@@ -286,8 +353,9 @@ where
             tokio::select! {
                 // 定时 tick
                 _ = tick_interval.tick() => {
-                    if self.should_exit {
-                        info!("[{}] Strategy loop exiting (signal)", self.symbol);
+                    // 检查运行状态
+                    if !self.is_running() {
+                        info!("[{}] Strategy loop exiting (stopped)", self.symbol);
                         break;
                     }
 
@@ -380,7 +448,7 @@ pub trait OrderSender {
 
 ```rust
 pub mod strategy_loop;
-pub use strategy_loop::{StrategyLoop, StrategyLoopConfig, MarketDataProvider, PositionDataProvider, OrderSender};
+pub use strategy_loop::{StrategyLoop, StrategyLoopConfig, RunningState, MarketDataProvider, PositionDataProvider, OrderSender};
 ```
 
 ================================================================
