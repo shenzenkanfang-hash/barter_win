@@ -11,7 +11,7 @@ use tokio::time::sleep;
 
 use super::PinStatus;
 use super::a_market_data;
-use super::b_signal_generator::SignalGenerator;
+use super::b_signal_generator::PinSignalGenerator;
 use super::d_order_executor::OrderExecutor;
 use x_data::trading::signal::StrategySignal;
 
@@ -19,7 +19,7 @@ use x_data::trading::signal::StrategySignal;
 pub struct TraderFlow {
     pub symbol: String,
     pub interval_ms: u64,
-    signal_gen: SignalGenerator,
+    signal_gen: PinSignalGenerator,
     is_running: bool,
 }
 
@@ -28,7 +28,7 @@ impl TraderFlow {
         Self {
             symbol: symbol.to_string(),
             interval_ms,
-            signal_gen: SignalGenerator::new(),
+            signal_gen: PinSignalGenerator::new(),
             is_running: false,
         }
     }
@@ -48,8 +48,23 @@ impl TraderFlow {
         // 1. 读取市场数据
         let market = a_market_data::read_market_data(&self.symbol)?;
 
-        // 2. 生成信号
-        let signal = self.signal_gen.generate(&market)?;
+        // 2. 生成信号（使用简化检测器）
+        let pin_signal = self.signal_gen.generate(
+            &market,
+            || true,  // check_long_entry
+            || true,  // check_short_entry
+            || true,  // check_long_add
+            || true,  // check_short_add
+            || true,  // check_long_hedge
+            || true,  // check_short_hedge
+            || false, // check_exit_high_vol
+            || false, // check_day_long_entry
+            || false, // check_day_short_entry
+            || false, // check_day_long_hedge
+            || false, // check_day_short_hedge
+        )?;
+
+        let signal = pin_signal.to_strategy_signal(&self.symbol, market.price);
 
         tracing::info!("[Flow {}] Signal generated: {:?}", self.symbol, signal);
         Some(signal)

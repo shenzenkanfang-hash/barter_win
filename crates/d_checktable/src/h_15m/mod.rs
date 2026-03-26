@@ -31,14 +31,14 @@ pub mod f_trader;
 pub use signal::MinSignalGenerator;
 pub use c_status::{PinStatus, PinStatusMachine};
 pub use quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
-pub use a_market_data::{MarketData, KlineSnapshot, read_market_data, get_price, get_volatility};
-pub use b_signal_generator::SignalGenerator;
+pub use a_market_data::{MarketData, KlineSnapshot, PositionSide, read_market_data, get_price, get_volatility};
+pub use b_signal_generator::{PinSignalGenerator, MarketStatus, OrderType, PinTradeSignal, config};
 pub use d_order_executor::{OrderExecutor, OrderResult, OrderError};
 pub use e_trader_flow::{TraderFlow, TraderFlowHealth};
 pub use f_trader::{Trader, TraderConfig, TraderHealth};
 
 use crate::types::{CheckChainContext, MinSignalInput, VolatilityTier};
-use x_data::trading::signal::{PositionSide, StrategySignal};
+use x_data::trading::signal::{PositionSide as XPositionSide, StrategySignal};
 
 /// 确定波动率通道
 fn determine_volatility_tier(tr_ratio_15min: rust_decimal::Decimal) -> VolatilityTier {
@@ -63,7 +63,7 @@ fn determine_volatility_tier(tr_ratio_15min: rust_decimal::Decimal) -> Volatilit
 pub fn run_check_chain(
     _symbol: &str,
     input: &MinSignalInput,
-    day_direction: Option<PositionSide>,
+    day_direction: Option<XPositionSide>,
     ctx: &CheckChainContext,
 ) -> Option<StrategySignal> {
     // 1. 判断波动率通道
