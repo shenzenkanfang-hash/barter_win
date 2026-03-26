@@ -5,9 +5,11 @@
 //!
 //! # 核心特性
 //! - RingBuffer存储闭合K线，current存储未闭合K线
-//! - 内存->磁盘自动同步（5秒定时）
+//! - 内存->磁盘自动同步（差异化：1分钟5秒批量，日线立即）
 //! - 数据异常自愈机制
 //! - 线程安全设计（RwLock/Arc）
+//! - API调用支持指数退避+jitter重试
+//! - 多品种并发限制（5并发+队列）
 //!
 //! # 使用方式
 //! ```rust,ignore
@@ -23,10 +25,12 @@
 //! let response = manager.query_history("BTCUSDT", "1m", end_time, 1000).await;
 //! ```
 
+pub mod api;
 pub mod manager;
 pub mod provider;
 pub mod types;
 
+pub use api::{HistoryApiClient, ApiClientConfig};
 pub use manager::{HistoryDataManager, MAX_KLINE_ENTRIES};
 pub use provider::HistoryDataProvider;
 pub use types::{

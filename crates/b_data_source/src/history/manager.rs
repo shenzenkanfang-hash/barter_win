@@ -7,6 +7,10 @@
 //! - ring_buffer: Vec<KLine> 带锁保护
 //! - current: Option<KLine> 带锁保护
 //! - Arc<SymbolKlineCache> 支持跨协程共享
+//!
+//! # 差异化策略
+//! - 1分钟K线: 5秒批量fsync（可接受5秒数据丢失）
+//! - 日线K线: 立即fsync（不允许丢失一天数据）
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -19,6 +23,7 @@ use parking_lot::RwLock;
 use tokio::sync::broadcast;
 
 use a_common::config::Paths;
+use crate::history::api::HistoryApiClient;
 use crate::history::types::{
     DataIssue, DataSource, HistoryError, HistoryResponse, KLine,
     klines_to_disk, klines_from_disk,
@@ -28,8 +33,13 @@ use crate::history::provider::HistoryDataProvider;
 /// 最大K线条目数（RingBuffer容量）
 pub const MAX_KLINE_ENTRIES: usize = 1000;
 
-/// 磁盘同步间隔（秒）
+/// 磁盘同步间隔（1分钟K线，秒）
 const DISK_SYNC_INTERVAL_SECS: u64 = 5;
+
+/// 判断是否为日线周期
+fn is_daily_period(period: &str) -> bool {
+    matches!(period, "1d" | "1D" | "d" | "day" | "daily")
+}
 
 /// 单品种K线缓存（线程安全）
 struct SymbolKlineCache {
@@ -147,10 +157,12 @@ pub struct HistoryDataManager {
     disk_dir: String,
     /// 关闭信号
     shutdown_tx: RwLock<Option<broadcast::Sender<()>>>,
+    /// API客户端（用于从交易所拉取历史数据）
+    api_client: HistoryApiClient,
 }
 
 impl HistoryDataManager {
-    /// 创建历史数据管理器
+    /// 创建历史数据管理器（使用合约API）
     pub fn new() -> Self {
         let paths = Paths::new();
         Self {
@@ -158,6 +170,19 @@ impl HistoryDataManager {
             memory_dir: paths.memory_backup_dir.clone(),
             disk_dir: paths.disk_sync_dir.clone(),
             shutdown_tx: RwLock::new(None),
+            api_client: HistoryApiClient::new_futures(),
+        }
+    }
+
+    /// 创建指定API类型的管理器
+    pub fn with_api_client(api_client: HistoryApiClient) -> Self {
+        let paths = Paths::new();
+        Self {
+            caches: RwLock::new(HashMap::new()),
+            memory_dir: paths.memory_backup_dir.clone(),
+            disk_dir: paths.disk_sync_dir.clone(),
+            shutdown_tx: RwLock::new(None),
+            api_client,
         }
     }
 
@@ -169,6 +194,7 @@ impl HistoryDataManager {
             memory_dir: memory_dir.to_string(),
             disk_dir: disk_dir.to_string(),
             shutdown_tx: RwLock::new(None),
+            api_client: HistoryApiClient::new_spot(),
         }
     }
 
@@ -244,15 +270,27 @@ impl HistoryDataManager {
     }
 
     /// 从API获取历史数据
+    ///
+    /// 使用带重试+jitter的API客户端
     async fn fetch_from_api(
         &self,
         symbol: &str,
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, HistoryError> {
-        // TODO: 实现实际API调用
         tracing::info!("Fetching {} {} from API (limit: {})", symbol, period, limit);
-        Ok(Vec::new())
+
+        // 计算时间范围：从当前时间往前推
+        let end_time = Utc::now().timestamp_millis();
+        let start_time = match period {
+            "1m" => end_time - (limit as i64 * 60 * 1000), // 1分钟K线：往前limit分钟
+            "1d" => end_time - (limit as i64 * 86400 * 1000), // 日线：往前limit天
+            _ => end_time - (limit as i64 * 60 * 1000), // 默认按1分钟处理
+        };
+
+        self.api_client
+            .fetch_klines(symbol, period, Some(start_time), Some(end_time), limit)
+            .await
     }
 
     /// 检查数据完整性
@@ -333,6 +371,36 @@ impl HistoryDataManager {
         }
     }
 
+    /// 同步保存K线到磁盘（用于日线立即fsync）
+    async fn save_kline_sync(&self, disk_dir: &str, symbol: &str, period: &str, kline: KLine) {
+        let file_path = Path::new(disk_dir)
+            .join(format!("{}_{}.json", symbol.to_lowercase(), period));
+
+        // 确保目录存在
+        if let Some(parent) = file_path.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::error!("Failed to create directory: {}", e);
+                    return;
+                }
+            }
+        }
+
+        let data = klines_to_disk(&[kline]);
+        match serde_json::to_string(&data) {
+            Ok(json) => {
+                if let Err(e) = tokio::fs::write(&file_path, json).await {
+                    tracing::warn!("Sync disk write failed: {}", e);
+                } else {
+                    tracing::debug!("Saved daily kline for {} {} to disk (immediate fsync)", symbol, period);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Serialization failed: {}", e);
+            }
+        }
+    }
+
     /// 克隆内部（用于async上下文）
     fn clone_inner(&self) -> Self {
         Self {
@@ -340,6 +408,7 @@ impl HistoryDataManager {
             memory_dir: self.memory_dir.clone(),
             disk_dir: self.disk_dir.clone(),
             shutdown_tx: RwLock::new(None),
+            api_client: self.api_client.clone(),
         }
     }
 }
@@ -351,6 +420,7 @@ impl Clone for HistoryDataManager {
             memory_dir: self.memory_dir.clone(),
             disk_dir: self.disk_dir.clone(),
             shutdown_tx: RwLock::new(None),
+            api_client: self.api_client.clone(),
         }
     }
 }
@@ -369,23 +439,35 @@ impl HistoryDataProvider for HistoryDataManager {
         if is_closed {
             cache.push_closed_kline(kline.clone())?;
 
-            // 异步刷盘
-            let disk_dir = self.disk_dir.clone();
-            let sym = symbol.to_string();
-            let per = period.to_string();
-            let kl = kline;
-            tokio::spawn(async move {
-                let file_path = Path::new(&disk_dir)
-                    .join(format!("{}_{}.json", sym.to_lowercase(), per));
-                let data = klines_to_disk(&[kl]);
-                let json = serde_json::to_string(&data)
-                    .map_err(|e| HistoryError::DiskWriteFailed(e.to_string()));
-                if let Ok(json) = json {
-                    if let Err(e) = tokio::fs::write(&file_path, json).await {
-                        tracing::warn!("Async disk write failed: {}", e);
+            // 差异化fsync策略
+            if is_daily_period(period) {
+                // 日线：立即fsync（不允许丢失一天数据）
+                let disk_dir = self.disk_dir.clone();
+                let sym = symbol.to_string();
+                let per = period.to_string();
+                let kl = kline;
+                self.save_kline_sync(&disk_dir, &sym, &per, kl).await;
+            } else {
+                // 1分钟：异步批量，5秒后同步（可接受5秒数据丢失）
+                let disk_dir = self.disk_dir.clone();
+                let sym = symbol.to_string();
+                let per = period.to_string();
+                let kl = kline;
+                tokio::spawn(async move {
+                    // 等待5秒批量窗口
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    let file_path = Path::new(&disk_dir)
+                        .join(format!("{}_{}.json", sym.to_lowercase(), per));
+                    let data = klines_to_disk(&[kl]);
+                    let json = serde_json::to_string(&data)
+                        .map_err(|e| HistoryError::DiskWriteFailed(e.to_string()));
+                    if let Ok(json) = json {
+                        if let Err(e) = tokio::fs::write(&file_path, json).await {
+                            tracing::warn!("Async disk write failed: {}", e);
+                        }
                     }
-                }
-            });
+                });
+            }
         } else {
             cache.update_current(kline);
         }

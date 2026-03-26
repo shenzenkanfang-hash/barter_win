@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use super::types::{DataIssue, HistoryError, HistoryRequest, HistoryResponse, KLine};
+use super::types::{DataIssue, HistoryError, HistoryResponse, KLine};
 
 /// 历史数据提供者接口
 ///
