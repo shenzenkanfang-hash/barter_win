@@ -1,15 +1,17 @@
 //! h_15m/trader.rs - 品种交易主循环
 //!
-//! 提供 run_once() 接口，由外部调度器调用
-//! 不自启动循环，由 TradeManager 统一调度
+//! 自循环运行，从 MarketDataStore 读取数据，生成交易信号
 
 #![forbid(unsafe_code)]
+
+use std::time::Duration;
 
 use b_data_source::{default_store, MarketDataStore};
 use chrono::Utc;
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use tokio::time::sleep;
 
 use crate::types::{MinSignalInput, VolatilityTier};
 use crate::h_15m::{MinSignalGenerator, PinStatusMachine, PinStatus};
@@ -20,6 +22,7 @@ use x_data::trading::signal::{StrategySignal, TradeCommand, StrategyId};
 #[derive(Debug, Clone)]
 pub struct TraderConfig {
     pub symbol: String,
+    pub interval_ms: u64,
     pub max_position: Decimal,
     pub initial_ratio: Decimal,
 }
@@ -28,23 +31,20 @@ impl Default for TraderConfig {
     fn default() -> Self {
         Self {
             symbol: "BTCUSDT".to_string(),
+            interval_ms: 100,
             max_position: dec!(0.15),
             initial_ratio: dec!(0.05),
         }
     }
 }
 
-/// 品种交易器
-///
-/// 被外部调度器（TradeManager）调用 run_once()
-/// 不自启动循环，专注于交易逻辑
+/// 品种交易器（自循环）
 pub struct Trader {
     config: TraderConfig,
     status_machine: RwLock<PinStatusMachine>,
     signal_generator: MinSignalGenerator,
     position: RwLock<Option<LocalPosition>>,
     is_running: RwLock<bool>,
-    last_run_time: RwLock<i64>,
 }
 
 impl Trader {
@@ -55,18 +55,33 @@ impl Trader {
             signal_generator: MinSignalGenerator::new(),
             position: RwLock::new(None),
             is_running: RwLock::new(false),
-            last_run_time: RwLock::new(0),
         }
     }
 
-    /// 检查是否应该运行（可控制运行状态）
+    /// 检查是否运行中
     pub fn is_running(&self) -> bool {
         *self.is_running.read()
     }
 
-    /// 设置运行状态
-    pub fn set_running(&self, running: bool) {
-        *self.is_running.write() = running;
+    /// 启动交易循环（自循环）
+    pub async fn start(&self) {
+        *self.is_running.write() = true;
+        tracing::info!("[Trader {}] Started", self.config.symbol);
+        
+        while *self.is_running.read() {
+            if let Some(signal) = self.run_once_internal() {
+                tracing::info!("[Trader {}] Signal: {:?}", self.config.symbol, signal);
+                // TODO: 发送到 OrderExecutor 执行下单
+            }
+            sleep(Duration::from_millis(self.config.interval_ms)).await;
+        }
+        
+        tracing::info!("[Trader {}] Stopped", self.config.symbol);
+    }
+
+    /// 停止交易
+    pub fn stop(&self) {
+        *self.is_running.write() = false;
     }
 
     /// 从 Store 获取当前K线
@@ -120,11 +135,8 @@ impl Trader {
         }
     }
 
-    /// 执行一次交易逻辑
-    ///
-    /// 由外部调度器（TradeManager）调用
-    /// 返回：Option<StrategySignal> - 有信号时返回，无信号时返回 None
-    pub fn run_once(&self) -> Option<StrategySignal> {
+    /// 执行一次交易逻辑（内部调用）
+    fn run_once_internal(&self) -> Option<StrategySignal> {
         // 1. 获取数据
         let _kline = self.get_current_kline()?;
         let vol_tier = self.volatility_tier();
@@ -148,7 +160,7 @@ impl Trader {
         &self,
         status: &PinStatus,
         signal: &crate::types::MinSignalOutput,
-        price: Decimal,
+        _price: Decimal,
     ) -> Option<StrategySignal> {
         let pos = self.position.read();
         let has_position = pos.as_ref()
