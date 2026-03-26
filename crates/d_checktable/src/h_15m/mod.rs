@@ -23,11 +23,13 @@ pub mod signal;
 pub mod status;
 pub mod quantity_calculator;
 pub mod trader;
+pub mod trader_flow;
 
 pub use signal::MinSignalGenerator;
 pub use status::{PinStatus, PinStatusMachine};
 pub use quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
 pub use trader::{Trader, TraderConfig, TraderHealth};
+pub use trader_flow::TraderFlow;
 
 use crate::types::{CheckChainContext, MinSignalInput, VolatilityTier};
 use x_data::trading::signal::{PositionSide, StrategySignal};

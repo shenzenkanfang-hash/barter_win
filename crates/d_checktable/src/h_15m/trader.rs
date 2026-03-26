@@ -75,7 +75,7 @@ impl Trader {
                 }
             });
 
-        let mut trader = Self {
+        let trader = Self {
             config: RwLock::new(config),
             status_machine: RwLock::new(PinStatusMachine::new()),
             signal_generator: MinSignalGenerator::new(),
@@ -186,6 +186,55 @@ impl Trader {
     /// 停止交易
     pub fn stop(&self) {
         *self.is_running.write() = false;
+    }
+
+    /// 设置运行状态
+    pub fn set_running(&self, running: bool) {
+        *self.is_running.write() = running;
+    }
+
+    /// 生成交易信号（核心逻辑）
+    pub fn generate_signal(&self) -> Option<StrategySignal> {
+        self.run_once_internal()
+    }
+
+    /// 下单后更新状态
+    pub fn update_after_order(&self, signal: &StrategySignal) {
+        // 根据信号更新状态机
+        match signal.command {
+            TradeCommand::Open => {
+                let status = match signal.direction {
+                    PositionSide::Long => PinStatus::LongFirstOpen,
+                    PositionSide::Short => PinStatus::ShortFirstOpen,
+                    _ => PinStatus::Initial,
+                };
+                self.status_machine.write().set_status(status);
+            }
+            TradeCommand::Add => {
+                let status = match signal.direction {
+                    PositionSide::Long => PinStatus::LongDoubleAdd,
+                    PositionSide::Short => PinStatus::ShortDoubleAdd,
+                    _ => PinStatus::Initial,
+                };
+                self.status_machine.write().set_status(status);
+            }
+            TradeCommand::FlatPosition | TradeCommand::FlatAll => {
+                self.status_machine.write().set_status(PinStatus::Initial);
+            }
+            TradeCommand::HedgeOpen => {
+                self.status_machine.write().set_status(PinStatus::HedgeEnter);
+            }
+            TradeCommand::HedgeClose => {
+                self.status_machine.write().set_status(PinStatus::PosLocked);
+            }
+            _ => {}
+        }
+        
+        // 更新配置状态
+        {
+            let mut config = self.config.write();
+            config.status = self.status_machine.read().current_status().as_str().to_string();
+        }
     }
 
     /// 从 Store 获取当前K线
