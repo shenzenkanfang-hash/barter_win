@@ -37,10 +37,12 @@ Status: 待实现
 │       ▼                                                    │
 │  StrategyLoop (Future)                                     │
 │       ├── running_state: RwLock<RunningState>            │
-│       ├── tick_interval: 500ms                            │
-│       ├── trader.tick(market, position)                   │
-│       ├── 有信号 → order_sender.send_order()              │
-│       └── 退出条件: !is_running || max_errors             │
+│       ├── self.loop:                                      │
+│       │   ├── 拉取价格数据 (from DataSource)              │
+│       │   ├── 计算信号                                    │
+│       │   ├── 有信号 → 下单                              │
+│       │   └── sleep(interval) → 继续                     │
+│       └── 退出: stop() 设置 Stopped → 循环检测到退出     │
 └─────────────────────────────────────────────────────────────┘
 
 数据流:
@@ -342,39 +344,72 @@ where
     }
 
     /// 运行自循环
+    ///
+    /// 策略自己拉取数据，不是 tick 驱动
     pub async fn run(mut self) {
         self.start();
         info!("[{}] Strategy loop started", self.symbol);
 
         let mut trader = Trader::new(&self.symbol);
-        let mut tick_interval = interval(Duration::from_millis(self.config.tick_interval_ms));
 
         loop {
-            tokio::select! {
-                // 定时 tick
-                _ = tick_interval.tick() => {
-                    // 检查运行状态
-                    if !self.is_running() {
-                        info!("[{}] Strategy loop exiting (stopped)", self.symbol);
-                        break;
-                    }
+            // 检查运行状态
+            if !self.is_running() {
+                info!("[{}] Strategy loop exiting (stopped)", self.symbol);
+                break;
+            }
 
-                    if let Err(e) = self.tick(&mut trader).await {
-                        self.consecutive_errors += 1;
-                        error!("[{}] Tick error: {}", self.symbol, e);
+            // 1. 拉取价格数据 (策略自己拉取)
+            let market = match self.data_source.get_market_data(&self.symbol).await {
+                Ok(m) => m,
+                Err(e) => {
+                    self.handle_error(&format!("Failed to get market data: {}", e));
+                    self.sleep().await;
+                    continue;
+                }
+            };
 
-                        if self.consecutive_errors >= self.config.max_consecutive_errors {
-                            error!("[{}] Max errors reached, exiting", self.symbol);
-                            break;
-                        }
-                    } else {
-                        self.consecutive_errors = 0;
-                    }
+            // 2. 拉取持仓数据
+            let position = match self.position_source.get_position_data(&self.symbol).await {
+                Ok(p) => p,
+                Err(e) => {
+                    self.handle_error(&format!("Failed to get position data: {}", e));
+                    self.sleep().await;
+                    continue;
+                }
+            };
+
+            // 3. 计算信号
+            if let Some(signal) = trader.tick(market, position) {
+                info!("[{}] Signal: {:?}, sending order...", self.symbol, signal.command);
+
+                // 4. 下单
+                if let Err(e) = self.order_sender.send_order(signal).await {
+                    self.handle_error(&format!("Failed to send order: {}", e));
                 }
             }
+
+            // 5. 等待下一次循环
+            self.sleep().await;
         }
 
         info!("[{}] Strategy loop stopped", self.symbol);
+    }
+
+    /// 等待 interval
+    async fn sleep(&self) {
+        tokio::time::sleep(Duration::from_millis(self.config.tick_interval_ms)).await;
+    }
+
+    /// 处理错误
+    fn handle_error(&mut self, msg: &str) {
+        self.consecutive_errors += 1;
+        error!("[{}] {}", self.symbol, msg);
+
+        if self.consecutive_errors >= self.config.max_consecutive_errors {
+            error!("[{}] Max errors reached, stopping", self.symbol);
+            self.stop();
+        }
     }
 
     /// 单次 tick
