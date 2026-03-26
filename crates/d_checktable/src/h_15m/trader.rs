@@ -65,6 +65,11 @@ impl Trader {
 
     /// 启动交易循环（自循环）
     pub async fn start(&self) {
+        self.execute().await;
+    }
+
+    /// 执行自循环（对外方法）
+    pub async fn execute(&self) {
         *self.is_running.write() = true;
         tracing::info!("[Trader {}] Started", self.config.symbol);
         

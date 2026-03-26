@@ -3,8 +3,10 @@
 //! 提供策略接口定义和调度器。
 
 pub mod executor;
+pub mod trader_manager;
 
 pub use executor::{SignalAggregator, StrategyExecutor};
+pub use trader_manager::{TraderManager, StrategyType, TraderError};
 
 use a_common::models::market_data::VolatilityTier;
 use chrono::{DateTime, Utc};
