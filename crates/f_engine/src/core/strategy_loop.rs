@@ -230,6 +230,7 @@ impl Engine {
                 guard.take()
             };
             if let Some(h) = join_handle {
+                h.abort();
                 let _ = h.await;
             }
             info!(symbol = symbol, "Trader 协程已停止");

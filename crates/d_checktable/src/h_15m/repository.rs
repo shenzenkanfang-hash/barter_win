@@ -213,6 +213,10 @@ impl Repository {
     }
 
     fn row_to_record(row: &rusqlite::Row) -> Result<TradeRecord, RepoError> {
+        // 列顺序断言：与 CREATE TABLE 严格对应，防止静默错误
+        // 0=id,1=symbol,2=timestamp,3=interval_ms,4=status,5=price...
+        debug_assert_eq!(row.as_ref().column_count(), 29, "trade_records 列数应为 29");
+
         Ok(TradeRecord {
             id: Some(row.get(0)?),
             symbol: row.get(1)?,

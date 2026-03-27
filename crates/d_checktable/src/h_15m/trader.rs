@@ -617,10 +617,8 @@ impl Trader {
                     break;
                 }
                 _ = tokio::time::sleep(Duration::from_millis(self.config.interval_ms)) => {
-                    // TODO: 心跳更新 + WAL 执行
-                    // handle.heartbeat();
-                    // self.execute_once_wal().await;
-                    tracing::debug!(symbol = %self.config.symbol, "Trader loop tick");
+                    // WAL 执行：预写→信号→决策→下单→确认
+                    self.execute_once_wal().await;
                 }
             }
         }
