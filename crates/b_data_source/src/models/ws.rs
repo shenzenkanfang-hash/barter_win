@@ -146,6 +146,7 @@ impl MarketStream for MockMarketStream {
             price: new_price,
             qty: Decimal::try_from(qty).ok()?,
             timestamp,
+            sequence_id: *self.tick_count.read(),
             kline_1m: None,
             kline_15m: None,
             kline_1d: None,

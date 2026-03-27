@@ -29,6 +29,7 @@
 //! - Arc<RwLock>: 最小化（DashMap 替代）
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
@@ -85,6 +86,14 @@ impl Default for SandboxConfig {
 // 指标计算（引擎内部，无锁）
 // ============================================================================
 
+/// 最大价格历史窗口
+/// 
+/// 计算所需的最大窗口：
+/// - EMA20 需要 20 个数据点
+/// - RSI14 需要 14 个数据点
+/// - 留 20% 冗余
+const MAX_PRICE_HISTORY: usize = 50;  // 50 * Decimal ≈ 几百字节
+
 #[derive(Debug, Clone)]
 struct Indicators {
     rsi: Option<Decimal>,
@@ -103,7 +112,7 @@ impl Default for Indicators {
             ema5: None,
             ema20: None,
             volatility: Decimal::ZERO,
-            price_history: Vec::new(),
+            price_history: Vec::with_capacity(MAX_PRICE_HISTORY),
             volatility_calc: VolatilityCalc::new(),
             vol_15m: Decimal::ZERO,
         }
@@ -115,9 +124,9 @@ impl Indicators {
     fn update(&mut self, tick: &Tick) {
         let price = tick.price;
 
-        // 1. 添加到价格历史（滚动窗口100）
+        // 1. 添加到价格历史（严格限制窗口大小，防止内存泄漏）
         self.price_history.push(price);
-        if self.price_history.len() > 100 {
+        if self.price_history.len() > MAX_PRICE_HISTORY {
             self.price_history.remove(0);
         }
 
@@ -219,11 +228,20 @@ impl Default for PositionState {
     }
 }
 
+/// 慢 Tick 告警阈值（毫秒）
+const SLOW_TICK_THRESHOLD_MS: u64 = 10;
+
 #[derive(Debug, Default)]
 struct EngineStats {
     total_orders: u32,
     total_trades: u32,
     total_errors: u32,
+    /// 总耗时累计
+    total_duration_ms: u64,
+    /// 慢 Tick 计数
+    slow_tick_count: u32,
+    /// 最大单次处理耗时（毫秒）
+    max_tick_duration_ms: u64,
 }
 
 impl EngineState {
@@ -270,6 +288,8 @@ struct TradingEngine {
     state: EngineState,
     gateway: Arc<ShadowBinanceGateway>,
     risk_checker: Arc<ShadowRiskChecker>,
+    /// 最后处理的序列号（用于幂等性去重）
+    last_processed_seq: u64,
 }
 
 impl TradingEngine {
@@ -283,6 +303,7 @@ impl TradingEngine {
             state: EngineState::new(),
             gateway,
             risk_checker,
+            last_processed_seq: 0,
         }
     }
 
@@ -292,10 +313,23 @@ impl TradingEngine {
     /// - 直接 await，不 spawn
     /// - 每个 Tick 处理完才接收下一个
     /// - 无 sleep，无轮询
+    /// - 幂等性：跳过重复的 Tick
     async fn run(&mut self, mut tick_rx: mpsc::Receiver<Tick>) {
         tracing::info!("[Engine] {} 事件循环启动", self.symbol);
 
         while let Some(tick) = tick_rx.recv().await {
+            // 幂等性检查：跳过重复 Tick
+            if tick.sequence_id <= self.last_processed_seq {
+                tracing::debug!(
+                    symbol = %tick.symbol,
+                    seq = %tick.sequence_id,
+                    last_seq = %self.last_processed_seq,
+                    "[Engine] 跳过重复 Tick"
+                );
+                continue;
+            }
+            self.last_processed_seq = tick.sequence_id;
+            
             // 处理单个 Tick - 串行，无并发
             self.on_tick(tick).await;
         }
@@ -305,34 +339,94 @@ impl TradingEngine {
 
     /// 处理单个 Tick - 完整处理链
     async fn on_tick(&mut self, tick: Tick) {
+        let total_start = Instant::now();
         let symbol = tick.symbol.clone();
 
         // ===== 步骤1: 更新指标（增量计算，O(1)）=====
+        let indicator_start = Instant::now();
         self.state.update_indicators(&tick);
+        let indicator_ms = indicator_start.elapsed().as_millis() as u64;
 
         // ===== 步骤2: 策略决策 =====
+        let decide_start = Instant::now();
         if let Some(decision) = self.decide(&tick) {
+            let decide_ms = decide_start.elapsed().as_millis() as u64;
+            
             // ===== 步骤3: 风控检查 =====
+            let risk_start = Instant::now();
             if let Some(order) = self.check_risk(&decision) {
+                let risk_ms = risk_start.elapsed().as_millis() as u64;
+                
                 // ===== 步骤4: 异步下单（不阻塞循环）=====
+                let submit_start = Instant::now();
                 self.submit_order(order).await;
+                let submit_ms = submit_start.elapsed().as_millis() as u64;
+                
+                tracing::trace!(
+                    symbol = %symbol,
+                    seq = %tick.sequence_id,
+                    indicator_ms = %indicator_ms,
+                    decide_ms = %decide_ms,
+                    risk_ms = %risk_ms,
+                    submit_ms = %submit_ms,
+                    "[Engine] Tick 处理完成"
+                );
             }
         }
 
         // ===== 步骤5: 更新持仓状态（如果成交）=====
         self.update_position_from_trade(&tick);
+        
+        // ===== 统计耗时 =====
+        let total_ms = total_start.elapsed().as_millis() as u64;
+        self.state.stats.total_duration_ms += total_ms;
+        
+        // 更新最大耗时
+        if total_ms > self.state.stats.max_tick_duration_ms {
+            self.state.stats.max_tick_duration_ms = total_ms;
+        }
+        
+        // 慢 Tick 告警
+        if total_ms > SLOW_TICK_THRESHOLD_MS {
+            self.state.stats.slow_tick_count += 1;
+            tracing::warn!(
+                symbol = %symbol,
+                seq = %tick.sequence_id,
+                total_ms = %total_ms,
+                indicator_ms = %indicator_ms,
+                "[Engine] 慢 Tick 告警"
+            );
+        }
     }
 
     /// 策略决策 - EMA 金叉/死叉
     fn decide(&self, tick: &Tick) -> Option<TradingDecision> {
         let symbol = &tick.symbol;
-        let indicators = self.state.get_indicators(symbol)?;
+        let indicators = match self.state.get_indicators(symbol) {
+            Some(ind) => ind,
+            None => {
+                tracing::trace!(symbol = %symbol, tick_ts = %tick.timestamp, "Skip tick: no indicators yet");
+                return None;
+            }
+        };
+        
         let position = self.state.get_position(symbol);
-
         let price = tick.price;
+        
         let (ema5, ema20, rsi) = match (indicators.ema5, indicators.ema20, indicators.rsi) {
             (Some(e5), Some(e20), Some(r)) => (e5, e20, r),
-            _ => return None,
+            (None, _, _) => {
+                tracing::trace!(symbol = %symbol, tick_ts = %tick.timestamp, "Skip tick: EMA5 not ready");
+                return None;
+            }
+            (_, None, _) => {
+                tracing::trace!(symbol = %symbol, tick_ts = %tick.timestamp, "Skip tick: EMA20 not ready");
+                return None;
+            }
+            (_, _, None) => {
+                tracing::trace!(symbol = %symbol, tick_ts = %tick.timestamp, "Skip tick: RSI not ready");
+                return None;
+            }
         };
 
         // 无持仓 -> 检查买入条件
@@ -368,7 +462,12 @@ impl TradingEngine {
         let account = match self.gateway.get_account() {
             Ok(acc) => acc,
             Err(e) => {
-                tracing::warn!("[Risk] 获取账户失败: {:?}", e);
+                tracing::warn!(
+                    symbol = %decision.symbol,
+                    action = ?decision.action,
+                    error = %e,
+                    "[Risk] 获取账户失败，跳过该决策"
+                );
                 return None;
             }
         };
@@ -377,8 +476,7 @@ impl TradingEngine {
             symbol: decision.symbol.clone(),
             side: match decision.action {
                 TradingAction::Long => Side::Buy,
-                TradingAction::Flat => Side::Sell,
-                TradingAction::Short => Side::Sell,
+                TradingAction::Flat | TradingAction::Short => Side::Sell,
             },
             order_type: OrderType::Market,
             qty: decision.qty,
@@ -387,7 +485,12 @@ impl TradingEngine {
 
         let risk_result = self.risk_checker.pre_check(&order, &account);
         if risk_result.pre_failed() {
-            tracing::warn!("[Risk] 风控拦截: {:?}", risk_result);
+            tracing::warn!(
+                symbol = %order.symbol,
+                qty = %order.qty,
+                reason = ?risk_result,
+                "[Risk] 风控拦截，跳过下单"
+            );
             return None;
         }
 
@@ -398,6 +501,7 @@ impl TradingEngine {
     async fn submit_order(&mut self, order: OrderRequest) {
         let symbol = order.symbol.clone();
         let side = order.side;
+        let qty = order.qty;
 
         match self.gateway.place_order(order) {
             Ok(result) => {
@@ -405,12 +509,24 @@ impl TradingEngine {
                 if side == Side::Buy {
                     self.state.stats.total_trades += 1;
                 }
-                tracing::info!("[Order] {} {:?} 成功: qty={}", 
-                    symbol, side, result.filled_qty);
+                tracing::info!(
+                    symbol = %symbol,
+                    side = ?side,
+                    qty = %result.filled_qty,
+                    price = %result.filled_price,
+                    order_id = %result.order_id,
+                    "[Order] 下单成功"
+                );
             }
             Err(e) => {
                 self.state.stats.total_errors += 1;
-                tracing::warn!("[Order] {} {:?} 失败: {:?}", symbol, side, e);
+                tracing::error!(
+                    symbol = %symbol,
+                    side = ?side,
+                    qty = %qty,
+                    error = %e,
+                    "[Order] 下单失败"
+                );
             }
         }
     }
@@ -594,6 +710,7 @@ async fn main() -> Result<()> {
                     price: tick_data.price,
                     qty: tick_data.qty,
                     timestamp: tick_data.timestamp,
+                    sequence_id: tick_data.sequence_id,
                     kline_1m: Some(KLine {
                         symbol: tick_data.symbol.clone(),
                         period: Period::Minute(1),

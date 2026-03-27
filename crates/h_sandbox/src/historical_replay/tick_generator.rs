@@ -43,6 +43,8 @@ pub struct SimulatedTick {
     pub qty: Decimal,
     /// 时间戳
     pub timestamp: DateTime<Utc>,
+    /// 序列号（用于幂等性去重）
+    pub sequence_id: u64,
     /// 所属 1m K线开盘价
     pub open: Decimal,
     /// 累积最高价
@@ -93,6 +95,8 @@ pub struct StreamTickGenerator {
     noise: GaussianNoise,
     /// 固定 qty（可配置）
     qty: Decimal,
+    /// 全局序列号（用于幂等性去重）
+    sequence_counter: u64,
 }
 
 impl StreamTickGenerator {
@@ -107,6 +111,7 @@ impl StreamTickGenerator {
             state: GeneratorState::Waiting,
             noise: GaussianNoise::new(),
             qty: dec!(0.01), // 默认固定数量
+            sequence_counter: 0,
         }
     }
 
@@ -345,12 +350,14 @@ impl Iterator for StreamTickGenerator {
                     let is_last_in_kline = *tick_index + 1 >= TICKS_PER_1M;
 
                     *tick_index += 1;
+                    self.sequence_counter += 1;
 
                     return Some(SimulatedTick {
                         symbol: self.symbol.clone(),
                         price,
                         qty: self.qty,
                         timestamp: tick_ts,
+                        sequence_id: self.sequence_counter,
                         open: kline.open,
                         high: *accumulated_high,
                         low: *accumulated_low,

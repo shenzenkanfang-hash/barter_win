@@ -14,6 +14,8 @@ pub struct Tick {
     pub price: Decimal,
     pub qty: Decimal,
     pub timestamp: DateTime<Utc>,
+    /// 序列号（用于幂等性去重）
+    pub sequence_id: u64,
     /// 当前 1m K线（增量更新中）
     pub kline_1m: Option<KLine>,
     /// 15m K线（每15根1m K线合成）

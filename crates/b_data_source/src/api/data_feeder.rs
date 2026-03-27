@@ -104,6 +104,8 @@ impl DataFeeder {
     }
 
     /// 广播 Tick 给所有订阅者（内部使用）
+    ///
+    /// 使用 try_send 非阻塞发送，避免慢订阅者阻塞整个数据层
     fn broadcast_to_subscribers(&self, tick: &Tick, subscribers: &[Subscriber]) {
         let symbol_upper = tick.symbol.to_uppercase();
         
@@ -112,10 +114,27 @@ impl DataFeeder {
         
         for subscriber in subscribers.iter() {
             if subscriber.symbol == symbol_upper {
-                // 尝试发送，不阻塞
-                if subscriber.tx.try_send(tick.clone()).is_err() {
-                    // channel 已关闭，标记移除
-                    to_remove.push(subscriber.symbol.clone());
+                // 尝试发送，非阻塞
+                match subscriber.tx.try_send(tick.clone()) {
+                    Ok(()) => {
+                        // 发送成功
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        // 慢订阅者告警：channel 满了，丢旧 Tick
+                        tracing::warn!(
+                            symbol = %symbol_upper,
+                            tick_ts = %tick.timestamp,
+                            "[Broadcast] 慢订阅者 channel 已满，丢弃 Tick"
+                        );
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        // 订阅者已关闭，标记移除
+                        tracing::debug!(
+                            symbol = %symbol_upper,
+                            "[Broadcast] 订阅者已关闭，清理"
+                        );
+                        to_remove.push(subscriber.symbol.clone());
+                    }
                 }
             }
         }

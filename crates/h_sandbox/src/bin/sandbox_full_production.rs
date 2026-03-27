@@ -273,6 +273,7 @@ async fn start_data_replay(
             price: tick_result.price,
             qty: tick_result.qty,
             timestamp: tick_result.timestamp,
+            sequence_id: tick_result.sequence_id,
             kline_1m: None,
             kline_15m: None,
             kline_1d: None,
