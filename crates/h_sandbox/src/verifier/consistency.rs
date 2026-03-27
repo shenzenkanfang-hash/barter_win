@@ -323,11 +323,11 @@ impl ConsistencyChecker {
 
         let by_type: HashMap<CheckType, (usize, usize)> = history.iter()
             .fold(HashMap::new(), |mut acc, r| {
-                let entry = acc.entry(r.check_type).or_insert((0, 0));
+                let counter = acc.entry(r.check_type).or_insert((0, 0));
                 if r.passed {
-                    entry.0 += 1;
+                    counter.0 += 1;
                 } else {
-                    entry.1 += 1;
+                    counter.1 += 1;
                 }
                 acc
             });

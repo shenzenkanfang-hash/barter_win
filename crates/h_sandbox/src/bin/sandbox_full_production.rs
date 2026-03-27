@@ -21,7 +21,7 @@ use tokio::sync::Notify;
 use tracing::{info, error};
 use tracing_subscriber::fmt;
 
-use b_data_source::{DataFeeder, KLine, history::HistoryApiClient, Period, MarketDataStoreImpl, default_store};
+use b_data_source::{DataFeeder, KLine, history::HistoryApiClient, Period, MarketDataStoreImpl, MarketDataStore, default_store};
 use b_data_source::ws::kline_1m::ws::KlineData;
 use d_checktable::h_15m::{Trader, TraderConfig, Executor, Repository};
 use f_engine::strategy::TraderManager;
@@ -292,11 +292,11 @@ async fn start_data_replay(
             high: tick_result.price.to_string(),
             low: tick_result.price.to_string(),
             volume: tick_result.qty.to_string(),
-            is_closed: true,  // 每个 tick 都作为闭合的 K 线写入
+            is_closed: true,
         };
 
-        // 写入真实 Store（触发 VolatilityManager 计算！）
-        store.write_kline(&symbol, kline_data, true);
+        // 通过 trait 方法调用
+        store.as_ref().write_kline(&symbol, kline_data, true);
     }
 
     info!(symbol = %symbol, "[Data] 数据回放完成，已写入 Store");

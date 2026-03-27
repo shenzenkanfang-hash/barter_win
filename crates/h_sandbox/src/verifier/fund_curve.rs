@@ -6,6 +6,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::str::FromStr;
 use chrono::{DateTime, Utc};
 
 /// 成交事件
@@ -203,7 +204,7 @@ impl FundCurveValidator {
 
     /// 处理成交事件（独立计算）
     pub fn process_fill(&mut self, fill: FillEvent) -> FundSnapshot {
-        let price = fill.price.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+        let price = Decimal::from_str(&fill.price).unwrap_or(Decimal::ZERO);
 
         // 独立计算更新持仓
         match fill.side {
@@ -313,7 +314,7 @@ impl FundCurveValidator {
                 FillSide::Sell => {
                     // 匹配最近的买入
                     if let Some(buy) = buy_queue.pop() {
-                        let sell_price = fill.price.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+                        let sell_price = Decimal::from_str(&fill.price).unwrap_or(Decimal::ZERO);
                         let buy_price = buy.price.parse::<Decimal>().unwrap_or(Decimal::ZERO);
                         let pnl = (sell_price - buy_price) * fill.qty - fill.fee - buy.fee;
 

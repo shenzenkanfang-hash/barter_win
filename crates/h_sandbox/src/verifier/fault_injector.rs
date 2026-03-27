@@ -140,8 +140,8 @@ pub struct FaultInjector {
     last_fault_time: AtomicU64,
     /// 故障持续结束时间
     fault_end_time: AtomicU64,
-    /// 随机数生成器（需要 Mutex 保护）
-    rng: RwLock<rand::rngs::StdRng>,
+    /// 随机数生成器
+    rng: RwLock<rand::ThreadRng>,
 }
 
 impl FaultInjector {
@@ -153,7 +153,7 @@ impl FaultInjector {
             events: RwLock::new(Vec::new()),
             last_fault_time: AtomicU64::new(0),
             fault_end_time: AtomicU64::new(0),
-            rng: RwLock::new(rand::rngs::StdRng::from_entropy()),
+            rng: RwLock::new(rand::thread_rng()),
         }
     }
 
@@ -175,7 +175,6 @@ impl FaultInjector {
         // 检查持续时间
         let end_time = self.fault_end_time.load(Ordering::Relaxed);
         if end_time > 0 && now > end_time {
-            // 故障持续时间已过
             return false;
         }
 
@@ -187,8 +186,8 @@ impl FaultInjector {
 
         // 随机检查
         let mut rng = self.rng.write();
-        let random_value: f64 = rng.gen();
-        let threshold = config.param / 100.0;  // param 作为概率
+        let random_value: f64 = rng.sample(rand::distributions::Standard);
+        let threshold = config.param / 100.0;
 
         random_value < threshold
     }
@@ -200,7 +199,7 @@ impl FaultInjector {
 
         let delay_ms = if config.random {
             let base = config.param as u64;
-            let jitter = rng.gen_range(0..base/2);
+            let jitter: u64 = rng.gen_range(0..base/2);
             base + jitter
         } else {
             config.param as u64
@@ -217,7 +216,8 @@ impl FaultInjector {
         }
 
         let mut rng = self.rng.write();
-        rng.gen::<f64>() < config.param
+        let val: f64 = rng.sample(rand::distributions::Standard);
+        val < config.param
     }
 
     /// 注入数据损坏（返回是否损坏）
@@ -228,21 +228,19 @@ impl FaultInjector {
         }
 
         let mut rng = self.rng.write();
-        rng.gen::<f64>() < config.param
+        let val: f64 = rng.sample(rand::distributions::Standard);
+        val < config.param
     }
 
     /// 损坏数据
-    pub fn corrupt_price(&self, price: Decimal) -> Option<Decimal> {
+    pub fn corrupt_price(&self, _price: Decimal) -> Option<Decimal> {
         if self.should_corrupt_data() {
-            let config = self.config.read();
             let mut rng = self.rng.write();
-
-            // 随机损坏：设置为 0、负数、或极大值
-            let corrupt_type = rng.gen_range(0..3);
+            let corrupt_type: u32 = rng.gen_range(0..3);
             match corrupt_type {
-                0 => Some(Decimal::ZERO),  // 价格为 0
-                1 => Some(dec!(-1)),       // 负价格
-                _ => Some(dec!(1e18)),     // 极大值
+                0 => Some(Decimal::ZERO),
+                1 => Some(dec!(-1)),
+                _ => Some(dec!(1e18)),
             }
         } else {
             None
@@ -256,12 +254,12 @@ impl FaultInjector {
             return requested_qty;
         }
 
-        let fill_rate = config.param;  // 成交率
+        let fill_rate = config.param;
         let mut rng = self.rng.write();
 
-        // 根据成交率计算实际成交数量
         let actual_rate = if config.random {
-            rng.gen_range(fill_rate * 0.5..fill_rate * 1.5).min(1.0).max(0.0)
+            let r: f64 = rng.sample(rand::distributions::Standard);
+            (fill_rate * 0.5 + r * fill_rate * 0.5).min(1.0).max(0.0)
         } else {
             fill_rate
         };
@@ -284,11 +282,9 @@ impl FaultInjector {
         let gap_percent = config.param / 100.0;
         let mut rng = self.rng.write();
 
-        // 随机方向
-        let direction = if rng.gen::<bool>() { 1.0 } else { -1.0 };
+        let direction: f64 = if rng.sample(rand::distributions::Standard) { 1.0 } else { -1.0 };
         let gap = current_price * Decimal::from_f64_retain(gap_percent * direction).unwrap_or(dec!(0));
 
-        // 设置故障持续时间
         if config.duration_secs > 0 {
             let end_time = Utc::now().timestamp() as u64 + config.duration_secs;
             self.fault_end_time.store(end_time, Ordering::Relaxed);
@@ -308,7 +304,8 @@ impl FaultInjector {
         }
 
         let mut rng = self.rng.write();
-        rng.gen::<f64>() < config.param
+        let val: f64 = rng.sample(rand::distributions::Standard);
+        val < config.param
     }
 
     /// 记录故障事件
@@ -371,25 +368,25 @@ pub struct FaultScenarios;
 impl FaultScenarios {
     /// 高延迟场景
     pub fn high_latency() -> FaultConfig {
-        FaultConfig::network_delay(1000.0)  // 1秒延迟
+        FaultConfig::network_delay(1000.0)
     }
 
     /// 随机丢包场景
     pub fn random_packet_loss() -> FaultConfig {
-        FaultConfig::data_drop(0.05)  // 5% 丢包
+        FaultConfig::data_drop(0.05)
     }
 
     /// 部分成交场景
     pub fn partial_fill_scenario() -> FaultConfig {
-        FaultConfig::partial_fill(0.5)  // 50% 成交
+        FaultConfig::partial_fill(0.5)
     }
 
     /// 价格跳空场景
     pub fn price_gap_scenario() -> FaultConfig {
-        FaultConfig::price_gap(10.0)  // 10% 跳空
+        FaultConfig::price_gap(10.0)
     }
 
-    /// 组合故障：延迟 + 丢包
+    /// 组合故障
     pub fn combined_latency_and_loss() -> Vec<FaultConfig> {
         vec![
             FaultConfig::network_delay(500.0),
@@ -407,7 +404,6 @@ mod tests {
         let config = FaultConfig::network_delay(100.0);
         let injector = FaultInjector::new(config);
 
-        // 启用故障
         injector.update_config(FaultConfig {
             enabled: true,
             fault_type: FaultType::NetworkDelay,
@@ -427,7 +423,6 @@ mod tests {
         let injector = FaultInjector::new(config);
 
         let actual = injector.calculate_actual_qty(dec!(1.0));
-        // 应该大约是 0.5，可能有一些随机波动
         assert!(actual > Decimal::ZERO);
         assert!(actual <= dec!(1.0));
     }

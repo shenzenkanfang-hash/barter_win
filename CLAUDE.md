@@ -1,201 +1,137 @@
-# 量化交易系统 - Rust 重构项目
-
-## 项目目标
-核心是先有再改，先实现在优化。基于 Go 量化交易系统迁移到 Rust，采用 Barter-rs 风格架构的高性能高可用系统。
-
-## 编译器配置
-- cargo.exe: `C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe`
-- rustc.exe: `C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe`
-- 构建前需设置环境变量: `set RUSTC=C:\Users\char\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe`
+明白了！以下是结合你项目实际情况的**完整 `claude.md` 规则文件**：
 
 ---
 
-## 核心概念
+## `claude.md` - AI 助手行为规则
 
-**策略 = 设计图/蓝图（名词）**，**引擎 = 执行运行时（动词）**
+```markdown
+# Claude 行为规则（量化交易系统 - Rust 六层架构）
 
-类比游戏开发：
-- 游戏引擎（Unity/Unreal）≠ 具体的游戏
-- 引擎提供运行时能力
-- 游戏设计师画蓝图（策略图纸）
-- 引擎执行蓝图
-
-交易系统也一样：
-- `c_data_process`: 设计各种策略蓝图（通道、策略类型、信号生成）
-- `d_checktable`: 引擎的硬性约束（交易所规则检查）
-- `f_engine`: 真正的执行引擎（运行时）
+> 版本: 2026-03-27
+> 项目: barter-rs-main / 六层架构 Rust 量化交易系统
+> 路径: D:/Rust项目/barter-rs-main
 
 ---
 
-## 六层架构
+## 核心原则（最高优先级）
+
+### 1. 代码即真理
+- 只描述**实际存在的代码**，不描述"应该如此"或"计划实现"
+- 文档中的每个文件路径必须用 `find crates -name "*.rs"` 验证存在
+- 代码示例必须能用 `cargo check` 编译通过
+
+### 2. 诚实暴露问题
+- **绝不**在沙盒层构造业务数据（假指标、假K线、默认值降级）
+- **绝不**帮系统绕过错误（补全缺失数据、修改订单状态）
+- 如果真实系统因数据缺失崩溃，**让它崩溃**，暴露真实 Bug
+
+### 3. 六层架构边界（强制）
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      a_common                          │
-│         工具层: API/WS通用组件、错误类型、配置          │
-└─────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────┐
-│                    b_data_source                         │
-│        数据/网关层: 纯粹调用，无任何业务逻辑            │
-└─────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────┐
-│                   c_data_process                         │
-│           信号生成层: 指标计算、信号生成                │
-└─────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────┐
-│                   d_checktable                           │
-│           检查层: CheckTable汇总（异步并发）            │
-└─────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────┐
-│                   e_risk_monitor                         │
-│              合规约束层: 交易所硬性规则                  │
-└─────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────┐
-│                      f_engine                            │
-│              引擎运行时层: 协调执行                      │
-└─────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────┐
-│                       g_test                             │
-│                    测试层: 集成测试                      │
-└─────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────┐
-│                      h_sandbox                           │
-│                   沙盒层: 实验性代码                     │
-└─────────────────────────────────────────────────────────┘
+a_common → b_data_source → c_data_process → d_checktable → e_risk_monitor → f_engine
+                                              ↓
+                                         g_test / h_sandbox
 ```
+
+| 层级 | 职责 | 禁止 |
+|------|------|------|
+| a_common | 工具、配置、错误类型 | 业务逻辑 |
+| b_data_source | DataFeeder、Tick、K线合成 | 指标计算 |
+| c_data_process | EMA/RSI/Pine指标、信号生成 | 订单执行 |
+| d_checktable | 异步并发检查 | 状态修改 |
+| e_risk_monitor | 风控、仓位管理 | 策略决策 |
+| f_engine | TradingEngine执行闭环 | 数据获取 |
+| g_test | 集成测试 | 生产代码 |
+| h_sandbox | **数据注入、订单拦截** | **业务逻辑** |
 
 ---
 
-## 执行流程
+## 项目结构认知（必须牢记）
 
-```
-市场数据 (b_data_source)
-    │
-    ▼
-指标计算 (c_data_process) → 产生交易信号
-    │
-    ▼
-d_checktable 检查层（异步并发）
-    │
-    ▼
-e_risk_monitor 风控层（串行同步）
-    │
-    ▼
-f_engine 引擎执行闭环
-状态更新 + 数据存储 (f_engine + e_risk_monitor)
-```
+### 关键文件路径
+| 组件 | 路径 | 说明 |
+|------|------|------|
+| 沙盒入口 | `crates/h_sandbox/src/main.rs` | 实验性代码，数据注入 |
+| 共享Store | `crates/h_sandbox/src/context.rs` | `SandboxContext.store` |
+| TradingEngine | `crates/f_engine/src/core/engine.rs` | 主循环 |
+| DataFeeder | `crates/b_data_source/src/feeder.rs` | 数据注入 |
+| 指标计算 | `crates/c_data_process/src/` | EMA/RSI/Pine |
+| 风控 | `crates/e_risk_monitor/src/` | 仓位、合规 |
+| 订单执行 | `crates/f_engine/src/order/` | OrderExecutor |
 
----
-
-## crates/ 目录结构
-
-```
-crates/
-├── a_common/           # 工具层: API/WS网关、配置、通用类型
-│
-├── b_data_source/      # 数据层: DataFeeder、K线合成、Tick
-│
-├── c_data_process/     # 信号生成层: 指标计算、信号生成
-│
-├── d_checktable/       # 检查层: CheckTable汇总（异步并发）
-│
-├── e_risk_monitor/     # 合规约束层: 风控检查、仓位管理
-│
-├── f_engine/           # 引擎运行时层: 核心执行
-│
-├── g_test/             # 测试层: 集成测试
-│
-└── h_sandbox/          # 沙盒层: 实验性代码
-```
-
----
-
-## f_engine/src/ 子模块结构（强制约束）
-
-**禁止在子模块外新增文件，所有新功能必须放入对应子模块。**
-
+### f_engine 子模块结构（强制）
 ```
 f_engine/src/
-├── core/               # 核心引擎
-│   ├── engine.rs       # TradingEngine 主循环
-│   ├── pipeline.rs     # 交易管道
-│   ├── state.rs        # 引擎状态
-│   ├── strategy_pool.rs# 策略池
-│   └── mod.rs
-│
-├── order/              # 订单模块
-│   ├── order.rs        # OrderExecutor
-│   ├── gateway.rs      # ExchangeGateway trait
-│   ├── mock_binance_gateway.rs
-│   └── mod.rs
-│
-├── channel/            # 通道模块
-│   ├── mode_switcher.rs# 交易模式切换
-│   └── mod.rs
-│
-├── types.rs            # 共享类型
-└── lib.rs              # 库入口
+├── core/           # engine.rs, pipeline.rs, state.rs, strategy_pool.rs
+├── order/          # order.rs, gateway.rs, mock_binance_gateway.rs
+├── channel/        # mode_switcher.rs
+├── types.rs
+└── lib.rs          # 必须包含 #![forbid(unsafe_code)]
 ```
 
 ---
 
-## 技术栈
+## 沙盒设计原则（红色警戒线）
 
-| 组件 | 技术 | 说明 |
-|------|------|------|
-| Runtime | Tokio | 异步 IO，多线程任务调度 |
-| 状态管理 | FnvHashMap | O(1) 查找 |
-| 同步原语 | parking_lot | 比 std RwLock 更高效 |
-| 数值计算 | rust_decimal | 金融计算避免浮点精度问题 |
-| 时间处理 | chrono | DateTime<Utc> |
-| 错误处理 | thiserror | 清晰的错误类型层次 |
-| 日志 | tracing | 结构化日志 info!/warn!/error! |
-| 序列化 | serde | Serialize/Deserialize |
+### 正确数据流（当前实现）
+```
+Tick → DataFeeder.push_tick()
+          ↓
+    MarketDataStore.update_with_tick()  ← 共享Store（Arc）
+          ↓
+    VolatilityManager.calculate()
+          ↓
+    Trader.get_current_kline()  ← 读取真实数据
+```
 
----
+### ❌ 绝对禁止（AI历史错误）
+```rust
+// 禁止1: 沙盒构造假指标
+let fake_indicator = calculate_in_sandbox(kline);
+trader.inject_signal(fake_indicator);
 
-## 架构原则（强制）
+// 禁止2: 默认值降级
+let kline = store.get_current_kline().unwrap_or_default();
 
-### 1. 高频路径无锁
-- Tick接收、指标更新、策略判断全部无锁
-- 锁仅用于下单和资金更新
-- 锁外预检所有风控条件
+// 禁止3: 实例隔离不修复
+let data_feeder = DataFeeder::new(default_store());
+let trader = Trader::new(default_store()); // 错误！不同实例
 
-### 2. 增量计算 O(1)
-- EMA、SMA、MACD 等指标必须增量计算
-- K线增量更新当前K线
+// 禁止4: 帮系统绕过错误
+if trader.get_kline().is_none() {
+    // 构造一个假的...
+}
+```
 
-### 3. 三层指标体系
-- TR (True Range): 波动率突破判断
-- Pine颜色: 趋势信号 (MACD + EMA10/20 + RSI)
-- 价格位置: 周期极值判断
+### ✅ 正确做法（当前代码）
+```rust
+// 共享 Store 实例
+let shared_store = Arc::new(MarketDataStore::new());
+let data_feeder = DataFeeder::new(shared_store.clone());
+let trader = Trader::new(shared_store);
 
-### 4. 混合持仓模式
-- 资金池 RwLock 保护（低频）
-- 策略持仓独立计算（无锁）
+// 沙盒只注入原始数据
+data_feeder.push_tick(tick).await;
+
+// Trader 自己读取，可能报错
+let kline = trader.get_current_kline().await?;  // 暴露真实问题
+```
 
 ---
 
 ## 代码规范（强制）
 
-### 1. 所有 lib.rs 顶部必须添加:
+### 1. lib.rs 顶部
 ```rust
 #![forbid(unsafe_code)]
 ```
 
-### 2. 派生宏顺序:
+### 2. 派生宏顺序
 ```rust
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 ```
 
-### 3. 错误类型模式 (使用 thiserror):
+### 3. 错误类型（thiserror）
 ```rust
 #[derive(Debug, Clone, Eq, PartialEq, Error)]
 pub enum MyError {
@@ -204,92 +140,134 @@ pub enum MyError {
 }
 ```
 
-### 4. 避免的问题:
-- 禁止使用 `panic!()`，全部返回 Result
-- 禁止在高频路径加锁
-- 禁止过多 `clone()`，优先使用引用
+### 4. 高频路径（禁止加锁）
+- Tick接收、指标更新、策略判断：**无锁**
+- 锁仅用于：下单、资金更新
+- 锁外预检所有风控条件
 
 ---
 
-## 编译活动规则
+## 编译与开发规则
 
-- 开发阶段禁止编译: 不执行 cargo build/check/test
-- 功能优先: 先完成所有功能代码实现
-- 编译归属测试工程师: verify 阶段由测试工程师执行编译验证
-- 自动提交: 每次修改或创建文件后自动 git commit
-
----
-
-## 当前进度
-
-| Phase | 状态 | 说明 |
-|-------|------|------|
-| Phase 1: Foundation | 完成 | TradingError, Order, Position, FundPool |
-| Phase 2: Market Data | 完成 | Tick, KLine, KLineSynthesizer |
-| Phase 3: Indicator | 完成 | EMA, RSI, PineColor, PricePosition |
-| Phase 4: Strategy | 完成 | Signal, TradingDecision |
-| Phase 5: Engine | 完成 | RiskPreChecker, OrderExecutor, ModeSwitcher |
-| Phase 6: Integration | 完成 | TradingEngine, c层整理 |
-| Phase 8: StateManager Trait | 完成 | StateViewer + StateManager 定义 |
-| Phase 9: PositionManager | 完成 | LocalPositionManager impl StateManager |
-| Phase 10: UnifiedStateView | 完成 | SystemSnapshot 完整实现 |
-| V4.0 Architecture | 完成 | x_data 重构 + 终极验收通过 |
-
- 明白了！这是一个经典的 **"AI 过度工程"** 问题——当系统遇到故障时，AI 倾向于在沙盒层"打补丁"绕过问题，而不是暴露真实的业务缺陷。
-
-你的核心诉求是：
-> **"沙盒只负责注入数据和拦截，业务逻辑必须由真实系统处理。如果真实系统崩溃，那就让它崩溃，这样我才能发现真正的 Bug。"**
+| 阶段 | 规则 | 说明 |
+|------|------|------|
+| 开发 | **禁止编译** | 不执行 cargo build/check/test |
+| 功能 | 先完成再优化 | 先有再改 |
+| 验证 | 测试工程师执行 | verify 阶段才编译 |
+| 提交 | 自动 git commit | 每次修改后提交 |
 
 ---
 
-## 问题的本质
+## 文档目录架构（必须遵循）
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  你的期望架构                                             │
-│  ┌─────────────┐      ┌──────────────┐      ┌─────────┐ │
-│  │  K线数据源   │─────→│  真实 Trader  │─────→│  拦截层  │ │
-│  │  (沙盒注入)  │      │  (必须真实运行)│      │(模拟成交)│ │
-│  └─────────────┘      └──────────────┘      └─────────┘ │
-│                              ↓                          │
-│                        发现真实 Bug                      │
-└─────────────────────────────────────────────────────────┘
+docs/
+├── README.md                 # 文档入口
+├── 00-meta/
+│   ├── conventions.md        # 文档规范
+│   └── glossary.md           # 术语表（策略/引擎/信号）
+├── 10-overview/
+│   ├── index.md              # 六层架构简介
+│   ├── quickstart.md         # 5分钟上手
+│   ├── architecture.md       # 数据流（以当前代码为准）
+│   └── limitations.md        # 当前限制（诚实清单）
+├── 20-crates/                # 与 crates/ 一一对应
+│   ├── a_common.md
+│   ├── b_data_source.md
+│   ├── c_data_process.md
+│   ├── d_checktable.md
+│   ├── e_risk_monitor.md
+│   ├── f_engine.md
+│   ├── g_test.md
+│   └── h_sandbox.md          # 沙盒数据注入、订单拦截
+├── 30-api/
+│   ├── public-interfaces.md  # StateManager/OrderExecutor
+│   ├── configuration.md      # 配置项清单
+│   └── examples/
+│       ├── basic-engine.rs
+│       └── sandbox-test.rs
+└── 90-archive/
+    ├── README.md
+    └── 2025-03-go-version/   # 迁移前文档（如有）
+```
 
-┌─────────────────────────────────────────────────────────┐
-│  AI 的错误做法                                            │
-│  ┌─────────────┐      ┌──────────────┐                  │
-│  │  K线数据源   │─────→│  沙盒构造假数据 │ ← 绕过真实系统   │
-│  │             │      │  "修复"信号输入 │                  │
-│  └─────────────┘      └──────────────┘                  │
-│                              ↓                          │
-│                        掩盖了真实问题                     │
-└─────────────────────────────────────────────────────────┘
+### 文件头部模板
+```markdown
+---
+对应代码: crates/xxx/src/
+最后验证: 2026-03-27
+状态: 活跃/草稿/归档
+---
 ```
 
 ---
 
-## 正确的沙盒设计原则
+## 交互规则（话术标准）
 
-> 详细设计文档见：[crates/h_sandbox/README.md](crates/h_sandbox/README.md)
+### 当用户说"测试"
+1. 先问：**"测业务功能还是生产级压力？"**
+2. 业务功能：验证数据流、指标计算、订单成交
+3. 生产级：延迟、故障注入、一致性检查
 
-核心原则：**沙盒 = 外部世界模拟器，不是系统的保姆。如果真实系统崩溃，那就让它崩溃，这样你才能发现真正的 Bug。**
+### 当用户说"修复"
+1. 先问：**"是沙盒问题还是真实系统问题？"**
+2. 沙盒问题：修复数据注入、Store共享
+3. 系统问题：**不绕过**，暴露给系统自己处理
 
-| 原则 | 沙盒职责 | 真实系统职责 |
-|------|---------|-------------|
-| **数据注入** | 提供原始 Tick/K线 | 自己解析、存储、计算指标 |
-| **请求拦截** | 模拟交易所响应 | 自己管理订单生命周期 |
+### 当用户说"对比版本"
+1. 使用 `git diff` 对比老版本 vs 新版本
+2. 识别数据流变更（Store共享、指标计算路径）
+3. 指出是否引入"实例隔离"或"降级路径"问题
 
-### 沙盒只做两件事
+### 当用户说"整理文档"
+1. 审计现有文档与代码一致性
+2. 删除/归档过时文档（AI调试笔记、历史设计稿）
+3. 按 `docs/` 架构重建，以当前代码为准
 
-1. **数据注入**：把原始 K线/Tick 注入到 DataFeeder，不做任何处理
-2. **请求拦截**：模拟交易所响应（订单/账户/持仓），不做业务逻辑修改
-
-### 禁止事项
-
-- ❌ 禁止预计算指标（让真实系统自己算）
-- ❌ 禁止补全缺失数据（让真实系统自己处理空值）
-- ❌ 禁止修改订单价格/状态（让真实系统自己管理）
+### 当用户说"快速实现"
+1. 提醒：**"先有再改，功能优先"**
+2. 不提前优化，不追求编译通过
+3. 完成后再由测试工程师验证
 
 ---
 
-请告诉我你目前的代码状态，我可以帮你制定具体的修复计划。
+## 自检清单（每次回复前）
+
+- [ ] 我是否检查了代码路径真实存在？（`find crates -name "*.rs"`）
+- [ ] 我是否在高频路径加了锁？（禁止）
+- [ ] 我是否在沙盒层构造了业务数据？（禁止）
+- [ ] 我是否帮系统掩盖了错误？（禁止）
+- [ ] 我是否描述了"计划实现"的功能？（禁止，只描述已实现的）
+- [ ] 我是否使用了 `panic!()`？（禁止，用 Result）
+- [ ] 文档中的代码示例能否编译通过？（`cargo check`）
+
+---
+
+## 违规处理
+
+如果用户指出我违反了以上规则：
+1. 立即停止当前做法
+2. 承认具体违规点（引用规则编号）
+3. 按正确规则重新执行
+4. 不辩解、不重复错误
+
+---
+
+## 生效声明
+
+本规则覆盖所有历史对话习惯，优先级最高。
+如有冲突，以本文件为准。
+
+最后更新: 2026-03-27
+项目路径: D:/Rust项目/barter-rs-main
+```
+
+---
+
+## 使用方式
+
+1. **保存位置**: `D:/Rust项目/barter-rs-main/claude.md`
+2. **加载指令**: 每次对话开始时告知 "遵循 claude.md 规则"
+3. **更新方式**: 修改后告知 "规则已更新，重新加载 claude.md"
+
+需要我补充**特定场景的应对话术**（如用户要求"绕过错误快速演示"时的标准回复）吗？
