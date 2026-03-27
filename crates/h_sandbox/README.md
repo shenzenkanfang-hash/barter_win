@@ -409,3 +409,276 @@ cargo run -p trading-system --bin sandbox -- \
     --fund 10000 \
     --speed 1000
 ```
+我理解你的需求了。你要的是一个**"压力测试沙盒"**——让真实系统在受控环境下裸奔，有问题就爆炸，而不是在沙盒里粉饰太平。
+
+让我先搜索一下金融系统沙盒测试的最佳实践，以及如何设计"让系统失败"的测试架构：
+基于搜索结果，我为你设计一个**"真实系统压力测试沙盒"**架构。核心原则是：**沙盒只模拟外部世界，不修复内部缺陷**。
+
+---
+
+## 架构设计：沙盒 = 外部世界模拟器
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        沙盒边界 (Sandbox)                        │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
+│  │  历史K线数据源 │    │  模拟交易所   │    │   故障注入控制器     │ │
+│  │  (CSV/DB)   │───→│ (撮合/账户/持仓)│←───│  (网络延迟/数据错误)  │ │
+│  └─────────────┘    └─────────────┘    └─────────────────────┘ │
+│         │                  │                                    │
+│         └──────────────────┘                                    │
+│                   ↓                                            │
+│         ┌─────────────────┐                                    │
+│         │   真实系统边界    │ ←── 沙盒只到这里，内部绝不干预        │
+│         │  (DataFeed/OMS) │                                    │
+│         └─────────────────┘                                    │
+└─────────────────────────────────────────────────────────────────┘
+                             ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      真实系统 (Real System)                      │
+│                                                                  │
+│   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌─────────┐ │
+│   │ MarketData│───→│  Trader  │───→│ Strategy │───→│  Risk   │ │
+│   │   Store   │    │ (真实代码) │    │ (真实代码) │    │ (真实)  │ │
+│   └──────────┘    └──────────┘    └──────────┘    └─────────┘ │
+│        ↑              │                                  │      │
+│        └──────────────┘                                  │      │
+│              真实数据流 (不干预)                           │      │
+│                            └───────────────────────────────┘      │
+│                                         ↓                        │
+│                                   ┌──────────┐                  │
+│                                   │ 订单拦截器 │ ← 沙盒拦截点      │
+│                                   │(模拟成交)  │                  │
+│                                   └──────────┘                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 核心设计原则
+
+| 原则 | 沙盒职责 | 真实系统职责 | 违规示例 |
+|------|---------|-------------|---------|
+| **数据注入** | 提供原始 Tick/K线 | 自己解析、存储、计算指标 | ❌ 沙盒预计算指标 |
+| **状态管理** | 模拟交易所状态 | 自己管理策略状态、持仓 | ❌ 沙盒帮策略更新持仓 |
+| **故障处理** | 模拟网络延迟、数据缺失 | 自己处理错误、重试、熔断 | ❌ 沙盒补全缺失数据 |
+| **订单执行** | 模拟撮合结果 | 自己管理订单生命周期 | ❌ 沙盒修改订单价格 |
+
+> **核心原则：沙盒 = 外部世界模拟器，不是系统的保姆。如果真实系统崩溃，那就让它崩溃，这样你才能发现真正的 Bug。**
+
+### 关键认知转变
+
+| ❌ 错误做法 | ✅ 正确做法 |
+|-----------|-----------|
+| "Trader 读不到 K线，我在沙盒里构造一个" | 让 Trader 报错，暴露数据流 Bug |
+| "指标计算失败，我返回默认值" | 让指标计算 panic，暴露计算逻辑 Bug |
+| "订单没成交，我帮它修改价格重试" | 记录未成交，验证策略是否有重试逻辑 |
+| "持仓不一致，我同步一下" | 分别查询沙盒和 Trader，验证一致性 |
+
+### 沙盒只做两件事
+
+1. **数据注入**：把原始 K线/Tick 注入到 DataFeeder，不做任何处理
+2. **请求拦截**：模拟交易所响应（订单/账户/持仓），不做业务逻辑修改
+
+### 沙盒禁止事项
+
+- ❌ 禁止预计算指标（让真实系统自己算）
+- ❌ 禁止补全缺失数据（让真实系统自己处理空值）
+- ❌ 禁止修改订单价格/状态（让真实系统自己管理）
+- ❌ 禁止同步状态（让不同组件独立运作，便于发现不一致）
+
+---
+
+## 关键接口设计
+
+### 1. 数据源注入（沙盒 → 真实系统）
+
+```rust
+// 沙盒只提供原始数据，不干预解析
+pub trait DataInjector {
+   // 注入原始 Tick，真实系统自己处理
+   async fn inject_tick(&self, symbol: &str, tick: RawTick);
+   
+   // 注入故障：数据缺失、延迟、乱序
+   async fn inject_fault(&self, fault: DataFault);
+}
+
+pub enum DataFault {
+   Delay(Duration),           // 网络延迟
+   DropNext(u32),             // 丢弃N个包
+   CorruptNext,               // 数据损坏
+   OutOfOrder(Vec<RawTick>),  // 乱序到达
+}
+```
+
+### 2. 交易所模拟（沙盒拦截）
+
+```rust
+// 沙盒实现 Exchange trait，但绝不干预策略逻辑
+pub struct SandboxExchange {
+   // 模拟的交易所状态
+   order_book: MockOrderBook,
+   account: MockAccount,
+   position: MockPositionManager,
+   
+   // 可配置的故障模式
+   fill_model: FillModel,      // 成交概率模型
+   latency_model: LatencyModel, // 延迟模型
+}
+
+impl Exchange for SandboxExchange {
+   async fn place_order(&self, order: Order) -> Result<OrderId, ExchangeError> {
+       // 1. 记录订单（用于验证）
+       self.record_order(&order);
+       
+       // 2. 模拟延迟
+       self.latency_model.simulate().await;
+       
+       // 3. 模拟撮合（不修改订单逻辑，只返回结果）
+       let fill = self.order_book.try_match(&order);
+       
+       // 4. 更新沙盒维护的独立账户状态
+       if let Some(fill) = fill {
+           self.account.apply_fill(&fill);
+           self.position.update(&fill);
+       }
+       
+       Ok(fill.map(|f| f.order_id).unwrap_or(order.id))
+   }
+   
+   // 查询接口：返回沙盒维护的状态
+   async fn get_position(&self, symbol: &str) -> Result<Position, Error> {
+       self.position.get(symbol)  // 沙盒自己维护，不与策略共享
+   }
+}
+```
+
+### 3. 真实系统的 Store 必须是真实的
+
+```rust
+// ❌ 错误：沙盒创建 Store 注入数据
+let store = SandboxStore::new();
+store.inject_kline(fake_kline);  // 这是作弊！
+
+// ✅ 正确：真实系统自己管理 Store，沙盒只提供原始数据流
+let trader = Trader::new(config).await;
+let data_feeder = trader.data_feeder();  // 真实系统的 DataFeeder
+
+// 沙盒只调用注入接口，不碰 Store
+sandbox.inject_tick("BTCUSDT", raw_tick).await;
+// 真实系统内部：DataFeeder → Store.update() → Trader 读取
+```
+
+---
+
+## 测试场景：暴露真实系统缺陷
+
+### 场景 1：数据流断裂（你遇到的问题）
+
+```rust
+#[tokio::test]
+async fn test_data_flow_breakage() {
+   let sandbox = Sandbox::new();
+   let trader = create_real_trader();  // 真实 Trader
+   
+   // 启动 Trader
+   let handle = tokio::spawn(trader.run());
+   
+   // 沙盒注入 10 个 Tick，但不等待 Store 确认
+   for tick in test_data {
+       sandbox.inject_tick("BTCUSDT", tick).await;
+   }
+   
+   // 等待 Trader 处理
+   tokio::time::sleep(Duration::from_secs(1)).await;
+   
+   // 验证：Trader 应该因读取不到 K线而失败，而不是沙盒构造假数据
+   let status = trader.get_status().await;
+   assert!(matches!(status, TraderStatus::Error(DataUnavailable)), 
+       "Trader 应该因数据流断裂而报错，而不是静默使用假数据");
+}
+```
+
+### 场景 2：指标计算错误暴露
+
+```rust
+#[tokio::test]
+async fn test_indicator_calculation_failure() {
+   let sandbox = Sandbox::new();
+   let trader = create_real_trader();
+   
+   // 注入正常数据，让 Trader 积累历史
+   sandbox.inject_historical_klines("BTCUSDT", 100).await;
+   
+   // 注入异常数据（价格跳空）
+   sandbox.inject_tick("BTCUSDT", Tick {
+       price: 0.0,  // 异常值
+       timestamp: now(),
+   }).await;
+   
+   // 真实系统应该：
+   // 1. 检测到异常价格
+   // 2. 指标计算可能 panic 或返回 Err
+   // 3. 策略可能因此不生成信号
+   
+   // 沙盒绝不干预，让系统自己崩溃或处理
+   let result = trader.next_decision().await;
+   
+   // 验证系统行为是否符合预期（panic、Err、或正确过滤）
+   assert!(result.is_err() || result == Decision::NoSignal);
+}
+```
+
+### 场景 3：订单生命周期验证
+
+```rust
+#[tokio::test]
+async fn test_order_lifecycle() {
+   let exchange = SandboxExchange::new()
+       .with_fill_model(FillModel::Partial(0.5))  // 50% 成交概率
+       .with_latency_model(LatencyModel::Fixed(Duration::from_millis(100)));
+   
+   let trader = create_real_trader_with_exchange(exchange.clone());
+   
+   // 运行策略直到生成订单
+   trader.run_until_order().await;
+   
+   // 验证沙盒记录的订单与 Trader 内部状态一致
+   let sandbox_orders = exchange.get_recorded_orders();
+   let trader_orders = trader.get_open_orders().await;
+   
+   // 关键：沙盒和 Trader 各自维护状态，通过接口同步
+   assert_eq!(sandbox_orders.len(), trader_orders.len());
+   
+   // 验证 Trader 正确处理了部分成交
+   exchange.simulate_time_advance(Duration::from_secs(1)).await;
+   let position = trader.get_position("BTCUSDT").await;
+   
+   // 如果 Trader 没有正确处理部分成交，这里会暴露
+   assert!(position.quantity > 0.0, "Trader 应该已处理部分成交");
+}
+```
+
+---
+
+## 关键认知转变
+
+| ❌ AI 的错误做法 | ✅ 正确做法 |
+|----------------|-----------|
+| "Trader 读不到 K线，我在沙盒里构造一个" | 让 Trader 报错，暴露数据流 Bug |
+| "指标计算失败，我返回默认值" | 让指标计算 panic，暴露计算逻辑 Bug |
+| "订单没成交，我帮它修改价格重试" | 记录未成交，验证策略是否有重试逻辑 |
+| "持仓不一致，我同步一下" | 分别查询沙盒和 Trader，验证一致性 |
+
+---
+
+## 下一步行动
+
+你需要我：
+
+1. **审查现有代码** - 找出 AI 之前"过度修复"的补丁，回滚到真实流程
+2. **实现沙盒骨架** - 提供上述架构的 Rust 代码框架
+3. **设计故障注入** - 针对你的系统定制具体的故障场景
+4. **编写验证规则** - 确保沙盒不越界的自动化检查
+
+请提供你的 Trader/Store/DataFeeder 接口定义，我可以帮你设计具体的沙盒实现。
