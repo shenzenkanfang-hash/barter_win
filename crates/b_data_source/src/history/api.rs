@@ -170,7 +170,25 @@ impl HistoryApiClient {
         end_time: Option<i64>,
         limit: u32,
     ) -> Result<Vec<KLine>, HistoryError> {
-        let url = format!("{}/api/v3/klines", self.config.api_base);
+        // 期货使用 /fapi/v1/klines，现货使用 /api/v3/klines
+        let path = if self.config.api_base.contains("fapi") {
+            "/fapi/v1/klines"
+        } else {
+            "/api/v3/klines"
+        };
+        let url = format!("{}{}", self.config.api_base, path);
+
+        // Debug: 打印 URL
+        let mut debug_url = format!("{}?symbol={}&interval={}&limit={}",
+            url, symbol, period, limit.min(1000));
+        if let Some(start) = start_time {
+            debug_url.push_str(&format!("&startTime={}", start));
+        }
+        if let Some(end) = end_time {
+            debug_url.push_str(&format!("&endTime={}", end));
+        }
+        tracing::debug!("Request URL: {}", debug_url);
+
         let mut req = self.client.get(&url);
 
         req = req.query(&[
@@ -189,14 +207,24 @@ impl HistoryApiClient {
         let resp = req.send().await
             .map_err(|e| HistoryError::ApiRequestFailed(format!("HTTP request failed: {}", e)))?;
 
-        if !resp.status().is_success() {
+        // Debug: 打印响应状态
+        let status = resp.status();
+        tracing::debug!("Response status: {}", status);
+
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            tracing::warn!("API error response: {}", body);
             return Err(HistoryError::ApiRequestFailed(format!(
-                "API returned error status: {}", resp.status()
+                "API returned error status: {} - {}", status, body
             )));
         }
 
-        let raw_klines: Vec<Vec<serde_json::Value>> = resp.json().await
-            .map_err(|e| HistoryError::ApiRequestFailed(format!("JSON parse failed: {}", e)))?;
+        // Debug: 打印响应体前200字符
+        let body = resp.text().await.unwrap_or_default();
+        tracing::debug!("Response body (first 200): {}", &body[..body.len().min(200)]);
+
+        let raw_klines: Vec<Vec<serde_json::Value>> = serde_json::from_str(&body)
+            .map_err(|e| HistoryError::ApiRequestFailed(format!("JSON parse failed: {} - body: {}", e, &body[..body.len().min(200)])))?;
 
         let klines: Vec<KLine> = raw_klines
             .into_iter()
@@ -209,13 +237,35 @@ impl HistoryApiClient {
 
     /// 解析单条K线
     fn parse_kline(&self, symbol: &str, period: &str, arr: &[serde_json::Value]) -> Option<KLine> {
-        let timestamp_str = arr.get(0)?.as_str()?;
-        let timestamp_ms: i64 = timestamp_str.parse().ok()?;
+        // Debug: 打印数组长度
+        tracing::debug!("parse_kline: arr len = {}", arr.len());
+
+        let timestamp_val = arr.get(0)?;
+        tracing::debug!("timestamp_val: {:?}", timestamp_val);
+
+        let timestamp_ms: i64 = if let Some(s) = timestamp_val.as_str() {
+            s.parse().ok()?
+        } else if let Some(n) = timestamp_val.as_i64() {
+            n
+        } else if let Some(n) = timestamp_val.as_f64() {
+            n as i64
+        } else {
+            tracing::warn!("Unknown timestamp type: {:?}", timestamp_val);
+            return None;
+        };
 
         let parse_decimal = |idx: usize| -> Option<Decimal> {
-            let s = arr.get(idx)?.as_str()?;
-            let f: f64 = s.parse().ok()?;
-            Decimal::from_f64_retain(f)
+            let val = arr.get(idx)?;
+            if let Some(s) = val.as_str() {
+                let f: f64 = s.parse().ok()?;
+                Decimal::from_f64_retain(f)
+            } else if let Some(n) = val.as_f64() {
+                Decimal::from_f64_retain(n)
+            } else if let Some(n) = val.as_i64() {
+                Some(Decimal::from(n))
+            } else {
+                None
+            }
         };
 
         Some(KLine {

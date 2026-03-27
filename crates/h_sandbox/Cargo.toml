@@ -7,6 +7,14 @@ edition = "2024"
 name = "full_production_sandbox"
 path = "src/bin/sandbox_full_production.rs"
 
+[[bin]]
+name = "download_hotusdt_history"
+path = "src/bin/download_hotusdt_history.rs"
+
+[[bin]]
+name = "generate_mock_hotusdt"
+path = "src/bin/generate_mock_hotusdt.rs"
+
 [dependencies]
 a_common = { path = "../a_common" }
 b_data_source = { path = "../b_data_source" }
