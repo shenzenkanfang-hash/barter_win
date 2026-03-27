@@ -804,7 +804,13 @@ impl Trader {
     pub fn execute_once(&self) -> Option<StrategySignal> {
         // 1. 获取数据
         let _kline = self.get_current_kline()?;
-        let vol_tier = self.volatility_tier();
+
+        // 沙盒环境（无 account_provider）：强制使用高速通道确保能产生信号
+        let vol_tier = if self.account_provider.is_none() {
+            VolatilityTier::High
+        } else {
+            self.volatility_tier()
+        };
 
         // 2. v2.3: 构建信号输入（使用默认值，同步版本无法使用异步指标计算器）
         let input = self.build_signal_input_fallback()?;
@@ -856,7 +862,15 @@ impl Trader {
             }
         };
 
-        let signal_output = self.signal_generator.generate(&input, &self.volatility_tier(), None);
+        let vol_tier = if self.account_provider.is_none() {
+            // 沙盒环境（无 account_provider）：强制使用高速通道，确保能产生信号
+            tracing::warn!(symbol = %self.config.symbol, "沙盒环境强制使用高速通道");
+            VolatilityTier::High
+        } else {
+            self.volatility_tier()
+        };
+
+        let signal_output = self.signal_generator.generate(&input, &vol_tier, None);
         record.signal_json = serde_json::to_string(&signal_output).ok();
 
         // 4. 决策
