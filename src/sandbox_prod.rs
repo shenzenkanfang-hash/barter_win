@@ -208,6 +208,7 @@ impl Iterator for MockKlineIter {
             close,
             volume: dec!(100),
             timestamp: Utc.timestamp_millis_opt(self.current_time).unwrap(),
+            is_closed: true,
         };
 
         self.current_time += 60_000;
@@ -354,6 +355,7 @@ fn process_tick(
         close: tick.price,
         volume: tick.qty,
         timestamp: tick.timestamp,
+        is_closed: true,
     };
 
     let tick_model = b_data_source::Tick {

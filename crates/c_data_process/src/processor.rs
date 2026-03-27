@@ -546,10 +546,24 @@ impl SignalProcessor {
         }
     }
 
-    // ==================== 自循环服务 ====================
+    // ==================== 自循环服务（已废弃） ====================
+    //
+    // ⚠️ 警告：start_loop 使用 tokio::spawn，违反事件驱动原则
+    // ⚠️ 正确做法：调用者显式调用 cleanup_expired()，或使用 channel 事件驱动
+    //
+    // 事件驱动原则：
+    // - 不应有后台自循环任务
+    // - 清理逻辑应由调用者驱动（按需或定时调用 cleanup_expired）
+    // - 或使用 channel 接收清理事件
 
-    /// 启动后台自循环（内部创建 Arc）
-    /// 返回 shutdown signal sender
+    /// 启动后台自循环（已废弃）
+    /// 
+    /// ⚠️ 已废弃：使用此方法违反事件驱动原则
+    /// 
+    /// 替代方案：
+    /// 1. 调用者定期调用 `cleanup_expired()` 方法
+    /// 2. 或使用外部定时器驱动清理
+    #[deprecated(since = "2026-03-27", note = "使用 cleanup_expired() 替代后台自循环")]
     pub fn start_loop(self: &Arc<Self>) -> watch::Sender<bool> {
         let processor = Arc::clone(self);
         processor.running.store(true, Ordering::SeqCst);

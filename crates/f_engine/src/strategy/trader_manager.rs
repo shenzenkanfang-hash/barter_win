@@ -85,8 +85,16 @@ impl TraderManager {
             b_data_source::default_store().clone();
         let trader = Arc::new(Trader::new(config, executor, repository, store));
 
-        // 启动异步循环（后台任务），保存 JoinHandle 以便 abort 和监控
+        // ⚠️ 已废弃：使用 tokio::spawn 启动后台任务，违反事件驱动原则
+        // 
+        // 替代方案：
+        // 1. 使用 channel 接收 Tick，引擎内部串行处理
+        // 2. 调用者控制 Trader 生命周期，不在内部 spawn
+        // 3. 统一为 TradingEngine::run(channel_receiver) 接口
+        //
+        // TODO: 重构为事件驱动架构
         let trader_clone = trader.clone();
+        #[allow(deprecated)]
         let join_handle = tokio::spawn(async move {
             trader_clone.start().await;
         });

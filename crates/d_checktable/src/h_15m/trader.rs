@@ -718,10 +718,20 @@ impl Trader {
         })
     }
 
-    // ==================== v2.1: P2-1 GC 定时任务 ====================
+    // ==================== v2.1: P2-1 GC 定时任务（已废弃） ====================
+    //
+    // ⚠️ 警告：start_gc_task 使用 tokio::spawn，违反事件驱动原则
+    //
+    // 替代方案：
+    // 1. 调用者定期调用 gc_pending() 方法
+    // 2. 或使用外部定时器驱动清理
+    //
+    // TODO: 重构为按需清理或外部驱动
 
-    /// 启动 GC 定时任务（v2.1: P2-1）
-    /// 定时清理超时的 PENDING WAL 记录
+    /// 启动 GC 定时任务（已废弃）
+    /// 
+    /// ⚠️ 已废弃：使用 tokio::spawn 启动后台任务
+    #[deprecated(since = "2026-03-27", note = "使用外部定时器驱动 gc_pending() 替代")]
     fn start_gc_task(&self) {
         let repo = Arc::clone(&self.repository);
         let timeout_secs = self.gc_config.timeout_secs;

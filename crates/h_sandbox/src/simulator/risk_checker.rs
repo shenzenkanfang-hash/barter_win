@@ -10,12 +10,31 @@ use a_common::exchange::ExchangeAccount;
 use f_engine::interfaces::{ExecutedOrder, PositionInfo, RiskChecker, RiskThresholds, RiskWarning};
 use f_engine::types::{OrderRequest, RiskCheckResult};
 
+/// 风控模式
+///
+/// - Strict: 严格模式，所有风控规则强制执行
+/// - Audit: 审计模式，记录所有风控决策但不阻止交易
+/// - Bypass: 旁路模式，跳过风控检查
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiskMode {
+    Strict,
+    Audit,
+    Bypass,
+}
+
+impl Default for RiskMode {
+    fn default() -> Self {
+        RiskMode::Strict
+    }
+}
+
 /// Shadow 风控检查器
 ///
 /// 模拟币安期货的风控规则
 pub struct ShadowRiskChecker {
     thresholds: RiskThresholds,
     max_leverage: u32,
+    mode: RiskMode,
 }
 
 impl ShadowRiskChecker {
@@ -23,7 +42,27 @@ impl ShadowRiskChecker {
         Self {
             thresholds: RiskThresholds::default(),
             max_leverage: 20,
+            mode: RiskMode::default(),
         }
+    }
+
+    /// 创建带模式的风控检查器
+    pub fn with_mode(mode: RiskMode) -> Self {
+        Self {
+            thresholds: RiskThresholds::default(),
+            max_leverage: 20,
+            mode,
+        }
+    }
+
+    /// 设置风控模式
+    pub fn set_mode(&mut self, mode: RiskMode) {
+        self.mode = mode;
+    }
+
+    /// 获取当前风控模式
+    pub fn get_mode(&self) -> RiskMode {
+        self.mode
     }
 
     /// 检查杠杆是否超过限制
@@ -51,25 +90,65 @@ impl Default for ShadowRiskChecker {
 
 impl RiskChecker for ShadowRiskChecker {
     fn pre_check(&self, order: &OrderRequest, account: &ExchangeAccount) -> RiskCheckResult {
-        // 临时跳过所有风控检查，专注于测试架构
-        // TODO: 后续根据实际需求启用风控规则
-        
-        // 1. 检查订单金额 (临时禁用)
-        // if !self.check_order_value(order.price, order.qty) {
-        //     return RiskCheckResult::new(false, false);
-        // }
+        match self.mode {
+            RiskMode::Bypass => {
+                // 旁路模式：跳过所有风控检查，直接通过
+                tracing::debug!("[Risk] {} 模式: 跳过风控检查", order.symbol);
+                RiskCheckResult::new(true, true)
+            }
+            RiskMode::Audit => {
+                // 审计模式：执行检查但记录日志，不阻止交易
+                let order_value = order.qty * order.price.unwrap_or(dec!(0));
+                
+                let order_value_ok = self.check_order_value(order.price, order.qty);
+                let balance_ok = order_value <= account.available;
+                
+                tracing::info!(
+                    "[Risk] {} Audit模式: symbol={}, order_value_ok={}, balance_ok={}, available={}",
+                    order.symbol,
+                    order.symbol,
+                    order_value_ok,
+                    balance_ok,
+                    account.available
+                );
+                
+                // 审计模式不阻止，只记录
+                RiskCheckResult::new(true, true)
+            }
+            RiskMode::Strict => {
+                // 严格模式：执行完整风控检查
+                
+                // 1. 检查订单金额
+                if !self.check_order_value(order.price, order.qty) {
+                    tracing::warn!("[Risk] {} 订单金额不满足要求", order.symbol);
+                    return RiskCheckResult::new(false, false);
+                }
 
-        // 2. 检查余额是否足够（临时禁用）
-        // let order_value = order.qty * order.price.unwrap_or(dec!(0));
-        // if order_value > account.available {
-        //     return RiskCheckResult::new(false, false);
-        // }
+                // 2. 检查余额是否足够
+                let order_value = order.qty * order.price.unwrap_or(dec!(0));
+                if order_value > account.available {
+                    tracing::warn!(
+                        "[Risk] {} 余额不足: 订单={}, 可用={}",
+                        order.symbol,
+                        order_value,
+                        account.available
+                    );
+                    return RiskCheckResult::new(false, false);
+                }
 
-        RiskCheckResult::new(true, true)
+                RiskCheckResult::new(true, true)
+            }
+        }
     }
 
     fn post_check(&self, _order: &ExecutedOrder, _account: &ExchangeAccount) -> RiskCheckResult {
-        RiskCheckResult::new(true, true)
+        match self.mode {
+            RiskMode::Bypass => RiskCheckResult::new(true, true),
+            RiskMode::Audit | RiskMode::Strict => {
+                // 后续实现持仓检查...
+                RiskCheckResult::new(true, true)
+            }
+        }
     }
 
     fn scan(&self, _positions: &[PositionInfo], _account: &ExchangeAccount) -> Vec<RiskWarning> {
