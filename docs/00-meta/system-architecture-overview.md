@@ -1,85 +1,46 @@
 ---
-系统全景图 - Rust 量化交易系统
-版本: 2026-03-27
+对应代码: 全项目 crates/ 目录
+最后验证: 2026-03-28
 状态: 活跃
 ---
 
-# 系统全景图
+# 系统全景图 - 八层架构
 
 ## 第一层：物理结构
 
-系统由九个物理层级构成。最底层是 **a_common** 工具层，为所有上层提供通用能力。
+系统由 9 个 crate 构成物理分层，按依赖关系从底层到顶层排列：
 
 ```
-a_common          → 基础工具层（错误类型、配置、日志）
-b_data_source     → 数据源层（WS、REST API、存储）
-c_data_process    → 数据处理层（信号处理、波动率计算）
-d_checktable      → 交易记录层（订单管理、状态机、WAL）
-e_risk_monitor    → 风控监控层（风控检查、阈值管理）
-f_engine          → 交易引擎层（策略决策、订单生成）
-g_test            → 测试层（集成测试）
-h_sandbox         → 沙盒层（模拟环境、回放）
-x_data            → 外部数据层（仓位、资金）
+crates/
+├── a_common/          # 通用工具层（无依赖）
+├── b_data_source/     # 数据源层
+├── c_data_process/    # 数据处理层
+├── d_checktable/      # 检查层
+├── e_risk_monitor/    # 风控层
+├── f_engine/          # 引擎层
+├── g_test/            # 测试层
+├── h_sandbox/         # 沙盒层
+└── x_data/            # 数据账户层
 ```
 
-文件组织结构（`crates/` 目录）：
-- `a_common/src/lib.rs` - 基础类型导出
-- `b_data_source/src/api/data_feeder.rs` - DataFeeder 统一数据接口
-- `c_data_process/src/processor.rs` - SignalProcessor 信号处理
-- `d_checktable/src/h_15m/trader.rs` - Trader 品种交易主循环
-- `e_risk_monitor/src/` - 风控检查器实现
-- `f_engine/src/core/engine.rs` - EventDrivenEngine 事件驱动引擎
-- `h_sandbox/src/lib.rs` - 沙盒模块入口
+每个 crate 包含独立的 `src/lib.rs` 和 `Cargo.toml`，形成明确的物理边界。
 
 ---
 
 ## 第二层：逻辑架构
 
-六层架构的逻辑划分遵循 **数据流单向** 原则，从数据源到引擎，职责逐层抽象。
+六层架构的逻辑划分与物理分层对应：
 
-### 层职责
+| 层级 | 名称 | Crate | 核心职责 |
+|------|------|-------|---------|
+| 1 | 工具层 | `a_common` | 波动率计算、数学工具 |
+| 2 | 数据层 | `b_data_source` | 市场数据接收、存储、分发 |
+| 3 | 信号层 | `c_data_process` | 指标计算（EMA、RSI） |
+| 4 | 检查层 | `d_checktable` | 交易检查、资金验证 |
+| 5 | 风控层 | `e_risk_monitor` | 风险检查、仓位管理 |
+| 6 | 引擎层 | `f_engine` | 策略决策、订单协调 |
 
-| 层级 | 名称 | 核心职责 | 关键文件 |
-|-----|------|---------|---------|
-| a | 工具层 | 错误类型、配置、宏定义 | `a_common/src/` |
-| b | 数据源层 | 数据注入、订阅、K线合成 | `b_data_source/src/api/` |
-| c | 数据处理层 | 信号计算、波动率 | `c_data_process/src/` |
-| d | 检查表层 | 订单状态机、WAL持久化 | `d_checktable/src/h_15m/` |
-| e | 风控层 | 风控阈值、预检 | `e_risk_monitor/src/` |
-| f | 引擎层 | 策略决策、订单生成 | `f_engine/src/core/` |
-
-### 调用关系
-
-```
-沙盒层 (h_sandbox)
-    ├── ShadowBinanceGateway → 模拟交易所响应
-    ├── StreamTickGenerator → 历史数据回放
-    └── ShadowRiskChecker → 影子风控
-
-        ↓ push_tick(tick: Tick)
-        
-数据层 (b_data_source)
-    └── DataFeeder → 统一数据接口
-        ├── subscribe_1m(symbol, tx)
-        ├── subscribe_15m(symbol, tx)
-        └── push_tick(tick)
-
-        ↓ Tick 流入 Channel
-
-引擎层 (f_engine)
-    └── EventDrivenEngine → 单事件循环
-        ├── run(tick_rx) → while let Some(tick) = tick_rx.recv().await
-        ├── on_tick(tick) → 串行处理链
-        ├── decide() → 策略决策
-        └── submit_order() → 异步下单
-
-        ↓ 检查风控
-
-风控层 (e_risk_monitor)
-    └── RiskChecker trait
-        ├── pre_check(order, account)
-        └── scan(positions, account)
-```
+沙盒层 `h_sandbox` 独立于六层之外，负责模拟和数据注入。
 
 ---
 
@@ -87,132 +48,90 @@ x_data            → 外部数据层（仓位、资金）
 
 市场数据从进入系统到触发交易的完整旅程：
 
-### Tick 生命周期
-
 ```
-T0: StreamTickGenerator::next()
-    位置: crates/h_sandbox/src/historical_replay/mod.rs
-    行为: 从历史数据读取 K线，转换为 Tick
-
-T1: tick_tx.send(tick).await
-    类型: tokio::sync::mpsc::Sender<Tick>
-    背压: channel(1024) 满时 send() 阻塞
-
-T2: tick_rx.recv().await
-    位置: src/sandbox_main.rs:298
-    行为: 阻塞等待，无轮询
-
-T3: on_tick(tick) 串行执行
-    ├── update_indicators(&tick)  → 增量计算 EMA/RSI
-    ├── decide(&tick)             → 策略信号生成
-    ├── check_risk(&decision)     → 风控预检
-    └── submit_order(order)       → 异步下单
-
-T4: 返回循环，继续 recv().await
+[交易所] 
+    ↓ WebSocket
+[b_data_source::KLineFeed]
+    ↓ push_tick()
+[MarketDataStore] 
+    ↓ get_1m() / get_15m()
+[c_data_process::VolatilityCalc]
+    ↓ calculate()
+[Indicators { ema5, ema20, rsi }]
+    ↓ decide()
+[f_engine::TradingEngine]
+    ↓ check_risk()
+[e_risk_monitor::ShadowRiskChecker]
+    ↓ place_order()
+[h_sandbox::ShadowBinanceGateway]
+    ↓ simulate_fill()
+[ShadowAccount]
 ```
 
-### 数据形态变化
-
-```
-原始数据 (CSV/Shard)
-    ↓ TickToWsConverter
-Tick { symbol, price, kline_1m, kline_15m }
-    ↓ DataFeeder::push_tick()
-Channel: mpsc::Sender<Tick>
-    ↓
-EventDrivenEngine::run()
-    ↓
-TradingDecision { action, price, qty, reason }
-    ↓
-OrderRequest { symbol, side, order_type, qty, price }
-```
+关键数据形态：
+- `Tick`: 原始报价 `crates/b_data_source/src/models/types.rs:23`
+- `KLine`: 聚合K线 `crates/b_data_source/src/models/types.rs:45`
+- `Indicators`: 计算指标 `src/sandbox_main.rs:180`
 
 ---
 
 ## 第四层：执行模型
 
-系统采用 **生产者-消费者** 并行模型：
+系统采用并行执行模型，关键结构在 `src/sandbox_main.rs:750-880`：
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  tokio::join! {                                          │
-│      // 生产者（1个 async 块）                             │
-│      async {                                             │
-│          while let Some(tick) = generator.next() {        │
-│              tick_tx.send(tick).await;  // 背压点         │
-│          }                                               │
-│      },                                                  │
-│                                                             │
-│      // 消费者（1个 TradingEngine::run）                    │
-│      async {                                             │
-│          engine.run(tick_rx).await;                       │
-│      }                                                   │
-│  }                                                       │
-└─────────────────────────────────────────────────────────────┘
+[tokio::join!]
+    ├── [生产者任务] StreamTickGenerator::next()
+    │       ↓ tick_tx.send()
+    │       mpsc::channel(1024)
+    │
+    └── [消费者任务] TradingEngine::run()
+            ↓ tick_rx.recv().await
+            on_tick(tick)
+                ├── update_indicators()   // O(1) 增量
+                ├── decide()              // EMA 金叉/死叉
+                ├── check_risk()          // 风控检查
+                └── submit_order()        // 异步下单
 ```
 
-### 并发约束
-
-| 约束 | 实现 | 位置 |
-|-----|------|------|
-| 零 spawn | 无 tokio::spawn | sandbox_main.rs |
-| 零 sleep | 无 tokio::time::sleep | sandbox_main.rs |
-| 零轮询 | recv().await 阻塞 | sandbox_main.rs:298 |
-| 串行保序 | 单 async 块内同步执行 | sandbox_main.rs:300 |
-| 背压控制 | channel send().await | sandbox_main.rs:587 |
-
-### Channel 配置
-
-```rust
-// 位置: src/sandbox_main.rs:574
-let (tick_tx, tick_rx) = mpsc::channel(1024);
-//       ↑ 容量 1024，用于背压控制
-```
+关键约束（`src/sandbox_main.rs:10-25`）：
+- `tokio::spawn`: 0 个（全部直接 await）
+- `tokio::sleep`: 0 个（事件驱动）
+- 背压模式 `BackpressureMode`: Replay 阻塞 / Realtime 非阻塞
 
 ---
 
 ## 第五层：接口契约
 
+组件间交互的功能约定：
+
 ### DataFeeder 接口
-
 ```rust
-// 位置: crates/b_data_source/src/api/data_feeder.rs
-
-/// 订阅 1m Tick 数据流
-pub fn subscribe_1m(&self, symbol: &str, tx: mpsc::Sender<Tick>)
-
-/// 订阅 15m Tick 数据流  
-pub fn subscribe_15m(&self, symbol: &str, tx: mpsc::Sender<Tick>)
-
-/// 推送 Tick（自动广播给订阅者）
-pub fn push_tick(&self, tick: Tick)
+// crates/b_data_source/src/api/data_feeder.rs:45
+trait DataFeeder {
+    async fn push_tick(&mut self, tick: Tick) -> Result<()>;
+    fn subscribe_1m(&mut self, tx: mpsc::Sender<Arc<Tick>>);
+    fn subscribe_15m(&mut self, tx: mpsc::Sender<Arc<Tick>>);
+}
 ```
 
-### EventDrivenEngine 接口
-
+### Gateway 接口
 ```rust
-// 位置: crates/f_engine/src/core/engine.rs
-
-/// 创建引擎
-pub fn new(symbol: String) -> Self
-
-/// 单事件循环
-pub async fn run(&mut self, tick_rx: mpsc::Receiver<Tick>)
-
-/// 获取统计
-pub fn stats(&self) -> &EngineStats
+// crates/h_sandbox/src/simulator/gateway.rs:30
+trait ExchangeGateway {
+    async fn place_order(&self, req: OrderRequest) -> Result<OrderResult>;
+    fn get_account(&self) -> Result<AccountInfo>;
+}
 ```
 
-### RiskChecker 接口
-
+### 引擎接口
 ```rust
-// 位置: crates/f_engine/src/interfaces/risk.rs
-
-pub trait RiskChecker: Send + Sync {
-    fn pre_check(&self, order: &OrderRequest, account: &ExchangeAccount) -> RiskCheckResult;
-    fn post_check(&self, order: &ExecutedOrder, account: &ExchangeAccount) -> RiskCheckResult;
-    fn scan(&self, positions: &[PositionInfo], account: &ExchangeAccount) -> Vec<RiskWarning>;
-    fn thresholds(&self) -> RiskThresholds;
+// src/sandbox_main.rs:420
+impl TradingEngine {
+    async fn run(&mut self, rx: mpsc::Receiver<Tick>);
+    async fn on_tick(&mut self, tick: Tick);
+    fn decide(&self, tick: &Tick) -> Option<TradingDecision>;
+    fn check_risk(&mut self, decision: &TradingDecision) -> Option<OrderRequest>;
 }
 ```
 
@@ -220,146 +139,117 @@ pub trait RiskChecker: Send + Sync {
 
 ## 第六层：状态管理
 
-### 共享存储模式
+系统使用无锁数据结构避免竞争：
 
-沙盒层通过 **共享 Store 实例** 同步数据：
-
+### DashMap 替代 RwLock
 ```rust
-// 位置: crates/h_sandbox/src/context.rs
-
-pub struct SandboxContext {
-    /// 共享市场数据存储
-    pub store: Arc<MarketDataStore>,
-    /// 共享账户模拟
-    pub account: Arc<RwLock<ShadowAccount>>,
-}
-```
-
-### 引擎内部状态
-
-```rust
-// 位置: crates/f_engine/src/core/engine.rs
-
+// src/sandbox_main.rs:235
 struct EngineState {
-    /// 指标缓存（按品种）
-    indicators: HashMap<String, IndicatorData>,
-    /// 持仓状态
-    positions: HashMap<String, PositionState>,
-    /// 统计
+    indicators: DashMap<String, Indicators>,  // 无锁
+    position: DashMap<String, PositionState>, // 无锁
     stats: EngineStats,
 }
+```
 
-#[derive(Debug, Clone, Default)]
-struct IndicatorData {
-    ema5: Option<Decimal>,
-    ema20: Option<Decimal>,
-    rsi: Option<Decimal>,
-    price_history: Vec<Decimal>,
+### AtomicI64 策略间隔
+```rust
+// src/sandbox_main.rs:237-240
+struct EngineState {
+    last_strategy_run_ts: AtomicI64,  // Acquire 读 / Release 写
+    strategy_interval_ms: i64,       // 默认 100ms
 }
 ```
 
-### 原子操作
-
+### CheckpointManager 崩溃恢复
 ```rust
-// 位置: crates/d_checktable/src/h_15m/trader.rs
-
-is_running: AtomicBool,    // 运行状态
-last_order_ms: AtomicU64, // 频率限制
+// src/sandbox_main.rs:228-280
+trait CheckpointManager {
+    fn save_checkpoint(&self, checkpoint: &Checkpoint);
+    fn load_checkpoint(&self) -> Option<Checkpoint>;
+}
+const CHECKPOINT_INTERVAL: u64 = 1000;  // 每1000 Tick保存
 ```
 
 ---
 
 ## 第七层：边界处理
 
-### 数据缺失处理
+系统对异常情况的处理策略：
 
-| 场景 | 处理方式 | 依据 |
-|-----|---------|------|
-| K线未就绪 | 返回 None，策略跳过 | `crates/b_data_source/src/api/data_feeder.rs` |
-| 指标计算不足 | 返回 None，策略跳过 | `f_engine/src/core/engine.rs:200-210` |
-| 账户查询失败 | 返回 Err，订单跳过 | `f_engine/src/core/engine.rs:256-260` |
+| 边界情况 | 处理方式 | 日志级别 |
+|---------|---------|---------|
+| 指标数据不足 | 跳过 Tick，返回 None | trace |
+| 风控检查失败 | 返回 None，记录 warn | warn |
+| 账户获取失败 | 跳过该决策 | warn |
+| Channel 满（Replay） | 阻塞等待 | info |
+| Channel 满（Realtime） | 丢弃新 Tick | warn |
+| Tick 重复 | 检查 sequence_id 跳过 | debug |
+| 慢 Tick | 超过 10ms 记录 | warn |
 
-### 错误传播链
-
-```
-沙盒注入假数据? → 禁止（沙盒边界规则）
-    ↓
-
-数据缺失
-    ↓
-Trader 返回 None
-    ↓
-Engine 跳过该 Tick
-    ↓
-继续处理下一个 Tick
-```
-
-### 风控拦截
-
-```rust
-// 位置: crates/f_engine/src/core/engine.rs:255-270
-
-fn check_risk(&self, decision: &TradingDecision) -> Option<OrderRequest> {
-    // 构造订单
-    let order = OrderRequest { ... };
-    
-    // 简化风控：只检查数量
-    if order.qty <= Decimal::ZERO {
-        return None;
-    }
-    
-    Some(order)
-}
-```
+关键错误日志点：
+- `src/sandbox_main.rs:450` - "Skip tick: no indicators yet"
+- `src/sandbox_main.rs:510` - "[Risk] 获取账户失败"
+- `src/sandbox_main.rs:630` - "[Producer] Channel full"
+- `src/sandbox_main.rs:460` - "[Engine] 跳过重复 Tick"
 
 ---
 
 ## 第八层：设计原则
 
-### 核心设计原则
+### 核心设计思想
 
-1. **事件驱动优于轮询**
-   - `recv().await` 阻塞等待，而非 `loop + sleep`
-   - 背压由 channel 自动处理
+1. **零轮询驱动**
+   所有等待使用 `recv().await` 阻塞，不使用 `sleep` 轮询
 
-2. **串行优于并发**
-   - 单事件循环，无 spawn
-   - Tick 处理顺序天然保序
+2. **串行保序**
+   每个 Tick 完整处理后才接收下一个，保证状态一致性
 
-3. **沙盒边界清晰**
-   - 沙盒只注入数据，不计算指标
-   - 业务逻辑在引擎内执行
+3. **单事件循环**
+   引擎内部无并发，所有操作在单一 async 任务内串行执行
 
-4. **向后兼容**
-   - 旧接口标记 `#[deprecated]`
-   - 新接口独立实现
+4. **增量计算**
+   指标更新使用 O(1) 增量算法，不重新遍历历史数据
+   ```rust
+   // src/sandbox_main.rs:195
+   fn calc_ema(prices: &[Decimal], period: usize) -> Decimal {
+       let k = dec!(2) / Decimal::from(period + 1);
+       let mut ema = prices[0];
+       for price in prices.iter().skip(1) {
+           ema = *price * k + ema * (Decimal::ONE - k);
+       }
+       ema
+   }
+   ```
 
-### 废弃接口清单
-
-| 接口 | 位置 | 替代方案 |
-|-----|------|---------|
-| `DataFeeder::ws_get_1m()` | b_data_source | `subscribe_1m()` |
-| `SignalProcessor::start_loop()` | c_data_process | `cleanup_expired()` |
-| `Trader::start_gc_task()` | d_checktable | `gc_pending()` |
-| `TraderManager::start_trader()` | f_engine | `EventDrivenEngine::run()` |
+5. **可观测性优先**
+   所有错误、跳过、警告都有结构化日志
+   ```rust
+   tracing::warn!(
+       symbol = %symbol,
+       seq = %tick.sequence_id,
+       total_ms = %total_ms,
+       "[Engine] 慢 Tick 告警"
+   );
+   ```
 
 ### 关键权衡
 
 | 权衡点 | 选择 | 理由 |
 |-------|------|------|
-| 多品种 vs 单品种 | 当前多品种 Manager，逐步迁移单品种 Engine | 向后兼容 |
-| 同步 vs 异步执行 | on_tick 内同步，submit_order 异步 | 简化状态管理 |
-| Trait vs 具体类型 | EventDrivenEngine 使用具体类型 | 简化 API |
+| 锁 vs 无锁 | DashMap 替代 RwLock | 消除写锁竞争 |
+| clone vs Arc | Arc<Tick> 多品种路由 | 克隆 ~200ns → ~2ns |
+| 阻塞 vs 非阻塞 | 可配置背压模式 | 兼容回放和实盘 |
+| 数量间隔 vs 时间间隔 | AtomicI64 时间戳控制 | 频率固定 |
 
 ---
 
-## 附录：关键文件索引
+## 附录：关键常量
 
-| 文件 | 作用 | 行号 |
-|-----|------|------|
-| `src/sandbox_main.rs` | 沙盒入口，事件循环 | 298 |
-| `crates/b_data_source/src/api/data_feeder.rs` | 数据订阅接口 | 85-130 |
-| `crates/f_engine/src/core/engine.rs` | 事件驱动引擎 | 90-130 |
-| `crates/h_sandbox/src/gateway/mod.rs` | 影子网关 | - |
-| `crates/d_checktable/src/h_15m/trader.rs` | 交易主循环 | 1341 |
-| `crates/c_data_process/src/processor.rs` | 信号处理 | 567 |
+| 常量 | 值 | 位置 |
+|-----|-----|------|
+| `MAX_PRICE_HISTORY` | 50 | `src/sandbox_main.rs:252` |
+| `SLOW_TICK_THRESHOLD_MS` | 10 | `src/sandbox_main.rs:256` |
+| `DEFAULT_STRATEGY_INTERVAL_MS` | 100 | `src/sandbox_main.rs:262` |
+| `CHECKPOINT_INTERVAL` | 1000 | `src/sandbox_main.rs:265` |
+| `DEFAULT_SYMBOL` | "HOTUSDT" | `src/sandbox_main.rs:57` |
+| `DEFAULT_FUND` | 10000.0 | `src/sandbox_main.rs:58` |
