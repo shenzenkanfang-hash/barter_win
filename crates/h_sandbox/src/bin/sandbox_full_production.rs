@@ -13,7 +13,7 @@
 //! - 完整 WAL 模式执行
 
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, TimeZone};
 use clap::Parser;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -21,8 +21,7 @@ use tokio::sync::Notify;
 use tracing::{info, error};
 use tracing_subscriber::fmt;
 
-use a_common::MarketError;
-use b_data_source::{DataFeeder, KLine};
+use b_data_source::{DataFeeder, KLine, history::HistoryApiClient, Period};
 use d_checktable::h_15m::{Trader, TraderConfig, Executor, Repository};
 use f_engine::strategy::TraderManager;
 
@@ -89,6 +88,20 @@ impl SandboxContext {
 
 // ==================== 历史数据拉取 ====================
 
+/// 将历史 K 线转换为模型 K 线
+fn convert_history_kline(history_kline: b_data_source::history::KLine) -> KLine {
+    KLine {
+        symbol: history_kline.symbol,
+        period: b_data_source::Period::Minute(1),
+        open: history_kline.open,
+        high: history_kline.high,
+        low: history_kline.low,
+        close: history_kline.close,
+        volume: history_kline.volume,
+        timestamp: chrono::Utc.timestamp_millis_opt(history_kline.timestamp_ms).unwrap(),
+    }
+}
+
 /// 拉取历史 K 线数据
 /// 【关键】调用币安 API 获取历史数据，而非预加载
 async fn fetch_historical_klines(
@@ -96,7 +109,7 @@ async fn fetch_historical_klines(
     start_time: DateTime<Utc>,
     end_time: DateTime<Utc>,
     limit: u32,
-) -> Result<Vec<KLine>, MarketError> {
+) -> Result<Vec<KLine>, Box<dyn std::error::Error>> {
     info!(
         symbol = symbol,
         start = %start_time,
@@ -106,10 +119,30 @@ async fn fetch_historical_klines(
         limit, end_time
     );
 
-    // TODO: 实现真实 API 调用
-    // 实际项目中会调用：b_data_source::api::kline::fetch_klines()
-    // 这里先返回空数组，触发数据不足检测
-    Ok(vec![])
+    // 转换时间戳为毫秒
+    let end_ms = end_time.timestamp_millis();
+    let start_ms = start_time.timestamp_millis();
+
+    // 创建历史 API 客户端（期货）
+    let history_client = HistoryApiClient::new_futures();
+
+    // 调用币安 API 获取历史 K 线
+    let history_klines = history_client
+        .fetch_klines(symbol, "1m", Some(start_ms), Some(end_ms), limit)
+        .await
+        .map_err(|e| format!("历史数据拉取失败: {}", e))?;
+
+    // 转换为模型 K 线
+    let klines: Vec<KLine> = history_klines.into_iter().map(convert_history_kline).collect();
+
+    info!(
+        symbol = symbol,
+        count = klines.len(),
+        "[Data] 成功拉取 {} 条历史 K 线",
+        klines.len()
+    );
+
+    Ok(klines)
 }
 
 // ==================== 数据注入 ====================
