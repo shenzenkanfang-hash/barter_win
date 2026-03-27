@@ -21,7 +21,7 @@ use tokio::sync::Notify;
 use tracing::{info, error};
 use tracing_subscriber::fmt;
 
-use b_data_source::{DataFeeder, KLine, history::HistoryApiClient, Period, MarketDataStoreImpl};
+use b_data_source::{DataFeeder, KLine, history::HistoryApiClient, Period, MarketDataStoreImpl, default_store};
 use b_data_source::ws::kline_1m::ws::KlineData;
 use d_checktable::h_15m::{Trader, TraderConfig, Executor, Repository};
 use f_engine::strategy::TraderManager;
@@ -79,8 +79,9 @@ pub struct SandboxContext {
 impl SandboxContext {
     /// 创建沙盒上下文
     pub fn new(symbol: String, initial_fund: Decimal) -> Self {
-        // 创建共享的 Store（Trader 读取数据的真实来源）
-        let store = Arc::new(MarketDataStoreImpl::new());
+        // 【关键修复】使用 default_store() 单例，确保与 Trader 共享同一实例
+        // 之前：let store = Arc::new(MarketDataStoreImpl::new());  ← 独立实例，数据流断裂！
+        let store = b_data_source::default_store().clone();
 
         // DataFeeder 保持独立（用于 API 查询）
         let data_feeder = Arc::new(DataFeeder::new());
@@ -89,7 +90,7 @@ impl SandboxContext {
             symbol,
             initial_fund,
             data_feeder,
-            store,  // 共享 store
+            store,  // 共享 default_store() 单例
             gateway: Arc::new(ShadowBinanceGateway::with_default_config(initial_fund)),
             trader_manager: Arc::new(TraderManager::new()),
             shutdown: Arc::new(Notify::new()),
