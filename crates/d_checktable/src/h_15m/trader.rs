@@ -5,12 +5,14 @@
 //!
 //! # 修复记录
 //! - v2.0: P0-1 主循环启用、P0-2 local_position 填充、P0-3 风控接入、P1-2 锁日志、P1-3 价格偏离度
+//! - v2.1: P2-1 gc_pending 定时调用基础设施
 
 #![forbid(unsafe_code)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use parking_lot::Mutex;
 
 use async_trait::async_trait;
 use b_data_source::MarketDataStore;
@@ -19,6 +21,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use thiserror::Error;
 use tokio::sync::{RwLock as TokioRwLock, Notify};
+use tokio::time::interval;
 use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategyId, StrategySignal, TradeCommand};
 
@@ -114,6 +117,43 @@ impl Default for TraderConfig {
     }
 }
 
+/// GC 配置（v2.1: P2-1 gc_pending 定时调用）
+#[derive(Debug, Clone)]
+pub struct GcConfig {
+    /// 超时时间（秒），超过此时间的 PENDING 记录将被清理
+    pub timeout_secs: i64,
+    /// 执行间隔（秒）
+    pub interval_secs: u64,
+}
+
+impl Default for GcConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: 300,  // 5分钟
+            interval_secs: 60,  // 1分钟
+        }
+    }
+}
+
+impl GcConfig {
+    /// 生产环境配置（更长间隔）
+    pub fn production() -> Self {
+        Self {
+            timeout_secs: 600,  // 10分钟
+            interval_secs: 300, // 5分钟
+        }
+    }
+    
+    /// 测试环境配置（短间隔）
+    #[cfg(test)]
+    pub fn test() -> Self {
+        Self {
+            timeout_secs: 30,
+            interval_secs: 5,
+        }
+    }
+}
+
 /// 品种交易器
 pub struct Trader {
     config: TraderConfig,
@@ -128,11 +168,17 @@ pub struct Trader {
     last_order_ms: AtomicU64,
     is_running: AtomicBool,
     shutdown: Notify,
+    /// v2.1: GC 配置
+    gc_config: GcConfig,
+    /// v2.1: GC 任务句柄（用于优雅停止）
+    /// 使用 Arc<Mutex<Option<...>>> 解决 &self 不可变借用问题
+    gc_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl Trader {
     /// 创建 Trader（需要注入 executor、repository 和 store）
     /// P0-3 修复：使用此构造函数时，风控将被禁用（不安全，生产环境禁止）
+    /// v2.1: 使用默认 GC 配置
     pub fn new(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -140,7 +186,7 @@ impl Trader {
         store: StoreRef,
     ) -> Self {
         Self {
-            config,
+            config: config.clone(),
             status_machine: TokioRwLock::new(PinStatusMachine::new()),
             signal_generator: MinSignalGenerator::new(),
             position: TokioRwLock::new(None),
@@ -151,11 +197,14 @@ impl Trader {
             last_order_ms: AtomicU64::new(0),
             is_running: AtomicBool::new(false),
             shutdown: Notify::new(),
+            gc_config: GcConfig::default(),
+            gc_handle: Arc::new(Mutex::new(None)),
         }
     }
 
     /// 创建带账户服务的 Trader（推荐）
     /// P0-3 修复：必须配置 AccountProvider 才能下单
+    /// v2.1: 使用默认 GC 配置
     pub fn with_account_provider(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -164,7 +213,7 @@ impl Trader {
         account_provider: Arc<dyn AccountProvider>,
     ) -> Self {
         Self {
-            config,
+            config: config.clone(),
             status_machine: TokioRwLock::new(PinStatusMachine::new()),
             signal_generator: MinSignalGenerator::new(),
             position: TokioRwLock::new(None),
@@ -175,6 +224,8 @@ impl Trader {
             last_order_ms: AtomicU64::new(0),
             is_running: AtomicBool::new(false),
             shutdown: Notify::new(),
+            gc_config: GcConfig::default(),
+            gc_handle: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -342,6 +393,98 @@ impl Trader {
         self.is_running.store(false, Ordering::SeqCst);
         // 通知所有等待者
         self.shutdown.notify_waiters();
+    }
+
+    // ==================== v2.1: P2-1 GC 定时任务 ====================
+
+    /// 启动 GC 定时任务（v2.1: P2-1）
+    /// 定时清理超时的 PENDING WAL 记录
+    fn start_gc_task(&self) {
+        let repo = Arc::clone(&self.repository);
+        let timeout_secs = self.gc_config.timeout_secs;
+        let interval_secs = self.gc_config.interval_secs;
+        let symbol = self.config.symbol.clone();
+        let gc_handle = Arc::clone(&self.gc_handle);
+        let symbol_for_log = symbol.clone();  // 克隆用于闭包后的日志
+        
+        let handle = tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_secs(interval_secs));
+            
+            tracing::debug!(
+                symbol = %symbol,
+                timeout_secs = timeout_secs,
+                interval_secs = interval_secs,
+                "GC 定时任务启动"
+            );
+            
+            loop {
+                ticker.tick().await;
+                
+                match repo.gc_pending() {
+                    Ok(count) if count > 0 => {
+                        tracing::info!(
+                            symbol = %symbol,
+                            count = count,
+                            timeout_secs = timeout_secs,
+                            "GC 清理完成"
+                        );
+                    }
+                    Ok(_) => {
+                        tracing::trace!(
+                            symbol = %symbol,
+                            "GC 检查完成，无待清理记录"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            symbol = %symbol,
+                            error = %e,
+                            "GC 清理失败"
+                        );
+                    }
+                }
+            }
+        });
+        
+        // 使用锁安全存储 handle
+        let mut guard = gc_handle.lock();
+        *guard = Some(handle);
+        tracing::debug!(
+            symbol = %symbol_for_log,
+            "GC 任务句柄已注册"
+        );
+    }
+
+    /// 停止 GC 任务（v2.1: P2-1）
+    /// 优雅终止 GC 后台任务
+    async fn stop_gc_task(&self) {
+        let handle = {
+            let mut guard = self.gc_handle.lock();
+            guard.take()  // 取出 handle，Mutex 变为 None
+        };
+        
+        if let Some(h) = handle {
+            tracing::debug!(
+                symbol = %self.config.symbol,
+                "正在停止 GC 任务"
+            );
+            h.abort();
+            match h.await {
+                Ok(_) => {
+                    tracing::info!(
+                        symbol = %self.config.symbol,
+                        "GC 任务已正常停止"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        symbol = %self.config.symbol,
+                        error = %e,
+                        "GC 任务异常终止"
+                    );
+                }
+            }
+        }
     }
 
     /// 主循环执行一次（同步版，保持兼容性）
@@ -880,9 +1023,13 @@ impl Trader {
 
     /// 启动交易循环（改造后：优雅停止 + 心跳 + WAL）
     /// P0-1 修复：启用 WAL 执行，处理新的返回类型
+    /// v2.1: P2-1 启动 GC 定时任务
     pub async fn start(&self) {
         self.is_running.store(true, Ordering::SeqCst);
         tracing::info!(symbol = %self.config.symbol, "Trader 启动");
+
+        // v2.1: 启动 GC 定时任务
+        self.start_gc_task();
 
         // 崩溃恢复
         if let Ok(Some(record)) = self.repository.load_latest(&self.config.symbol) {
@@ -937,6 +1084,9 @@ impl Trader {
                 }
             }
         }
+
+        // v2.1: 停止 GC 任务（优雅关闭）
+        self.stop_gc_task().await;
 
         tracing::info!(symbol = %self.config.symbol, "Trader 已停止");
     }

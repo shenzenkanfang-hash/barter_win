@@ -332,12 +332,18 @@ mod tests {
     fn test_high_channel_uses_full_conditions() {
         let r#gen = MinSignalGenerator::new();
         let mut input = MinSignalInput::default();
-        input.tr_base_60min = dec!(0.20);
+        // 满足 >= 4 Pin 条件触发入场
+        input.tr_base_60min = dec!(0.20);  // > 15%
+        input.zscore_14_1m = dec!(2.5);     // 条件1: |zscore| > 2
+        input.pos_norm_60 = dec!(90);        // 条件3: > 80
+        input.acc_percentile_1h = dec!(95);  // 条件4: > 90
+        input.pine_bg_color = "纯绿".to_string();   // 条件5
+        input.pine_bar_color = "纯红".to_string();   // 条件6
         input.price_deviation = dec!(-0.5);
-        input.pos_norm_60 = dec!(90);
-        input.acc_percentile_1h = dec!(95);
+        input.price_deviation_horizontal_position = dec!(100);  // 条件7
+        input.tr_ratio_60min_5h = dec!(1.2);  // 条件2: > 1
 
         let output = r#gen.generate_fast_signal(&input);
-        assert!(output.long_entry || output.short_entry);
+        assert!(output.long_entry || output.short_entry, "Pin 入场条件满足时应触发信号");
     }
 }
