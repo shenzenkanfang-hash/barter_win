@@ -21,7 +21,8 @@ use tokio::sync::Notify;
 use tracing::{info, error};
 use tracing_subscriber::fmt;
 
-use b_data_source::{DataFeeder, KLine, history::HistoryApiClient, Period};
+use b_data_source::{DataFeeder, KLine, history::HistoryApiClient, Period, MarketDataStoreImpl};
+use b_data_source::ws::kline_1m::ws::KlineData;
 use d_checktable::h_15m::{Trader, TraderConfig, Executor, Repository};
 use f_engine::strategy::TraderManager;
 
@@ -62,8 +63,11 @@ pub struct SandboxContext {
     pub symbol: String,
     /// 初始资金
     pub initial_fund: Decimal,
-    /// DataFeeder（用于注入数据）
+    /// DataFeeder（用于注入数据 + API 查询）
     pub data_feeder: Arc<DataFeeder>,
+    /// 共享的 MarketDataStore（真实系统使用）
+    /// 【关键】Trader 从这里读取数据，不再构造假指标
+    pub store: Arc<MarketDataStoreImpl>,
     /// Shadow 网关
     pub gateway: Arc<ShadowBinanceGateway>,
     /// Trader 管理器
@@ -75,10 +79,17 @@ pub struct SandboxContext {
 impl SandboxContext {
     /// 创建沙盒上下文
     pub fn new(symbol: String, initial_fund: Decimal) -> Self {
+        // 创建共享的 Store（Trader 读取数据的真实来源）
+        let store = Arc::new(MarketDataStoreImpl::new());
+
+        // DataFeeder 保持独立（用于 API 查询）
+        let data_feeder = Arc::new(DataFeeder::new());
+
         Self {
             symbol,
             initial_fund,
-            data_feeder: Arc::new(DataFeeder::new()),
+            data_feeder,
+            store,  // 共享 store
             gateway: Arc::new(ShadowBinanceGateway::with_default_config(initial_fund)),
             trader_manager: Arc::new(TraderManager::new()),
             shutdown: Arc::new(Notify::new()),
@@ -224,6 +235,9 @@ async fn fetch_from_api(
 // ==================== 数据注入 ====================
 
 /// 启动数据回放
+/// 【关键】数据同时写入：
+/// 1. DataFeeder - 用于 API 查询
+/// 2. MarketDataStore - 用于 Trader 读取（触发真实波动率计算）
 async fn start_data_replay(
     ctx: &SandboxContext,
     start_time: DateTime<Utc>,
@@ -239,6 +253,10 @@ async fn start_data_replay(
         "[Data] 启动数据回放"
     );
 
+    // 克隆共享组件
+    let data_feeder = ctx.data_feeder.clone();
+    let store = ctx.store.clone();
+
     // 使用已加载的 K 线数据
     // 创建生成器
     let generator = StreamTickGenerator::new(
@@ -246,11 +264,11 @@ async fn start_data_replay(
         Box::new(klines.into_iter()),
     );
 
-    // 按时间顺序生成 Tick，注入 DataFeeder
-    let data_feeder = ctx.data_feeder.clone();
+    // 按时间顺序生成 Tick，同时注入 DataFeeder 和写入 Store
     for tick_result in generator {
+        // 1. 转换为 Tick（用于 DataFeeder）
         let tick = b_data_source::Tick {
-            symbol: tick_result.symbol,
+            symbol: tick_result.symbol.clone(),
             price: tick_result.price,
             qty: tick_result.qty,
             timestamp: tick_result.timestamp,
@@ -259,10 +277,28 @@ async fn start_data_replay(
             kline_1d: None,
         };
 
+        // 2. 注入 DataFeeder（API 查询用）
         data_feeder.push_tick(tick);
+
+        // 3. 转换为 KlineData 写入 Store（触发真实波动率计算！）
+        let kline_data = KlineData {
+            kline_start_time: tick_result.timestamp.timestamp_millis(),
+            kline_close_time: tick_result.timestamp.timestamp_millis() + 60000,
+            symbol: tick_result.symbol.clone(),
+            interval: "1m".to_string(),
+            open: tick_result.price.to_string(),
+            close: tick_result.price.to_string(),
+            high: tick_result.price.to_string(),
+            low: tick_result.price.to_string(),
+            volume: tick_result.qty.to_string(),
+            is_closed: true,  // 每个 tick 都作为闭合的 K 线写入
+        };
+
+        // 写入真实 Store（触发 VolatilityManager 计算！）
+        store.write_kline(&symbol, kline_data, true);
     }
 
-    info!(symbol = %symbol, "[Data] 数据回放完成");
+    info!(symbol = %symbol, "[Data] 数据回放完成，已写入 Store");
 }
 
 // ==================== 策略执行 ====================
@@ -294,9 +330,9 @@ async fn start_trader(ctx: &SandboxContext) -> Result<(), Box<dyn std::error::Er
             .map_err(|e| format!("Repository init failed: {}", e))?
     );
 
-    // 创建 MarketDataStore（使用默认 store）
+    // 【关键】使用共享的 Store（沙盒数据已写入，Trader 从这里读取真实数据）
     let store: std::sync::Arc<dyn b_data_source::MarketDataStore + Send + Sync> =
-        b_data_source::default_store().clone();
+        ctx.store.clone();
 
     // 创建 Trader
     let trader = Arc::new(Trader::new(config, executor, repository, store));
