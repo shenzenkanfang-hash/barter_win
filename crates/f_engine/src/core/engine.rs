@@ -58,7 +58,7 @@ impl Default for PositionState {
 }
 
 #[derive(Debug, Default, Clone)]
-struct EngineStats {
+pub struct EngineStats {
     total_orders: u64,
     total_trades: u64,
     total_errors: u64,
@@ -106,7 +106,7 @@ impl EventDrivenEngine {
 
     /// 处理单个 Tick
     async fn on_tick(&mut self, tick: b_data_source::Tick) {
-        let symbol = tick.symbol.clone();
+        let _symbol = tick.symbol.clone();
 
         // 1. 更新指标
         self.update_indicators(&tick);
@@ -275,7 +275,7 @@ impl EventDrivenEngine {
     }
 
     /// 更新持仓状态
-    fn update_position(&mut self, tick: &b_data_source::Tick) {
+    fn update_position(&mut self, _tick: &b_data_source::Tick) {
         // 预留扩展点
     }
 

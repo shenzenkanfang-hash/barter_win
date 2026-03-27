@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use crate::account::types::FundPool;
 
 /// 资金池管理器
+#[allow(dead_code)]
 pub struct FundPoolManager {
     /// 分钟级资金池
     minute_pool: Arc<RwLock<FundPool>>,

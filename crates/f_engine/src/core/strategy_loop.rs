@@ -1,8 +1,30 @@
 //! strategy_loop.rs - 策略自循环协程
 //!
 //! Engine 协程管理 - spawn / stop / 心跳监控 / 指数退避重启
+//!
+//! # ⚠️ 已废弃 (v3.0)
+//! 此模块使用轮询架构，已被事件驱动架构替代。
+//!
+//! ## 新架构
+//! - 使用 `f_engine::event::EventEngine` 替代
+//! - 使用 `recv().await` 阻塞等待替代 `tokio::time::sleep`
+//! - 使用 channel 驱动替代 spawn 后台任务
+//!
+//! ## 迁移指南
+//! ```ignore
+//! // 旧代码
+//! let loop = StrategyLoop::new(config);
+//! loop.run().await;
+//!
+//! // 新代码
+//! use f_engine::event::{EventEngine, EngineConfig, EventBus};
+//! let (bus, handle) = EventBus::default();
+//! let engine = EventEngine::new(config, risk_checker, strategy, gateway);
+//! engine.run(bus.into_tick_rx()).await;
+//! ```
 
 #![forbid(unsafe_code)]
+#![allow(deprecated)]
 
 use parking_lot::RwLock;
 use std::collections::HashMap;

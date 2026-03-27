@@ -22,8 +22,8 @@ name = "trading-system"
 path = "src/main.rs"
 
 [[bin]]
-name = "sandbox"
-path = "src/sandbox_main.rs"
+name = "sandbox_pure"
+path = "src/sandbox_pure.rs"
 
 
 [dependencies]

@@ -17,7 +17,7 @@ use parking_lot::{Mutex, RwLock as ParkingRwLock};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use thiserror::Error;
-use tokio::sync::Notify;
+use tokio::sync::{mpsc, Notify};
 use tokio::time::interval;
 use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategyId, StrategySignal, TradeCommand};
@@ -83,6 +83,7 @@ pub enum TraderError {
 /// 账户信息提供者 Trait（已废弃，使用 AccountProviderFn 代替）
 /// @deprecated v2.3: 使用 AccountProviderFn 替代以避免 async trait dyn 兼容性问题
 #[deprecated(since = "2.3.0", note = "使用 AccountProviderFn 替代")]
+#[allow(async_fn_in_trait)]
 pub trait AccountProvider: Send + Sync {
     async fn get_account(&self, symbol: &str) -> Result<AccountInfo, TraderError>;
 }
@@ -1346,6 +1347,7 @@ impl Trader {
         tracing::info!(symbol = %self.config.symbol, "Trader 启动");
 
         // v2.1: 启动 GC 定时任务
+        #[allow(deprecated)]
         self.start_gc_task();
 
         // 崩溃恢复
@@ -1406,6 +1408,77 @@ impl Trader {
         self.stop_gc_task().await;
 
         tracing::info!(symbol = %self.config.symbol, "Trader 已停止");
+    }
+
+    // ==================== 事件驱动架构 (v3.0) ====================
+
+    /// 事件驱动交易循环（替代 start() 的新方法）
+    ///
+    /// # 架构
+    /// - **零轮询**: `recv().await` 阻塞等待，无 `tokio::time::sleep`
+    /// - **零 spawn**: 无 `tokio::spawn` 后台任务
+    /// - **单事件流**: 一个 Tick 驱动完整处理链
+    ///
+    /// # 使用方式
+    /// ```ignore
+    /// use tokio::sync::mpsc;
+    ///
+    /// let (tx, rx) = mpsc::channel(1024);
+    /// let trader = Trader::new(...);
+    /// trader.run(rx).await;
+    /// ```
+    pub async fn run(&self, mut tick_rx: mpsc::Receiver<b_data_source::Tick>) {
+        self.is_running.store(true, Ordering::SeqCst);
+        tracing::info!(symbol = %self.config.symbol, "Trader 事件驱动模式启动");
+
+        // 崩溃恢复
+        if let Ok(Some(record)) = self.repository.load_latest(&self.config.symbol) {
+            tracing::info!(
+                symbol = %self.config.symbol,
+                status = ?record.trader_status,
+                "已从 SQLite 恢复状态"
+            );
+            self.restore_from_record(&record).await;
+        }
+
+        // 事件循环：替代原来的 sleep + execute_once_wal
+        while let Some(_tick) = tick_rx.recv().await {
+            // 执行一次交易逻辑
+            match self.execute_once_wal().await {
+                Ok(ExecutionResult::Executed { qty, order_type }) => {
+                    tracing::info!(
+                        symbol = %self.config.symbol,
+                        qty = %qty,
+                        ?order_type,
+                        "WAL 执行成功"
+                    );
+                }
+                Ok(ExecutionResult::Skipped(reason)) => {
+                    tracing::trace!(
+                        symbol = %self.config.symbol,
+                        reason = %reason,
+                        "WAL 跳过执行"
+                    );
+                }
+                Ok(ExecutionResult::Failed(e)) => {
+                    tracing::warn!(
+                        symbol = %self.config.symbol,
+                        error = %e,
+                        "WAL 执行失败"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        symbol = %self.config.symbol,
+                        error = %e,
+                        "WAL 执行异常"
+                    );
+                }
+            }
+        }
+
+        self.is_running.store(false, Ordering::SeqCst);
+        tracing::info!(symbol = %self.config.symbol, "Trader 事件循环结束");
     }
 
     /// 健康检查（异步）

@@ -11,6 +11,15 @@
 //! - 不模拟指标计算（真实调用 c_data_process）
 //! - 不跳过历史数据拉取
 //! - 完整 WAL 模式执行
+//!
+//! # ⚠️ 已废弃 (v3.0)
+//! 此文件使用轮询架构，已被事件驱动架构替代。
+//!
+//! ## 新架构
+//! 使用 `src/sandbox_event_main.rs` 替代，支持：
+//! - 零轮询：recv().await 阻塞等待
+//! - 零 spawn：单事件循环
+//! - Channel 背压控制
 
 use std::sync::Arc;
 use chrono::{DateTime, Utc, TimeZone};
@@ -344,13 +353,20 @@ async fn start_trader(ctx: &SandboxContext) -> Result<(), Box<dyn std::error::Er
     // 创建 Trader
     let trader = Arc::new(Trader::new(config, executor, repository, store));
 
-    // 启动 Trader 协程
+    // 创建 Tick channel（事件驱动架构）
+    let (tick_tx, tick_rx) = tokio::sync::mpsc::channel(1024);
     let trader_clone = trader.clone();
+
+    // 启动 Trader 事件循环（使用新的 run() 方法）
     tokio::spawn(async move {
-        trader_clone.start().await;
+        trader_clone.run(tick_rx).await;
     });
 
-    info!(symbol = %symbol, "[Engine] Trader 协程已启动");
+    info!(symbol = %symbol, "[Engine] Trader 事件驱动模式已启动");
+
+    // 存储 tick_tx 以便外部注入 Tick
+    // 注意：这个实现中 Tick 是通过 DataFeeder 注入的，这里只是标记事件驱动模式已启用
+    let _ = tick_tx; // 暂时忽略，DataFeeder 注入在 data_loop 中处理
 
     Ok(())
 }

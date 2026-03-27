@@ -4,681 +4,185 @@
 
 **沙盒是全项目集成测试环境**，用于验证整个交易系统在真实行情数据下的完整闭环运行。
 
-## 架构选型：为什么不用微服务？
+## 核心原则
 
-交易系统追求 **微秒级低延迟**：
-- 微服务：网络通信，10-50ms 延迟
-- 共享内存：内存访问，<1μs 延迟
-
-采用 **共享内存的数据服务模式**，同进程内数据交互零网络开销。
-
-### 数据服务模式
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  数据服务层（共享内存，同进程）                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│  DataFeeder (Tick/K线数据服务)                                      │
-│  └─ 持续接收数据，按需提供 ws_get_1m(symbol)                        │
-├─────────────────────────────────────────────────────────────────────┤
-│  IndicatorCache (指标数据服务)                                       │
-│  └─ 持续计算指标，按需提供 get(symbol)                              │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↑ 提供数据
-┌─────────────────────────────────────────────────────────────────────┐
-│  消费者（引擎层/策略层）                                            │
-│  └─ 按需调用 → 共享内存访问 → 微秒级响应                           │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**TradeManager 四层架构：**
-```
-数据源层（自运行）  →  指标层（自运行）  →  引擎层  →  策略层
-StreamTickGenerator     IndicatorCache      监控波动率    独立任务
-      ↓                      ↓                   ↓            ↓
-  push_tick            计算RSI/EMA        触发任务        策略/风控/下单
-```
-
-## 架构设计
-
-### 正常WS数据流
-
-**核心原则：WS推送完整K线数据 → 共享内存 → 消费者按需拉取**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     币安期货 WS (fstream.binance.com)           │
-│   推送: 实时更新当前1m K线的完整数据 (O/H/L/C/V)                 │
-│   每条消息包含: open, high, low, close, volume, is_closed        │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓ 解析消息
-┌─────────────────────────────────────────────────────────────────┐
-│                     Kline1mStream (b_data_source/ws/kline_1m)   │
-│   1. 解析 BinanceKlineMsg                                        │
-│   2. 更新 VolatilityManager (波动率计算)                          │
-│   3. 写入历史文件 (is_closed=true 时)                            │
-│   4. 写入实时缓存文件 (覆盖写入)                                 │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓ 共享内存
-┌─────────────────────────────────────────────────────────────────┐
-│                     DataFeeder (b_data_source/api)              │
-│   latest_ticks: HashMap<Symbol, Tick>                           │
-│   Tick { kline_1m: Option<KLine>, kline_15m, kline_1d }       │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓ 按需拉取
-┌─────────────────────────────────────────────────────────────────┐
-│         风控层 / 检查层 / 引擎层                                 │
-│   通过 ws_get_1m(symbol) 拉取最新K线                            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**注意：WS推送的每条消息就是完整的K线数据，不是Tick聚合！**
-
-### 正常项目架构：被动拉取式
-
-**核心原则：数据层/指标层是被动提供者，被其他层主动拉取**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     行情数据层 (b_data_source)                    │
-│   实时WS → Kline1mStream → DataFeeder                          │
-│   提供 API 按需拉取历史数据                                      │
-└─────────────────────────────────────────────────────────────────┘
-                              ↕ 拉取
-┌─────────────────────────────────────────────────────────────────┐
-│                     指标层 (c_data_process)                      │
-│   拉取历史K线 → 计算指标 (EMA/RSI/PineColor)                    │
-│   提供指标值查询接口                                             │
-└─────────────────────────────────────────────────────────────────┘
-                              ↕ 拉取
-┌─────────────────────────────────────────────────────────────────┐
-│         风控层 / 检查层 / 引擎层                                 │
-│   主动拉取数据使用，按需拉取                                     │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## 沙盒职责
-
-**沙盒模拟真实交易所环境，中间业务层完全不变**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              正常业务层 (c/d/e/f_engine)                        │
-│   TradingEngineV2 → 策略 → 风控 → 订单执行                      │
-│   以为在和真实交易所通信，实际被两端拦截                          │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓ 上行请求
-┌─────────────────────────────────────────────────────────────────┐
-│         ShadowBinanceGateway (h_sandbox/gateway)               │
-│   职责: 拦截订单/账户/持仓请求                                    │
-│   - place_order() → 模拟成交                                     │
-│   - get_account() → 返回沙盒账户余额                             │
-│   - get_position() → 返回沙盒持仓                                │
-│   - 推送模拟 Tick 到 DataFeeder                                  │
-└─────────────────────────────────────────────────────────────────┘
-                              ↑ 下行响应
-┌─────────────────────────────────────────────────────────────────┐
-│         StreamTickGenerator (h_sandbox/historical_replay)       │
-│   职责: 模拟WS推送数据                                           │
-│   - 从API拉取历史K线 (--start --end)                            │
-│   - 生成模拟 Tick流                                             │
-│   - 填充 kline_1m → push_tick → DataFeeder                      │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                     DataFeeder (b_data_source)                  │
-│   latest_ticks: HashMap<Symbol, Tick>                           │
-│   正常业务层通过 ws_get_1m() 按需拉取                            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 两端拦截模式
-
-| 方向 | 组件 | 职责 |
-|-----|------|------|
-| **前端拦截** | ShadowBinanceGateway | 拦截下行请求（订单/账户/持仓），返回模拟响应 |
-| **后端注入** | StreamTickGenerator | 注入上行数据（K线/Tick），模拟WS推送 |
-
-### 沙盒与正常模式的对比
-
-| 层级 | 正常模式 | 沙盒模式 |
-|-----|---------|---------|
-| WS数据源 | 币安fstream.binance.com | StreamTickGenerator → push_tick |
-| 订单执行 | 币安API | ShadowBinanceGateway.place_order() |
-| 账户查询 | 币安API | ShadowBinanceGateway.get_account() |
-| 持仓查询 | 币安API | ShadowBinanceGateway.get_position() |
-| 业务逻辑 | c/d/e/f_engine (不变) | c/d/e/f_engine (不变) |
-
-### 关键点
-
-1. **ShadowBinanceGateway** 替代真实交易所API，业务层无感知
-2. **StreamTickGenerator → push_tick** 替代真实WS推送，业务层无感知
-3. 中间的 c/d/e/f_engine **完全不变**，按正常逻辑运行
-
-### 沙盒功能
-
-1. **拉取历史K线**（用于模拟）
-   ```
-   --symbol HOTUSDT --start 2025-10-09 --end 2025-10-11
-   ```
-   - 从币安API (`fapi.binance.com/fapi/v1/klines`) 拉取K线数据
-   - 分页拼接 (每次最多1000条)
-   - 转换为内部 KLine 格式
-
-2. **模拟WS推送**
-   ```
-   KLine数据 → StreamTickGenerator → 60 ticks/K线
-                                  ↓
-                           填充 kline_1m → push_tick → DataFeeder
-   ```
-   - 每根K线生成60个模拟Tick
-   - 每条Tick包含当前K线状态 (open/high/low/close/volume)
-   - 调用 `push_tick` 存入 DataFeeder
-   - 正常业务层通过 `ws_get_1m()` 按需拉取
-
-3. **API请求拦截**
-   ```
-   TradingEngine → place_order() → ShadowBinanceGateway → 模拟成交
-   TradingEngine → get_account() → ShadowBinanceGateway → 返回账户
-   TradingEngine → get_position() → ShadowBinanceGateway → 返回持仓
-   ```
-
-4. **数据格式**
-   - WS格式: BinanceKlineMsg (与真实WS一致)
-   - 内存格式: Tick { kline_1m: Some(KLine), kline_15m: None, kline_1d: None }
-
-## 测试场景设计
-
-### 场景1: 趋势跟踪
-```
-数据: 明显趋势行情 (BTCUSDT 2025-03 上涨)
-预期:
-  - EMA5 > EMA20 金叉 → 做多
-  - EMA5 < EMA20 死叉 → 平仓
-  - 最终盈亏: 正
-```
-
-### 场景2: 震荡行情
-```
-数据: 横盘震荡 (BTCUSDT 2025-01)
-预期:
-  - RSI 超买超卖反复触发
-  - 风控拦截: 订单价值过小
-  - 最终盈亏: 接近0 或 负(手续费)
-```
-
-### 场景3: 极端行情
-```
-数据: 大幅波动 (HOTUSDT 2025-10-19)
-预期:
-  - 波动率超过阈值 → 禁止开仓
-  - 已有持仓 → 止损检查
-```
-
-## 验证指标
-
-| 指标 | 说明 | 验证方式 |
-|------|------|----------|
-| 资金一致性 | 余额 ± 浮动盈亏 = 初始资金 | 断言 |
-| 持仓一致性 | 开仓量 - 平仓量 = 当前持仓 | 断言 |
-| 订单完整性 | 所有订单都有 Filled/Cancelled | 日志 |
-| 风控有效性 | 拦截的订单都有原因 | 日志 |
-| 性能指标 | Tick处理 < 1ms | 计时 |
-
-## 测试检查目标（BUG 发现清单）
-
-### 1. 策略层面检查
-
-| 检查项 | 预期行为 | 异常表现 |
-|-------|---------|---------|
-| EMA 金叉/死叉 | EMA5 上穿 EMA20 开多，下穿平仓 | 信号延迟、方向错误 |
-| RSI 超买超卖 | RSI > 70 禁止开多，RSI < 30 禁止开空 | 未生效、误触发 |
-| PineColor 颜色 | 多头趋势绿色做多，红色平仓 | 颜色判断错误 |
-| 止盈止损 | 达到止盈/止损点必须平仓 | 未触发、延迟 |
-| 交易频率 | 同一 symbol 禁止超频交易 | 短时间内多次开仓 |
-
-### 2. 风控层面检查
-
-| 检查项 | 预期行为 | 异常表现 |
-|-------|---------|---------|
-| 仓位限制 | 单边持仓不超过资金上限 | 超仓 |
-| 杠杆倍数 | 不超过最大杠杆 | 杠杆超限 |
-| 订单价值 | 订单金额不能过小/过大 | 金额异常 |
-| 资金检查 | 余额不足时禁止开仓 | 负数余额 |
-| 禁止交易期 | 波动率过高期间禁止开仓 | 极端行情开仓 |
-
-### 3. 数据层面检查
-
-| 检查项 | 预期行为 | 异常表现 |
-|-------|---------|---------|
-| K线拼接 | 分页数据正确拼接 | 数据丢失、顺序错误 |
-| Tick 完整性 | 不丢 Tick、不重复 | 价格跳变、数据断裂 |
-| RSI/EMA 计算 | 历史数据足够时计算正确 | 数据不足时 NaN/0 |
-| 价格精度 | Decimal 计算精确 | 精度丢失 |
-| 指标更新 | Tick 到达时指标同步更新 | 指标滞后 |
-
-### 4. 状态一致性检查
-
-| 检查项 | 预期行为 | 异常表现 |
-|-------|---------|---------|
-| 资金守恒 | 余额 + 浮动盈亏 = 初始资金 | 资金凭空增减 |
-| 持仓守恒 | 开仓量 - 平仓量 = 当前持仓 | 持仓数量错误 |
-| 订单闭环 | 所有订单终态 Filled/Cancelled | 订单卡死 Pending |
-| 重启恢复 | 重启后状态完整恢复 | 状态丢失 |
-
-### 5. 性能层面检查
-
-| 检查项 | 预期阈值 | 异常表现 |
-|-------|---------|---------|
-| Tick 处理延迟 | < 1ms | 处理超时 |
-| 锁竞争 | 无长时间持锁 | 其他任务等待 |
-| 内存使用 | 稳定不增长 | 内存泄漏 |
-| CPU 使用 | 合理范围 | 死循环、空转 |
-
-### 6. 边界情况检查
-
-| 检查项 | 场景描述 | 预期表现 |
-|-------|---------|---------|
-| 暴涨/暴跌 | 价格瞬间波动 > 5% | 禁止开仓、触发止损 |
-| 极端波动 | 波动率突增 10 倍 | 暂停交易 |
-| 数据断流 | 某段时间无数据 | 使用上一笔价格 |
-| 订单堆积 | 短时间大量订单 | 按顺序执行 |
-| 并发操作 | 多任务同时操作同一 symbol | 互斥锁保护 |
-
-### 7. 测试场景映射
-
-| 场景 | 覆盖检查项 |
-|-----|-----------|
-| 趋势跟踪 (BTCUSDT 2025-03) | EMA 金叉/死叉、止盈止损、资金守恒 |
-| 震荡行情 (BTCUSDT 2025-01) | RSI 超买超卖、订单价值、交易频率 |
-| 极端行情 (HOTUSDT 2025-10-19) | 波动率限制、止损检查、边界情况 |
-| 数据完整性测试 | K线拼接、Tick完整性、价格精度 |
-| 并发压力测试 | 锁竞争、订单堆积、状态一致性 |
-
-### 8. 断言规则（自动化检查）
-
-```rust
-// 资金守恒
-assert_eq!(account.balance + unrealized_pnl, initial_fund);
-
-// 持仓守恒
-assert_eq!(opened_qty - closed_qty, current_position);
-
-// 订单闭环
-for order in orders {
-    assert!(matches!(order.status, Filled | Cancelled));
-}
-
-// 性能检查
-assert!(processing_time < Duration::from_millis(1));
-```
-
-## 沙盒测试流程规则
-
-**核心原则：所有测试在沙盒副本中进行，确认无误后再同步到主项目**
-
-### 沙盒副本规则
-
-1. **创建沙盒副本**
-   ```
-   crates/h_sandbox/sandbox_copy/
-   └── 复制整个项目结构
-   ```
-
-2. **沙盒内测试**
-   - 所有代码修改在 `sandbox_copy/` 内进行
-   - 引用路径全部改为 `sandbox_copy/`
-   - 可自由修改任何层级
-
-3. **问题确认**
-   - 测试通过
-   - 问题定位清晰
-   - 修复方案确定
-
-4. **同步到主项目**
-   - 将修复复制回主项目对应位置
-   - 执行 `git add` + `git commit`
-   - 保留沙盒副本作为记录
-
-### 操作流程
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  1. 创建沙盒副本                                              │
-│     cp -r . crates/h_sandbox/sandbox_copy/                   │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│  2. 在沙盒副本中修改                                          │
-│     修改引用路径，测试各种场景                               │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│  3. 确认问题/修复                                            │
-│     运行测试，验证修复有效                                   │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│  4. 同步到主项目                                              │
-│     git add + commit                                         │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 禁止事项
-
-- ❌ 禁止直接在主项目测试未经验证的代码
-- ❌ 禁止跳过沙盒测试直接提交
-- ❌ 沙盒副本中发现的临时调试代码必须清理后才能同步
-
-## 开发约束
-
-**一、除数据层外，其他层禁止为沙盒做特别修改！**
-
-| 层级 | 允许修改 | 说明 |
-|------|---------|------|
-| b_data_source | ✅ | 历史数据/模拟Tick生成（沙盒专属） |
-| c_data_process | ❌ | 指标计算/信号生成（使用真实逻辑） |
-| d_checktable | ❌ | 交易所规则校验（使用真实规则） |
-| e_risk_monitor | ❌ | 风控检查（使用真实风控） |
-| f_engine | ❌ | 订单执行/持仓管理（使用真实引擎） |
-
-**例外情况：**
-- 实际运行中本来就会遇到的问题（如网络超时处理、配置文件缺失）
-- 可以修改，但必须同步到主代码库，不能是沙盒独有
-
-**二、任何问题的修改必须得到用户确认！**
-
-| 修改类型 | 处理方式 |
-|---------|---------|
-| 业务逻辑修改 | 列出方案 → 用户确认 → 执行 |
-| 接口变更 | 说明影响范围 → 用户确认 → 执行 |
-| 测试修复 | 解释原因 → 用户确认 → 执行 |
-| 文档更新 | 用户确认 → 执行 |
-
-## 运行命令
-
-```bash
-# 运行沙盒测试
-cargo run -p trading-system --bin sandbox -- --symbol BTCUSDT --start 2025-10-19 --end 2025-10-21
-
-# 带参数
-cargo run -p trading-system --bin sandbox -- \
-    --symbol HOTUSDT \
-    --start 2025-10-19 \
-    --end 2025-10-21 \
-    --fund 10000 \
-    --speed 1000
-```
-我理解你的需求了。你要的是一个**"压力测试沙盒"**——让真实系统在受控环境下裸奔，有问题就爆炸，而不是在沙盒里粉饰太平。
-
-让我先搜索一下金融系统沙盒测试的最佳实践，以及如何设计"让系统失败"的测试架构：
-基于搜索结果，我为你设计一个**"真实系统压力测试沙盒"**架构。核心原则是：**沙盒只模拟外部世界，不修复内部缺陷**。
+> **沙盒 = 外部世界模拟器，不是系统的保姆。**
+> 如果真实系统崩溃，那就让它崩溃，这样你才能发现真正的 Bug。
 
 ---
 
-## 架构设计：沙盒 = 外部世界模拟器
+## 架构原则
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        沙盒边界 (Sandbox)                        │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
-│  │  历史K线数据源 │    │  模拟交易所   │    │   故障注入控制器     │ │
-│  │  (CSV/DB)   │───→│ (撮合/账户/持仓)│←───│  (网络延迟/数据错误)  │ │
-│  └─────────────┘    └─────────────┘    └─────────────────────┘ │
-│         │                  │                                    │
-│         └──────────────────┘                                    │
-│                   ↓                                            │
-│         ┌─────────────────┐                                    │
-│         │   真实系统边界    │ ←── 沙盒只到这里，内部绝不干预        │
-│         │  (DataFeed/OMS) │                                    │
-│         └─────────────────┘                                    │
-└─────────────────────────────────────────────────────────────────┘
-                             ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                      真实系统 (Real System)                      │
-│                                                                  │
-│   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌─────────┐ │
-│   │ MarketData│───→│  Trader  │───→│ Strategy │───→│  Risk   │ │
-│   │   Store   │    │ (真实代码) │    │ (真实代码) │    │ (真实)  │ │
-│   └──────────┘    └──────────┘    └──────────┘    └─────────┘ │
-│        ↑              │                                  │      │
-│        └──────────────┘                                  │      │
-│              真实数据流 (不干预)                           │      │
-│                            └───────────────────────────────┘      │
-│                                         ↓                        │
-│                                   ┌──────────┐                  │
-│                                   │ 订单拦截器 │ ← 沙盒拦截点      │
-│                                   │(模拟成交)  │                  │
-│                                   └──────────┘                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+### 沙盒职责（仅这些）
 
----
-
-## 核心设计原则
-
-| 原则 | 沙盒职责 | 真实系统职责 | 违规示例 |
-|------|---------|-------------|---------|
-| **数据注入** | 提供原始 Tick/K线 | 自己解析、存储、计算指标 | ❌ 沙盒预计算指标 |
-| **状态管理** | 模拟交易所状态 | 自己管理策略状态、持仓 | ❌ 沙盒帮策略更新持仓 |
-| **故障处理** | 模拟网络延迟、数据缺失 | 自己处理错误、重试、熔断 | ❌ 沙盒补全缺失数据 |
-| **订单执行** | 模拟撮合结果 | 自己管理订单生命周期 | ❌ 沙盒修改订单价格 |
-
-> **核心原则：沙盒 = 外部世界模拟器，不是系统的保姆。如果真实系统崩溃，那就让它崩溃，这样你才能发现真正的 Bug。**
-
-### 关键认知转变
-
-| ❌ 错误做法 | ✅ 正确做法 |
-|-----------|-----------|
-| "Trader 读不到 K线，我在沙盒里构造一个" | 让 Trader 报错，暴露数据流 Bug |
-| "指标计算失败，我返回默认值" | 让指标计算 panic，暴露计算逻辑 Bug |
-| "订单没成交，我帮它修改价格重试" | 记录未成交，验证策略是否有重试逻辑 |
-| "持仓不一致，我同步一下" | 分别查询沙盒和 Trader，验证一致性 |
-
-### 沙盒只做两件事
-
-1. **数据注入**：把原始 K线/Tick 注入到 DataFeeder，不做任何处理
-2. **请求拦截**：模拟交易所响应（订单/账户/持仓），不做业务逻辑修改
+| 组件 | 职责 | 说明 |
+|------|------|------|
+| `StreamTickGenerator` | 生成 Tick 数据 | 仅数据生成，不处理业务逻辑 |
+| `ShadowBinanceGateway` | 拦截并模拟交易所响应 | 模拟账户/持仓/成交，不干预策略 |
+| `TickToWsConverter` | 转换为 WS 格式 | 仅格式转换 |
 
 ### 沙盒禁止事项
 
 - ❌ 禁止预计算指标（让真实系统自己算）
 - ❌ 禁止补全缺失数据（让真实系统自己处理空值）
 - ❌ 禁止修改订单价格/状态（让真实系统自己管理）
-- ❌ 禁止同步状态（让不同组件独立运作，便于发现不一致）
+- ❌ 禁止同步状态（让不同组件独立运作）
+
+### 真实业务层（使用这些）
+
+| 组件 | 路径 | 说明 |
+|------|------|------|
+| `Trader` | `d_checktable::h_15m::Trader` | 真实交易器 |
+| `Executor` | `d_checktable::h_15m::Executor` | 真实订单执行器 |
+| `Repository` | `d_checktable::h_15m::Repository` | WAL 持久化 |
+| `DataFeeder` | `b_data_source` | 真实数据存储 |
 
 ---
 
-## 关键接口设计
+## 事件驱动架构 (v3.0)
 
-### 1. 数据源注入（沙盒 → 真实系统）
+### 数据流
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  沙盒层 (h_sandbox)                                                │
+│                                                                     │
+│  StreamTickGenerator ──→ Tick ──→ ShadowBinanceGateway              │
+│         │                                  │                         │
+│         │  (仅数据)                       │  (仅拦截)               │
+│         └──────────────────────────────────┘                         │
+└─────────────────────────────────────────────────────────────────────┘
+                                ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│  真实业务层                                                        │
+│                                                                     │
+│  c_data_process ──→ d_checktable ──→ e_risk_monitor ──→ f_engine │
+│                                                                     │
+│  Trader::run(tick_rx) ← 事件驱动，无轮询                            │
+│                                                                     │
+│  真实系统边界 ──────────────────────────────────────────────────────  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Channel 驱动
 
 ```rust
-// 沙盒只提供原始数据，不干预解析
-pub trait DataInjector {
-   // 注入原始 Tick，真实系统自己处理
-   async fn inject_tick(&self, symbol: &str, tick: RawTick);
-   
-   // 注入故障：数据缺失、延迟、乱序
-   async fn inject_fault(&self, fault: DataFault);
-}
+// 沙盒生成 Tick，发送到 channel
+let tick = generator.next().await;
+tick_tx.send(tick).await?;
 
-pub enum DataFault {
-   Delay(Duration),           // 网络延迟
-   DropNext(u32),             // 丢弃N个包
-   CorruptNext,               // 数据损坏
-   OutOfOrder(Vec<RawTick>),  // 乱序到达
+// 真实 Trader 从 channel 接收
+while let Some(tick) = tick_rx.recv().await {
+    trader.execute_once_wal(tick).await;
 }
 ```
 
-### 2. 交易所模拟（沙盒拦截）
+### 关键约束
 
-```rust
-// 沙盒实现 Exchange trait，但绝不干预策略逻辑
-pub struct SandboxExchange {
-   // 模拟的交易所状态
-   order_book: MockOrderBook,
-   account: MockAccount,
-   position: MockPositionManager,
-   
-   // 可配置的故障模式
-   fill_model: FillModel,      // 成交概率模型
-   latency_model: LatencyModel, // 延迟模型
-}
+| 约束 | 说明 |
+|------|------|
+| 零轮询 | `recv().await` 阻塞等待，无 `tokio::time::sleep` |
+| 零 spawn | `Trader::run()` 直接 await，不 spawn 后台任务 |
+| 单事件流 | 一个 Tick 驱动完整处理链 |
 
-impl Exchange for SandboxExchange {
-   async fn place_order(&self, order: Order) -> Result<OrderId, ExchangeError> {
-       // 1. 记录订单（用于验证）
-       self.record_order(&order);
-       
-       // 2. 模拟延迟
-       self.latency_model.simulate().await;
-       
-       // 3. 模拟撮合（不修改订单逻辑，只返回结果）
-       let fill = self.order_book.try_match(&order);
-       
-       // 4. 更新沙盒维护的独立账户状态
-       if let Some(fill) = fill {
-           self.account.apply_fill(&fill);
-           self.position.update(&fill);
-       }
-       
-       Ok(fill.map(|f| f.order_id).unwrap_or(order.id))
-   }
-   
-   // 查询接口：返回沙盒维护的状态
-   async fn get_position(&self, symbol: &str) -> Result<Position, Error> {
-       self.position.get(symbol)  // 沙盒自己维护，不与策略共享
-   }
-}
-```
+---
 
-### 3. 真实系统的 Store 必须是真实的
+## 入口程序
 
-```rust
-// ❌ 错误：沙盒创建 Store 注入数据
-let store = SandboxStore::new();
-store.inject_kline(fake_kline);  // 这是作弊！
+| 程序 | 说明 | 使用场景 |
+|------|------|----------|
+| `sandbox_pure.rs` | **推荐** 纯沙盒，仅数据注入，使用真实业务层 | 集成测试 |
+| `sandbox_full_production.rs` | 完整生产级（已废弃） | ❌ 不要使用 |
 
-// ✅ 正确：真实系统自己管理 Store，沙盒只提供原始数据流
-let trader = Trader::new(config).await;
-let data_feeder = trader.data_feeder();  // 真实系统的 DataFeeder
+### 运行命令
 
-// 沙盒只调用注入接口，不碰 Store
-sandbox.inject_tick("BTCUSDT", raw_tick).await;
-// 真实系统内部：DataFeeder → Store.update() → Trader 读取
+```bash
+# 推荐：纯沙盒模式
+cargo run --bin sandbox_pure -- --symbol HOTUSDT --fund 10000
+
+# 指定数据文件
+cargo run --bin sandbox_pure -- --symbol HOTUSDT --data data/HOTUSDT_1m.csv
 ```
 
 ---
 
-## 测试场景：暴露真实系统缺陷
+## 两端拦截模式
 
-### 场景 1：数据流断裂（你遇到的问题）
+| 方向 | 组件 | 职责 |
+|-----|------|------|
+| **上行数据** | `StreamTickGenerator` | 生成模拟 Tick，注入 DataFeeder |
+| **下行请求** | `ShadowBinanceGateway` | 拦截 place_order/get_account/get_position |
 
-```rust
-#[tokio::test]
-async fn test_data_flow_breakage() {
-   let sandbox = Sandbox::new();
-   let trader = create_real_trader();  // 真实 Trader
-   
-   // 启动 Trader
-   let handle = tokio::spawn(trader.run());
-   
-   // 沙盒注入 10 个 Tick，但不等待 Store 确认
-   for tick in test_data {
-       sandbox.inject_tick("BTCUSDT", tick).await;
-   }
-   
-   // 等待 Trader 处理
-   tokio::time::sleep(Duration::from_secs(1)).await;
-   
-   // 验证：Trader 应该因读取不到 K线而失败，而不是沙盒构造假数据
-   let status = trader.get_status().await;
-   assert!(matches!(status, TraderStatus::Error(DataUnavailable)), 
-       "Trader 应该因数据流断裂而报错，而不是静默使用假数据");
-}
 ```
-
-### 场景 2：指标计算错误暴露
-
-```rust
-#[tokio::test]
-async fn test_indicator_calculation_failure() {
-   let sandbox = Sandbox::new();
-   let trader = create_real_trader();
-   
-   // 注入正常数据，让 Trader 积累历史
-   sandbox.inject_historical_klines("BTCUSDT", 100).await;
-   
-   // 注入异常数据（价格跳空）
-   sandbox.inject_tick("BTCUSDT", Tick {
-       price: 0.0,  // 异常值
-       timestamp: now(),
-   }).await;
-   
-   // 真实系统应该：
-   // 1. 检测到异常价格
-   // 2. 指标计算可能 panic 或返回 Err
-   // 3. 策略可能因此不生成信号
-   
-   // 沙盒绝不干预，让系统自己崩溃或处理
-   let result = trader.next_decision().await;
-   
-   // 验证系统行为是否符合预期（panic、Err、或正确过滤）
-   assert!(result.is_err() || result == Decision::NoSignal);
-}
-```
-
-### 场景 3：订单生命周期验证
-
-```rust
-#[tokio::test]
-async fn test_order_lifecycle() {
-   let exchange = SandboxExchange::new()
-       .with_fill_model(FillModel::Partial(0.5))  // 50% 成交概率
-       .with_latency_model(LatencyModel::Fixed(Duration::from_millis(100)));
-   
-   let trader = create_real_trader_with_exchange(exchange.clone());
-   
-   // 运行策略直到生成订单
-   trader.run_until_order().await;
-   
-   // 验证沙盒记录的订单与 Trader 内部状态一致
-   let sandbox_orders = exchange.get_recorded_orders();
-   let trader_orders = trader.get_open_orders().await;
-   
-   // 关键：沙盒和 Trader 各自维护状态，通过接口同步
-   assert_eq!(sandbox_orders.len(), trader_orders.len());
-   
-   // 验证 Trader 正确处理了部分成交
-   exchange.simulate_time_advance(Duration::from_secs(1)).await;
-   let position = trader.get_position("BTCUSDT").await;
-   
-   // 如果 Trader 没有正确处理部分成交，这里会暴露
-   assert!(position.quantity > 0.0, "Trader 应该已处理部分成交");
-}
+真实系统                    沙盒
+    │                        │
+    ├─→ get_account() ──────→│ 返回模拟账户
+    │                        │
+    ├─→ place_order() ───────→│ 模拟成交
+    │                        │
+    │←──────────────────────┤
+    │                        │
+    │←──────────────────────┤
+    │  push_tick() ←─────────┤
 ```
 
 ---
 
-## 关键认知转变
+## 沙盒与正常模式对比
 
-| ❌ AI 的错误做法 | ✅ 正确做法 |
-|----------------|-----------|
-| "Trader 读不到 K线，我在沙盒里构造一个" | 让 Trader 报错，暴露数据流 Bug |
-| "指标计算失败，我返回默认值" | 让指标计算 panic，暴露计算逻辑 Bug |
-| "订单没成交，我帮它修改价格重试" | 记录未成交，验证策略是否有重试逻辑 |
-| "持仓不一致，我同步一下" | 分别查询沙盒和 Trader，验证一致性 |
+| 层级 | 正常模式 | 沙盒模式 |
+|-----|---------|---------|
+| WS 数据源 | Binance WS | StreamTickGenerator |
+| 订单执行 | Binance API | ShadowBinanceGateway |
+| 账户查询 | Binance API | ShadowBinanceGateway |
+| 持仓查询 | Binance API | ShadowBinanceGateway |
+| 业务逻辑 | c/d/e/f_engine | c/d/e/f_engine (不变) |
 
 ---
 
-## 下一步行动
+## 关键文件
 
-你需要我：
+| 文件 | 说明 |
+|------|------|
+| `src/historical_replay/tick_generator.rs` | StreamTickGenerator 实现 |
+| `src/gateway/interceptor.rs` | ShadowBinanceGateway 实现 |
+| `src/config.rs` | 沙盒配置 |
+| `src/simulator/` | 模拟器组件 |
 
-1. **审查现有代码** - 找出 AI 之前"过度修复"的补丁，回滚到真实流程
-2. **实现沙盒骨架** - 提供上述架构的 Rust 代码框架
-3. **设计故障注入** - 针对你的系统定制具体的故障场景
-4. **编写验证规则** - 确保沙盒不越界的自动化检查
+---
 
-请提供你的 Trader/Store/DataFeeder 接口定义，我可以帮你设计具体的沙盒实现。
+## 测试检查清单
+
+### 1. 资金一致性
+```rust
+assert_eq!(account.balance + unrealized_pnl, initial_fund);
+```
+
+### 2. 持仓一致性
+```rust
+assert_eq!(opened_qty - closed_qty, current_position);
+```
+
+### 3. 订单闭环
+```rust
+for order in orders {
+    assert!(matches!(order.status, Filled | Cancelled));
+}
+```
+
+### 4. 性能检查
+```rust
+assert!(processing_time < Duration::from_millis(1));
+```
+
+---
+
+## 开发约束
+
+| 层级 | 允许修改 | 说明 |
+|------|---------|------|
+| `b_data_source` | ✅ | 数据存储（沙盒专用） |
+| `c_data_process` | ❌ | 指标计算（使用真实逻辑） |
+| `d_checktable` | ❌ | 检查表（使用真实规则） |
+| `e_risk_monitor` | ❌ | 风控检查（使用真实风控） |
+| `f_engine` | ❌ | 订单执行（使用真实引擎） |

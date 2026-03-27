@@ -31,6 +31,7 @@ impl Default for RiskMode {
 /// Shadow 风控检查器
 ///
 /// 模拟币安期货的风控规则
+#[allow(dead_code)]
 pub struct ShadowRiskChecker {
     thresholds: RiskThresholds,
     max_leverage: u32,
@@ -66,6 +67,7 @@ impl ShadowRiskChecker {
     }
 
     /// 检查杠杆是否超过限制
+    #[allow(dead_code)]
     fn check_leverage(&self, leverage: u32) -> bool {
         leverage <= self.max_leverage
     }

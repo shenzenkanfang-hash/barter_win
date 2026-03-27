@@ -6,6 +6,7 @@ use a_common::ws::binance_ws::{BinanceKlineMsg, KlineData};
 use super::SimulatedTick;
 
 /// SimulatedTick → BinanceKlineMsg 转换器
+#[allow(dead_code)]
 pub struct TickToWsConverter {
     symbol: String,
     interval: String,

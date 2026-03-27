@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use parking_lot::RwLock;
+use tokio::time::interval;
 use tracing::info;
 
 use b_data_source::KLine;
@@ -168,10 +169,11 @@ impl ReplayController {
         &self.stats
     }
 
-    /// 启动回放（使用已有 K线迭代器）
+    /// 启动回放（使用已有 K线迭代器）- 异步版本
     ///
     /// K线由调用方加载（如 ApiKlineFetcher），这里只负责回放控制。
-    pub fn run_with_klines(
+    /// 使用 tokio::time::interval 实现非阻塞定时。
+    pub async fn run_with_klines(
         &mut self,
         klines: Vec<KLine>,
         symbol: &str,
@@ -186,8 +188,9 @@ impl ReplayController {
         self.state = ReplayState::Running;
         self.stats.start_time = Some(Instant::now());
 
-        // 主循环
+        // 使用 tokio 异步定时器（不阻塞 OS 线程）
         let effective_interval = Duration::from_millis(self.config.effective_interval_ms());
+        let mut ticker = Box::pin(interval(effective_interval));
 
         for tick in generator {
             if self.state != ReplayState::Running {
@@ -219,8 +222,8 @@ impl ReplayController {
                 }
             }
 
-            // 控制速度
-            std::thread::sleep(effective_interval);
+            // 异步等待下一个 Tick 间隔（不阻塞 tokio runtime）
+            ticker.as_mut().tick().await;
         }
 
         self.state = ReplayState::Completed;
