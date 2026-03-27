@@ -169,11 +169,6 @@ impl Repository {
         Ok(())
     }
 
-    fn prepare(&self, sql: &str) -> Result<rusqlite::Statement, RepoError> {
-        let conn = self.pool.get()?;
-        Ok(conn.prepare(sql)?)
-    }
-
     fn exec_insert(&self, sql: &str, record: &TradeRecord) -> Result<i64, RepoError> {
         let conn = self.pool.get()?;
         conn.execute(
@@ -284,15 +279,16 @@ impl Repository {
                 tracing::debug!(id = id, symbol = %record.symbol, "预写记录 PENDING");
                 Ok(id)
             }
-            Err(e) => {
+            Err(RepoError::Database(rusqlite::Error::SqliteFailure(code, _))) => {
                 // 检测 UNIQUE 约束冲突
-                if let Some(code) = e.extended_code() {
-                    if code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE {
-                        return Err(RepoError::UniqueViolation);
-                    }
+                // code 在 rusqlite 0.32 中是 libsqlite3_sys::Error (字段 extended_code: i32)
+                let extended = code.extended_code;
+                if extended == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE {
+                    return Err(RepoError::UniqueViolation);
                 }
-                Err(RepoError::Database(e))
+                Err(RepoError::Database(rusqlite::Error::SqliteFailure(code, None)))
             }
+            Err(e) => Err(e),
         }
     }
 
@@ -335,7 +331,8 @@ impl Repository {
             WHERE symbol = ? AND timestamp = ?
             LIMIT 1
         "#;
-        let mut stmt = self.prepare(sql)?;
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(sql)?;
         let mut rows = stmt.query(params![symbol, timestamp])?;
         if let Some(row) = rows.next()? {
             Ok(Some(Self::row_to_record(row)?))
@@ -352,7 +349,8 @@ impl Repository {
             ORDER BY timestamp DESC
             LIMIT 1
         "#;
-        let mut stmt = self.prepare(sql)?;
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(sql)?;
         let mut rows = stmt.query(params![symbol])?;
         if let Some(row) = rows.next()? {
             let record = Self::row_to_record(row)?;

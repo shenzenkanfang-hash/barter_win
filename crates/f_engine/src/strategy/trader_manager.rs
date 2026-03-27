@@ -6,11 +6,10 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::Mutex;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use d_checktable::h_15m::Trader;
+use d_checktable::h_15m::{Trader, TraderConfig, Executor, Repository};
 
 /// 策略类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,9 +24,7 @@ pub enum StrategyType {
 
 /// Trader 实例包装
 struct TraderInstance {
-    trader: Arc<Mutex<Trader>>,
-    /// 线程句柄（用于跟踪）
-    handle: Option<std::thread::JoinHandle<()>>,
+    trader: Arc<Trader>,
 }
 
 /// Trader 管理器
@@ -64,18 +61,35 @@ impl TraderManager {
             }
         }
 
-        // 创建 Trader 并启动
-        let trader = Trader::new(&symbol);
-        let trader_arc = trader.startloop();
+        // 创建 Trader（需要注入依赖）
+        let config = TraderConfig {
+            symbol: symbol.clone(),
+            ..Default::default()
+        };
+        let executor = Arc::new(Executor::new(d_checktable::h_15m::ExecutorConfig {
+            symbol: symbol.clone(),
+            order_interval_ms: config.order_interval_ms,
+            initial_ratio: config.initial_ratio,
+            lot_size: config.lot_size,
+            max_position: config.max_position,
+        }));
+        let repository = Arc::new(
+            Repository::new(&symbol, &config.db_path)
+                .map_err(|e| TraderError::InitFailed(symbol.clone(), e.to_string()))?,
+        );
+        let trader = Arc::new(Trader::new(config, executor, repository));
+
+        // 启动异步循环（后台任务）
+        let trader_clone = trader.clone();
+        tokio::spawn(async move {
+            trader_clone.start().await;
+        });
 
         info!("Started trader for {}", symbol);
 
         // 存储实例
         let mut instances = self.instances.write().await;
-        instances.insert(symbol.clone(), TraderInstance { 
-            trader: trader_arc.clone(), 
-            handle: None, // handle 在线程内部，不单独保存
-        });
+        instances.insert(symbol.clone(), TraderInstance { trader });
 
         Ok(())
     }
@@ -85,10 +99,7 @@ impl TraderManager {
         let mut instances = self.instances.write().await;
         
         if let Some(instance) = instances.remove(symbol) {
-            instance.trader.lock().stop();
-            if let Some(handle) = instance.handle {
-                handle.join().ok();
-            }
+            instance.trader.stop();
             info!("Stopped trader for {}", symbol);
             Ok(())
         } else {
@@ -100,12 +111,9 @@ impl TraderManager {
     /// 停止所有交易
     pub async fn stop_all(&self) {
         let mut instances = self.instances.write().await;
-        
+
         for (symbol, instance) in instances.drain() {
-            instance.trader.lock().stop();
-            if let Some(handle) = instance.handle {
-                handle.join().ok();
-            }
+            instance.trader.stop();
             info!("Stopped trader for {}", symbol);
         }
     }
@@ -123,9 +131,13 @@ impl TraderManager {
     }
 
     /// 获取 Trader 健康状态
-    pub async fn health_check(&self, symbol: &str) -> Option<d_checktable::h_15m::HealthCheck> {
+    pub async fn health_check(&self, symbol: &str) -> Option<d_checktable::h_15m::TraderHealth> {
         let instances = self.instances.read().await;
-        instances.get(symbol).map(|i| i.trader.lock().health_check())
+        if let Some(instance) = instances.get(symbol) {
+            Some(instance.trader.health().await)
+        } else {
+            None
+        }
     }
 }
 
@@ -134,9 +146,12 @@ impl TraderManager {
 pub enum TraderError {
     #[error("Trader for {0} already running")]
     AlreadyRunning(String),
-    
+
     #[error("Trader for {0} not found")]
     NotFound(String),
+
+    #[error("Failed to init trader for {0}: {1}")]
+    InitFailed(String, String),
 }
 
 #[cfg(test)]

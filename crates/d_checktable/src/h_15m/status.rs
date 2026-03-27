@@ -7,9 +7,10 @@
 #![forbid(unsafe_code)]
 
 use crate::types::MarketStatus;
+use serde::{Deserialize, Serialize};
 
 /// Pin状态枚举（从pin_main.py移植，Rust命名规范修正）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PinStatus {
     /// 初始状态
     Initial,

@@ -25,6 +25,7 @@ pub mod fund_pool;  // 资金池管理
 pub mod risk_manager;  // 风控管理
 pub mod monitoring;  // 监控与超时
 pub mod rollback;  // 回滚管理
+pub mod strategy_loop;  // 策略自循环
 
 #[cfg(test)]
 mod tests;  // 测试模块

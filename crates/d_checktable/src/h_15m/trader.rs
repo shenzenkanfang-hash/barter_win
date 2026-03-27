@@ -14,7 +14,6 @@ use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::sync::{RwLock as TokioRwLock, Notify};
-use tokio::time::sleep;
 use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategyId, StrategySignal, TradeCommand};
 
@@ -130,7 +129,7 @@ impl Trader {
     }
 
     /// 获取当前持仓方向（异步）
-    pub async fn current_position_side(&self) -> Option<PositionSide> {
+    pub async fn current_position_side(&self) -> Option<PositionDirection> {
         self.position
             .read()
             .await
@@ -165,10 +164,11 @@ impl Trader {
         // 恢复持仓
         if let Some(ref pos_str) = record.local_position {
             if let Ok(position) = serde_json::from_str::<LocalPosition>(pos_str) {
+                let qty = position.qty;
                 *self.position.write().await = Some(position);
                 tracing::info!(
                     symbol = %self.config.symbol,
-                    qty = %position.qty,
+                    qty = %qty,
                     "持仓已恢复"
                 );
             }
@@ -195,7 +195,7 @@ impl Trader {
     /// 停止 Trader（优雅停止）
     pub fn stop(&self) {
         // 尝试设置 is_running 为 false
-        if let Some(mut guard) = self.is_running.try_write() {
+        if let Ok(mut guard) = self.is_running.try_write() {
             *guard = false;
         }
         // 通知所有等待者
@@ -215,7 +215,7 @@ impl Trader {
         let signal_output = self.signal_generator.generate(&input, &vol_tier, None);
 
         // 4. 状态机决策
-        let status = self.status_machine.try_read()?.current_status();
+        let status = self.status_machine.try_read().ok()?.current_status();
         let price = self.current_price()?;
 
         // 根据状态和信号决定动作
@@ -267,8 +267,15 @@ impl Trader {
         let current_side = self.current_position_side().await;
         let current_qty = self.current_position_qty().await;
 
+        // 转换为 PositionSide（用于下单）
+        let current_side_for_order = current_side.map(|dir| match dir {
+            PositionDirection::Long | PositionDirection::NetLong => x_data::position::PositionSide::Long,
+            PositionDirection::Short | PositionDirection::NetShort => x_data::position::PositionSide::Short,
+            PositionDirection::Flat => x_data::position::PositionSide::None,
+        });
+
         // 6. 执行下单
-        match self.executor.send_order(order_type, current_qty, current_side) {
+        match self.executor.send_order(order_type, current_qty, current_side_for_order) {
             Ok(()) => {
                 // 7. WAL 确认
                 if let Err(e) = self.repository.confirm_record(pending_id, "OK") {
@@ -303,12 +310,13 @@ impl Trader {
                         .get_by_timestamp(&record.symbol, record.timestamp)
                     {
                         Ok(Some(existing)) => {
+                            let id = existing.id.unwrap_or(0);
                             tracing::warn!(
                                 symbol = %record.symbol,
-                                id = existing.id,
+                                id = id,
                                 "发现重复记录，使用已有 ID"
                             );
-                            return Ok(existing.id);
+                            return Ok(id);
                         }
                         Ok(None) => {
                             tracing::warn!(
@@ -342,10 +350,10 @@ impl Trader {
             status: crate::h_15m::repository::RecordStatus::PENDING,
             price: self.current_price().map(|p| p.to_string()),
             volatility: self.volatility_value(),
-            trader_status: Some(
-                serde_json::to_string(&self.status_machine.try_read().map(|m| m.current_status()))
-                    .unwrap_or_default(),
-            ),
+            trader_status: {
+                let machine_guard = self.status_machine.try_read().ok();
+                machine_guard.and_then(|m| serde_json::to_string(&m.current_status()).ok())
+            },
             local_position: None, // 后续更新
             order_timestamp: Some(timestamp),
             ..Default::default()
@@ -425,7 +433,7 @@ impl Trader {
         signal: &MinSignalOutput,
         price: Decimal,
     ) -> Option<StrategySignal> {
-        let pos = self.position.try_read()?;
+        let pos = self.position.try_read().ok()?;
         let has_position = pos
             .as_ref()
             .map(|p| p.direction != PositionDirection::Flat && p.qty > Decimal::ZERO)
@@ -510,6 +518,7 @@ impl Trader {
         let qty = self
             .position
             .try_read()
+            .ok()
             .and_then(|p| p.as_ref().map(|p| p.qty))
             .unwrap_or(Decimal::ZERO);
 
@@ -531,14 +540,14 @@ impl Trader {
 
     /// 更新持仓
     pub fn update_position(&self, position: Option<LocalPosition>) {
-        if let Some(mut guard) = self.position.try_write() {
+        if let Ok(mut guard) = self.position.try_write() {
             *guard = position;
         }
     }
 
     /// 更新状态
     pub fn update_status(&self, status: PinStatus) {
-        if let Some(mut guard) = self.status_machine.try_write() {
+        if let Ok(mut guard) = self.status_machine.try_write() {
             guard.set_status(status);
         }
     }

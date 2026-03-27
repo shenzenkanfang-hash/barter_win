@@ -96,7 +96,7 @@ impl MinSignalInput {
 }
 
 /// 分钟级信号输出
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinSignalOutput {
     pub long_entry: bool,
     pub short_entry: bool,
