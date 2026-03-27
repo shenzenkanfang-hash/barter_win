@@ -12,6 +12,7 @@
 use chrono::Utc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use parking_lot::{Mutex, RwLock as ParkingRwLock};
 use rust_decimal::Decimal;
@@ -365,9 +366,7 @@ impl Trader {
 
     /// 从 Store 获取波动率
     pub fn get_volatility(&self) -> Option<b_data_source::store::VolatilityData> {
-        let vol = self.store.get_volatility(&self.config.symbol);
-        tracing::warn!(symbol = %self.config.symbol, ?vol, "获取波动率调试");
-        vol
+        self.store.get_volatility(&self.config.symbol)
     }
 
     /// 获取当前价格
@@ -681,15 +680,11 @@ impl Trader {
 
     /// 构建信号输入（默认值版本，降级使用）
     /// P1-1: 临时实现，待接入真实数据
+    ///
+    /// 注意：由于沙盒环境波动率为 0 或极小值，这里使用合理的默认值
     fn build_signal_input_fallback(&self) -> Option<MinSignalInput> {
-        let vol = self.volatility_value().unwrap_or(0.0);
-
-        // 使用安全的转换方式
-        let tr_ratio = if vol > 0.0 {
-            Decimal::try_from(vol).unwrap_or(dec!(0.05))
-        } else {
-            dec!(0.05)  // volatility 为 0 时使用默认值
-        };
+        // 沙盒环境：波动率为 0 或极小值，使用中等波动率默认值
+        let tr_ratio = dec!(0.05);  // 5% 波动率默认值
 
         // TODO: P1-1 修复 - 从 store 和指标缓存获取真实数据
         // 以下为临时实现
