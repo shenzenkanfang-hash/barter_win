@@ -365,7 +365,9 @@ impl Trader {
 
     /// 从 Store 获取波动率
     pub fn get_volatility(&self) -> Option<b_data_source::store::VolatilityData> {
-        self.store.get_volatility(&self.config.symbol)
+        let vol = self.store.get_volatility(&self.config.symbol);
+        tracing::warn!(symbol = %self.config.symbol, ?vol, "获取波动率调试");
+        vol
     }
 
     /// 获取当前价格
@@ -680,13 +682,20 @@ impl Trader {
     /// 构建信号输入（默认值版本，降级使用）
     /// P1-1: 临时实现，待接入真实数据
     fn build_signal_input_fallback(&self) -> Option<MinSignalInput> {
-        let vol = self.volatility_value()?;
+        let vol = self.volatility_value().unwrap_or(0.0);
+
+        // 使用安全的转换方式
+        let tr_ratio = if vol > 0.0 {
+            Decimal::try_from(vol).unwrap_or(dec!(0.05))
+        } else {
+            dec!(0.05)  // volatility 为 0 时使用默认值
+        };
 
         // TODO: P1-1 修复 - 从 store 和指标缓存获取真实数据
         // 以下为临时实现
         Some(MinSignalInput {
             tr_base_60min: dec!(0.1),
-            tr_ratio_15min: Decimal::from_f64_retain(vol)?,
+            tr_ratio_15min: tr_ratio,
             zscore_14_1m: dec!(0),
             zscore_1h_1m: dec!(0),
             tr_ratio_60min_5h: dec!(0),

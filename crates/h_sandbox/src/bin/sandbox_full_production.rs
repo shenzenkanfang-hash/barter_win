@@ -392,7 +392,7 @@ async fn simulate_order_filled(
 async fn run_sandbox(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // 1. 初始化日志
     fmt()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(tracing::Level::DEBUG)
         .with_target(true)
         .init();
 
