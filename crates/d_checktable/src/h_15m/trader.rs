@@ -381,11 +381,17 @@ impl Trader {
 
     /// 判断波动率通道
     fn volatility_tier(&self) -> VolatilityTier {
-        match self.volatility_value() {
+        let vol_val = self.volatility_value();
+        tracing::debug!(symbol = %self.config.symbol, volatility = ?vol_val, "波动率通道判断");
+
+        let tier = match vol_val {
             Some(v) if v > 0.15 => VolatilityTier::High,
             Some(v) if v > 0.05 => VolatilityTier::Medium,
             _ => VolatilityTier::Low,
-        }
+        };
+
+        tracing::debug!(symbol = %self.config.symbol, tier = ?tier, "选择通道");
+        tier
     }
 
     /// 获取账户信息（必须成功，否则拒绝下单）
