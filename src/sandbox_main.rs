@@ -29,6 +29,7 @@
 //! - Arc<RwLock>: 最小化（DashMap 替代）
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -232,6 +233,10 @@ struct EngineState {
     indicators: DashMap<String, Indicators>,  // 无锁
     position: DashMap<String, PositionState>, // 无锁
     stats: EngineStats,
+    /// 上次策略执行时间戳（毫秒）- AtomicI64 保证多线程安全
+    last_strategy_run_ts: AtomicI64,
+    /// 策略执行间隔（毫秒）
+    strategy_interval_ms: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -253,6 +258,8 @@ impl Default for PositionState {
 
 /// 慢 Tick 告警阈值（毫秒）
 const SLOW_TICK_THRESHOLD_MS: u64 = 10;
+/// 策略执行默认间隔（毫秒）
+const DEFAULT_STRATEGY_INTERVAL_MS: i64 = 100;
 
 #[derive(Debug, Default)]
 struct EngineStats {
@@ -273,6 +280,8 @@ impl EngineState {
             indicators: DashMap::new(),
             position: DashMap::new(),
             stats: EngineStats::default(),
+            last_strategy_run_ts: AtomicI64::new(0),  // 初始化为 0
+            strategy_interval_ms: DEFAULT_STRATEGY_INTERVAL_MS,
         }
     }
 
@@ -422,9 +431,26 @@ impl TradingEngine {
         }
     }
 
-    /// 策略决策 - EMA 金叉/死叉
+    /// 策略决策 - EMA 金叉/死叉（带间隔控制）
     fn decide(&self, tick: &Tick) -> Option<TradingDecision> {
         let symbol = &tick.symbol;
+        
+        // === 策略间隔检查 ===
+        let current_ts = tick.timestamp.timestamp_millis();
+        let last_ts = self.state.last_strategy_run_ts.load(Ordering::Acquire);
+        let interval = self.state.strategy_interval_ms;
+        
+        if current_ts - last_ts < interval {
+            tracing::trace!(
+                symbol = %symbol,
+                current_ts = %current_ts,
+                last_ts = %last_ts,
+                interval_ms = %interval,
+                "Skip: strategy interval not reached"
+            );
+            return None;
+        }
+        
         let indicators = match self.state.get_indicators(symbol) {
             Some(ind) => ind,
             None => {
@@ -455,6 +481,8 @@ impl TradingEngine {
         // 无持仓 -> 检查买入条件
         if !position.has_position {
             if ema5 > ema20 && rsi < dec!(70) && rsi > dec!(30) {
+                // 更新策略执行时间戳（Release ordering）
+                self.state.last_strategy_run_ts.store(current_ts, Ordering::Release);
                 return Some(TradingDecision {
                     symbol: symbol.clone(),
                     action: TradingAction::Long,
@@ -467,6 +495,8 @@ impl TradingEngine {
         // 有持仓 -> 检查卖出条件
         else {
             if ema5 < ema20 || rsi > dec!(70) {
+                // 更新策略执行时间戳（Release ordering）
+                self.state.last_strategy_run_ts.store(current_ts, Ordering::Release);
                 return Some(TradingDecision {
                     symbol: symbol.clone(),
                     action: TradingAction::Flat,
