@@ -2,6 +2,14 @@
 //!
 //! 提供所有市场数据查询接口，其他模块必须通过这里获取数据
 //! 不能直接访问内部内存或 WS
+//!
+//! ## 事件驱动架构
+//! 
+//! 推荐使用 channel 订阅模式，而非轮询模式：
+//! - `subscribe_1m(symbol, tx)`: 订阅 1m Tick 流
+//! - `subscribe_15m(symbol, tx)`: 订阅 15m Tick 流
+//!
+//! 旧接口 `ws_get_1m()` 已标记为 deprecated，将在未来版本移除。
 
 use crate::models::{KLine, Tick};
 use crate::ws::volatility::VolatilityManager;
@@ -14,6 +22,13 @@ use a_common::MarketError;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+
+/// 订阅者条目
+struct Subscriber {
+    tx: mpsc::Sender<Tick>,
+    symbol: String,
+}
 
 /// 统一数据提供者 - 所有数据查询的单一入口
 pub struct DataFeeder {
@@ -28,6 +43,10 @@ pub struct DataFeeder {
     account_syncer: FuturesDataSyncer,
     /// 缓存的最新Tick（按symbol索引）
     latest_ticks: RwLock<HashMap<String, Tick>>,
+    /// 1m 订阅者列表
+    subscribers_1m: RwLock<Vec<Subscriber>>,
+    /// 15m 订阅者列表
+    subscribers_15m: RwLock<Vec<Subscriber>>,
 }
 
 impl DataFeeder {
@@ -38,6 +57,73 @@ impl DataFeeder {
             volatility_manager: Arc::new(VolatilityManager::new()),
             account_syncer: FuturesDataSyncer::new(),
             latest_ticks: RwLock::new(HashMap::new()),
+            subscribers_1m: RwLock::new(Vec::new()),
+            subscribers_15m: RwLock::new(Vec::new()),
+        }
+    }
+
+    // ==================== Channel 订阅接口（推荐使用） ====================
+
+    /// 订阅 1m Tick 数据流
+    ///
+    /// # 示例
+    /// ```ignore
+    /// let (tx, rx) = mpsc::channel(1024);
+    /// feeder.subscribe_1m("BTCUSDT", tx);
+    /// // 在另一个任务中: while let Some(tick) = rx.recv().await { ... }
+    /// ```
+    pub fn subscribe_1m(&self, symbol: &str, tx: mpsc::Sender<Tick>) {
+        let subscriber = Subscriber {
+            tx,
+            symbol: symbol.to_uppercase(),
+        };
+        self.subscribers_1m.write().push(subscriber);
+        tracing::debug!("订阅 1m Tick: {}", symbol);
+    }
+
+    /// 订阅 15m Tick 数据流
+    pub fn subscribe_15m(&self, symbol: &str, tx: mpsc::Sender<Tick>) {
+        let subscriber = Subscriber {
+            tx,
+            symbol: symbol.to_uppercase(),
+        };
+        self.subscribers_15m.write().push(subscriber);
+        tracing::debug!("订阅 15m Tick: {}", symbol);
+    }
+
+    /// 退订 1m Tick
+    pub fn unsubscribe_1m(&self, symbol: &str) {
+        let symbol = symbol.to_uppercase();
+        self.subscribers_1m.write().retain(|s| s.symbol != symbol);
+    }
+
+    /// 退订 15m Tick
+    pub fn unsubscribe_15m(&self, symbol: &str) {
+        let symbol = symbol.to_uppercase();
+        self.subscribers_15m.write().retain(|s| s.symbol != symbol);
+    }
+
+    /// 广播 Tick 给所有订阅者（内部使用）
+    fn broadcast_to_subscribers(&self, tick: &Tick, subscribers: &[Subscriber]) {
+        let symbol_upper = tick.symbol.to_uppercase();
+        
+        // 收集需要移除的订阅者（channel 已关闭）
+        let mut to_remove = Vec::new();
+        
+        for subscriber in subscribers.iter() {
+            if subscriber.symbol == symbol_upper {
+                // 尝试发送，不阻塞
+                if subscriber.tx.try_send(tick.clone()).is_err() {
+                    // channel 已关闭，标记移除
+                    to_remove.push(subscriber.symbol.clone());
+                }
+            }
+        }
+        
+        // 移除已关闭的订阅者
+        if !to_remove.is_empty() {
+            let mut subs = self.subscribers_1m.write();
+            subs.retain(|s| !to_remove.contains(&s.symbol));
         }
     }
 
@@ -125,6 +211,9 @@ impl DataFeeder {
     // ==================== 内部方法（供 WS 回调使用） ====================
 
     /// 更新 Tick（由 K线合成器调用）
+    /// 
+    /// 注意：此方法只更新缓存，不会广播给订阅者
+    /// 如需广播，请使用 push_tick()
     #[allow(dead_code)]
     pub(crate) fn update_tick(&self, tick: Tick) {
         let symbol = tick.symbol.clone();
@@ -133,8 +222,30 @@ impl DataFeeder {
     }
 
     /// 推送 Tick（公开接口，用于模拟数据注入）
+    /// 
+    /// 会自动广播给所有订阅者
     pub fn push_tick(&self, tick: Tick) {
-        self.update_tick(tick);
+        let symbol = tick.symbol.clone();
+        
+        // 1. 更新内部缓存
+        {
+            let mut ticks = self.latest_ticks.write();
+            ticks.insert(symbol.clone(), tick.clone());
+        }
+        
+        // 2. 广播给 1m 订阅者
+        {
+            let subs = self.subscribers_1m.read();
+            self.broadcast_to_subscribers(&tick, &subs);
+        }
+        
+        // 3. 如果有 15m K 线，也广播给 15m 订阅者
+        if tick.kline_15m.is_some() {
+            let subs = self.subscribers_15m.read();
+            self.broadcast_to_subscribers(&tick, &subs);
+        }
+        
+        tracing::trace!("推送 Tick: {}", symbol);
     }
 
     /// 获取波动率管理器（内部使用）
