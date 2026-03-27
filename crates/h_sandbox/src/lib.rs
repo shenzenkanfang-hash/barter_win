@@ -4,6 +4,7 @@
 //! 1. historical_replay - K线转Tick推WS内存
 //! 2. gateway/interceptor - 拦截API下单/账户/持仓
 //! 3. simulator - 完整交易流程(账户/订单/风控)
+//! 4. verifier - 生产级验证系统
 
 #![forbid(unsafe_code)]
 
@@ -11,6 +12,7 @@ pub mod config;
 pub mod simulator;
 pub mod gateway;
 pub mod historical_replay;
+pub mod verifier;
 
 pub use config::ShadowConfig;
 pub use simulator::{Account, OrderEngine, Position, Side, ShadowRiskChecker};
@@ -20,4 +22,11 @@ pub use historical_replay::{
     MemoryInjector, MemoryInjectorConfig, SharedMarketData,
     ReplayController, ReplayConfig, ReplayState, ReplayStats, ReplayError,
     TickToWsConverter, ShardCache, ShardReader, ShardReaderChain, ShardWriter,
+};
+pub use verifier::{
+    ConsistencyChecker, ConsistencyReport,
+    FundCurveValidator, FundCurveReport,
+    FaultInjector, FaultConfig, FaultType,
+    PerformanceBenchmark, PerformanceReport,
+    VerificationReporter, VerificationReport,
 };
