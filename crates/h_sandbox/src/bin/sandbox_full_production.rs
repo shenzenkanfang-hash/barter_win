@@ -82,6 +82,7 @@ impl SandboxContext {
         // 【关键修复】使用 default_store() 单例，确保与 Trader 共享同一实例
         // 之前：let store = Arc::new(MarketDataStoreImpl::new());  ← 独立实例，数据流断裂！
         let store = b_data_source::default_store().clone();
+        info!("[Sandbox] Store 地址: {:p}", store.as_ref());
 
         // DataFeeder 保持独立（用于 API 查询）
         let data_feeder = Arc::new(DataFeeder::new());
@@ -297,9 +298,9 @@ async fn start_data_replay(
         // 写入 Store
         store.as_ref().write_kline(&symbol, kline_data, true);
 
-        // 【关键】短暂让出，让 Trader 有机会处理刚写入的数据
-        // 模拟真实市场的时间间隔（1分钟K线 = 60秒）
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // 【关键】让出时间 >= Trader 间隔，确保数据生产速度跟上处理速度
+        // Trader interval_ms=100ms，这里 sleep 150ms 保证不丢数据
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
     }
 
     info!(symbol = %symbol, "[Data] 数据回放完成");
@@ -337,6 +338,7 @@ async fn start_trader(ctx: &SandboxContext) -> Result<(), Box<dyn std::error::Er
     // 【关键】使用共享的 Store（沙盒数据已写入，Trader 从这里读取真实数据）
     let store: std::sync::Arc<dyn b_data_source::MarketDataStore + Send + Sync> =
         ctx.store.clone();
+    info!("[Engine] Trader Store 地址: {:p}", store.as_ref());
 
     // 创建 Trader
     let trader = Arc::new(Trader::new(config, executor, repository, store));
