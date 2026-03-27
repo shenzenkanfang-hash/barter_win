@@ -5,7 +5,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -57,7 +57,7 @@ pub struct Trader {
     executor: Arc<Executor>,
     repository: Arc<Repository>,
     last_order_ms: AtomicU64,
-    is_running: TokioRwLock<bool>,
+    is_running: AtomicBool,
     shutdown: Notify,
 }
 
@@ -72,7 +72,7 @@ impl Trader {
             executor,
             repository,
             last_order_ms: AtomicU64::new(0),
-            is_running: TokioRwLock::new(false),
+            is_running: AtomicBool::new(false),
             shutdown: Notify::new(),
         }
     }
@@ -194,10 +194,8 @@ impl Trader {
 
     /// 停止 Trader（优雅停止）
     pub fn stop(&self) {
-        // 尝试设置 is_running 为 false
-        if let Ok(mut guard) = self.is_running.try_write() {
-            *guard = false;
-        }
+        // AtomicBool: 无锁设置 is_running 为 false
+        self.is_running.store(false, Ordering::SeqCst);
         // 通知所有等待者
         self.shutdown.notify_waiters();
     }
@@ -252,7 +250,13 @@ impl Trader {
         };
 
         let signal_output = self.signal_generator.generate(&input, &self.volatility_tier(), None);
-        record.signal_json = serde_json::to_string(&signal_output).ok();
+        record.signal_json = match serde_json::to_string(&signal_output) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::warn!(symbol = %self.config.symbol, error = %e, "信号序列化失败");
+                None
+            }
+        };
 
         // 4. 决策
         let (signal, order_type) = match self.decide_action_wal(&signal_output) {
@@ -352,7 +356,15 @@ impl Trader {
             volatility: self.volatility_value(),
             trader_status: {
                 let machine_guard = self.status_machine.try_read().ok();
-                machine_guard.and_then(|m| serde_json::to_string(&m.current_status()).ok())
+                machine_guard.and_then(|m| {
+                    match serde_json::to_string(&m.current_status()) {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            tracing::warn!(symbol = %self.config.symbol, error = %e, "状态序列化失败");
+                            None
+                        }
+                    }
+                })
             },
             local_position: None, // 后续更新
             order_timestamp: Some(timestamp),
@@ -554,7 +566,7 @@ impl Trader {
 
     /// 启动交易循环（改造后：优雅停止 + 心跳 + WAL）
     pub async fn start(&self) {
-        *self.is_running.write().await = true;
+        self.is_running.store(true, Ordering::SeqCst);
         tracing::info!(symbol = %self.config.symbol, "Trader 启动");
 
         // 崩溃恢复
@@ -568,7 +580,7 @@ impl Trader {
         }
 
         // 主循环（优雅停止 + 心跳）
-        while *self.is_running.read().await {
+        while self.is_running.load(Ordering::SeqCst) {
             tokio::select! {
                 _ = self.shutdown.notified() => {
                     tracing::info!(symbol = %self.config.symbol, "收到停止信号");
@@ -590,7 +602,7 @@ impl Trader {
     pub async fn health(&self) -> TraderHealth {
         TraderHealth {
             symbol: self.config.symbol.clone(),
-            is_running: *self.is_running.read().await,
+            is_running: self.is_running.load(Ordering::SeqCst),
             status: self.status_machine.read().await.current_status().as_str().to_string(),
             price: self.current_price().map(|p| p.to_string()),
             volatility: self.volatility_value(),

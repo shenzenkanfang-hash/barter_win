@@ -120,7 +120,9 @@ impl StrategyLoop {
     }
 
     async fn execute_once(&self) -> Result<(), StrategyLoopError> {
-        // TODO: 实现业务逻辑
+        // StrategyLoop 作为独立监控协程时，定期检查心跳状态
+        // 注意：Trader 自循环已在 TraderManager 中管理，此处仅作监控桩
+        tracing::debug!(symbol = %self.symbol, "StrategyLoop tick");
         Ok(())
     }
 }

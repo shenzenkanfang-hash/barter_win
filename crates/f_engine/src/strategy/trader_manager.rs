@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use d_checktable::h_15m::{Trader, TraderConfig, Executor, Repository};
@@ -25,6 +26,8 @@ pub enum StrategyType {
 /// Trader 实例包装
 struct TraderInstance {
     trader: Arc<Trader>,
+    /// 后台任务的 JoinHandle，用于 abort 和监控
+    join_handle: JoinHandle<()>,
 }
 
 /// Trader 管理器
@@ -79,17 +82,17 @@ impl TraderManager {
         );
         let trader = Arc::new(Trader::new(config, executor, repository));
 
-        // 启动异步循环（后台任务）
+        // 启动异步循环（后台任务），保存 JoinHandle 以便 abort 和监控
         let trader_clone = trader.clone();
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             trader_clone.start().await;
         });
 
-        info!("Started trader for {}", symbol);
+        info!(symbol = %symbol, "Trader 协程已启动");
 
-        // 存储实例
+        // 存储实例（包含 JoinHandle）
         let mut instances = self.instances.write().await;
-        instances.insert(symbol.clone(), TraderInstance { trader });
+        instances.insert(symbol.clone(), TraderInstance { trader, join_handle });
 
         Ok(())
     }
@@ -97,13 +100,16 @@ impl TraderManager {
     /// 停止品种交易
     pub async fn stop_trader(&self, symbol: &str) -> Result<(), TraderError> {
         let mut instances = self.instances.write().await;
-        
+
         if let Some(instance) = instances.remove(symbol) {
+            // 1. 通知 Trader 优雅停止
             instance.trader.stop();
-            info!("Stopped trader for {}", symbol);
+            // 2. 强制中止后台任务
+            instance.join_handle.abort();
+            info!(symbol = %symbol, "Trader 协程已停止");
             Ok(())
         } else {
-            warn!("Trader for {} not found", symbol);
+            warn!(symbol = %symbol, "Trader not found");
             Err(TraderError::NotFound(symbol.to_string()))
         }
     }
@@ -114,7 +120,8 @@ impl TraderManager {
 
         for (symbol, instance) in instances.drain() {
             instance.trader.stop();
-            info!("Stopped trader for {}", symbol);
+            instance.join_handle.abort();
+            info!(symbol = %symbol, "Trader stopped");
         }
     }
 
