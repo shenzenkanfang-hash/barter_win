@@ -9,20 +9,20 @@
 
 #![forbid(unsafe_code)]
 
+use chrono::Utc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use parking_lot::Mutex;
-
-use b_data_source::MarketDataStore;
-use chrono::Utc;
+use parking_lot::{Mutex, RwLock as ParkingRwLock};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use thiserror::Error;
-use tokio::sync::{RwLock as TokioRwLock, Notify};
+use tokio::sync::Notify;
 use tokio::time::interval;
 use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategyId, StrategySignal, TradeCommand};
+
+use b_data_source::MarketDataStore;
 
 use crate::h_15m::executor::{Executor, OrderType};
 use crate::h_15m::quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
@@ -256,9 +256,14 @@ pub type AccountProviderFn = Box<dyn Fn(String) -> std::pin::Pin<Box<dyn std::fu
 /// 品种交易器
 pub struct Trader {
     config: TraderConfig,
-    status_machine: TokioRwLock<PinStatusMachine>,
+    /// 状态机（使用 Arc<ParkingRwLock>，支持同步和异步上下文）
+    /// v2.4 FIX: 从 TokioRwLock 改为 Arc<ParkingRwLock>，解决同步方法中 try_read 可能失败的问题
+    /// Arc 允许克隆到 spawn_blocking 闭包中
+    status_machine: Arc<ParkingRwLock<PinStatusMachine>>,
     signal_generator: MinSignalGenerator,
-    position: TokioRwLock<Option<LocalPosition>>,
+    /// 持仓快照（使用 Arc<ParkingRwLock>，支持同步和异步上下文）
+    /// v2.4 FIX: 从 TokioRwLock 改为 Arc<ParkingRwLock>
+    position: Arc<ParkingRwLock<Option<LocalPosition>>>,
     executor: Arc<Executor>,
     repository: Arc<Repository>,
     store: StoreRef,
@@ -284,6 +289,7 @@ impl Trader {
     /// P0-3 修复：使用此构造函数时，风控将被禁用（不安全，生产环境禁止）
     /// v2.1: 使用默认 GC 配置
     /// v2.2: quantity_calculator = None，使用 executor 默认逻辑
+    /// v2.4 FIX: 使用 Arc<ParkingRwLock> 支持异步上下文
     pub fn new(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -292,9 +298,11 @@ impl Trader {
     ) -> Self {
         Self {
             config: config.clone(),
-            status_machine: TokioRwLock::new(PinStatusMachine::new()),
+            // v2.4 FIX: 使用 Arc<ParkingRwLock>
+            status_machine: Arc::new(ParkingRwLock::new(PinStatusMachine::new())),
             signal_generator: MinSignalGenerator::new(),
-            position: TokioRwLock::new(None),
+            // v2.4 FIX: 使用 Arc<ParkingRwLock>
+            position: Arc::new(ParkingRwLock::new(None)),
             executor,
             repository,
             store,
@@ -314,6 +322,7 @@ impl Trader {
     /// v2.1: 使用默认 GC 配置
     /// v2.2: quantity_calculator = None，使用 executor 默认逻辑
     /// v2.3: indicator_calculator = None，使用默认值
+    /// v2.4 FIX: 使用 Arc<ParkingRwLock> 支持异步上下文
     pub fn with_account_provider(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -323,9 +332,11 @@ impl Trader {
     ) -> Self {
         Self {
             config: config.clone(),
-            status_machine: TokioRwLock::new(PinStatusMachine::new()),
+            // v2.4 FIX: 使用 Arc<ParkingRwLock>
+            status_machine: Arc::new(ParkingRwLock::new(PinStatusMachine::new())),
             signal_generator: MinSignalGenerator::new(),
-            position: TokioRwLock::new(None),
+            // v2.4 FIX: 使用 Arc<ParkingRwLock>
+            position: Arc::new(ParkingRwLock::new(None)),
             executor,
             repository,
             store,
@@ -410,32 +421,43 @@ impl Trader {
     }
 
     /// 获取当前持仓方向（异步）
+    /// v2.4 FIX: 使用 spawn_blocking 访问 parking_lot::RwLock
     pub async fn current_position_side(&self) -> Option<PositionDirection> {
-        self.position
-            .read()
-            .await
-            .as_ref()
-            .map(|p| p.direction)
+        let position = self.position.clone();
+        tokio::task::spawn_blocking(move || {
+            position.read().as_ref().map(|p| p.direction)
+        })
+        .await
+        .unwrap_or(None)
     }
 
     /// 获取当前持仓数量（异步）
+    /// v2.4 FIX: 使用 spawn_blocking 访问 parking_lot::RwLock
     pub async fn current_position_qty(&self) -> Decimal {
-        self.position
-            .read()
-            .await
-            .as_ref()
-            .map(|p| p.qty)
-            .unwrap_or_default()
+        let position = self.position.clone();
+        tokio::task::spawn_blocking(move || {
+            position.read().as_ref().map(|p| p.qty).unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// 从记录恢复 Trader 状态（异步）
+    /// v2.4 FIX: 使用 spawn_blocking 访问 parking_lot::RwLock
     pub async fn restore_from_record(&self, record: &TradeRecord) {
         // 恢复状态机
         if let Some(ref status_str) = record.trader_status {
             if let Ok(status) = serde_json::from_str::<PinStatus>(status_str) {
-                self.status_machine.write().await.set_status(status);
+                // v2.4 FIX: spawn_blocking 用于 parking_lot 锁，需要 clone Arc
+                let status_machine = Arc::clone(&self.status_machine);
+                let symbol = self.config.symbol.clone();
+                tokio::task::spawn_blocking(move || {
+                    status_machine.write().set_status(status);
+                })
+                .await
+                .ok();
                 tracing::info!(
-                    symbol = %self.config.symbol,
+                    symbol = %symbol,
                     ?status,
                     "状态机已恢复"
                 );
@@ -446,9 +468,17 @@ impl Trader {
         if let Some(ref pos_str) = record.local_position {
             if let Ok(position) = serde_json::from_str::<LocalPosition>(pos_str) {
                 let qty = position.qty;
-                *self.position.write().await = Some(position);
+                let position = Some(position);
+                // v2.4 FIX: spawn_blocking 用于 parking_lot 锁，需要 clone Arc
+                let position_arc = Arc::clone(&self.position);
+                let symbol = self.config.symbol.clone();
+                tokio::task::spawn_blocking(move || {
+                    *position_arc.write() = position;
+                })
+                .await
+                .ok();
                 tracing::info!(
-                    symbol = %self.config.symbol,
+                    symbol = %symbol,
                     qty = %qty,
                     "持仓已恢复"
                 );
@@ -777,7 +807,8 @@ impl Trader {
         let signal_output = self.signal_generator.generate(&input, &vol_tier, None);
 
         // 4. 状态机决策
-        let status = self.status_machine.try_read().ok()?.current_status();
+        // v2.4 FIX: 使用 read() 替代 try_read()，parking_lot RwLock 在同步上下文保证成功
+        let status = self.status_machine.read().current_status();
         let price = self.current_price()?;
 
         // 根据状态和信号决定动作
@@ -968,35 +999,20 @@ impl Trader {
 
     /// 构建待预写的记录
     /// P0-2 修复：填充 local_position 和 trader_status 快照
+    /// v2.4 FIX: 使用 parking_lot::RwLock，read() 阻塞式获取，保证成功
     fn build_pending_record(&self) -> Option<TradeRecord> {
         let timestamp = chrono::Utc::now().timestamp();
 
-        // P1-2 修复：获取持仓快照（添加锁失败日志）
-        let local_position = match self.position.try_read() {
-            Ok(guard) => {
-                guard.as_ref().and_then(|p| serde_json::to_string(p).ok())
-            }
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "获取持仓锁失败，local_position 将为 None"
-                );
-                None
-            }
+        // v2.4 FIX: parking_lot RwLock::read() 同步获取，不会失败
+        let local_position = {
+            let guard = self.position.read();
+            guard.as_ref().and_then(|p| serde_json::to_string(p).ok())
         };
 
-        // 获取状态快照
-        let trader_status = match self.status_machine.try_read() {
-            Ok(guard) => serde_json::to_string(&guard.current_status()).ok(),
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "获取状态锁失败，trader_status 将为 None"
-                );
-                None
-            }
+        // v2.4 FIX: parking_lot RwLock::read() 同步获取，不会失败
+        let trader_status = {
+            let guard = self.status_machine.read();
+            serde_json::to_string(&guard.current_status()).ok()
         };
 
         Some(TradeRecord {
@@ -1016,19 +1032,13 @@ impl Trader {
     /// WAL 模式决策
     /// P1-3 修复：使用 price 计算价格偏离度
     /// P1-2 修复：锁竞争时添加 warn 日志
+    /// v2.4 FIX: 使用 parking_lot::RwLock，read() 阻塞式获取，保证成功
     #[allow(unused_variables)]
     fn decide_action_wal(&self, signal: &MinSignalOutput) -> Option<(StrategySignal, OrderType)> {
-        // P1-2 修复：获取状态，锁失败时添加日志
-        let status = match self.status_machine.try_read() {
-            Ok(guard) => guard.current_status(),
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "获取状态锁失败，跳过本次决策"
-                );
-                return None;
-            }
+        // v2.4 FIX: parking_lot RwLock::read() 同步获取，不会失败
+        let status = {
+            let guard = self.status_machine.read();
+            guard.current_status()
         };
 
         // P1-3 修复：price 将用于偏离度计算
@@ -1044,17 +1054,10 @@ impl Trader {
         };
 
         // P1-3 修复：计算价格偏离度用于辅助决策
-        // 获取持仓均价
-        let entry_price = match self.position.try_read() {
-            Ok(guard) => guard.as_ref().map(|p| p.avg_price),
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "获取持仓锁失败，无法计算偏离度"
-                );
-                None
-            }
+        // v2.4 FIX: parking_lot RwLock::read() 同步获取，保证成功
+        let entry_price = {
+            let guard = self.position.read();
+            guard.as_ref().map(|p| p.avg_price)
         };
 
         // 计算偏离度（用于决策参考）
@@ -1147,24 +1150,15 @@ impl Trader {
     /// 决策逻辑（同步版）
     /// P1-2 修复：锁竞争时添加 warn 日志
     /// P1-3 修复：使用 price 计算价格偏离度
+    /// v2.4 FIX: 使用 parking_lot::RwLock，read() 阻塞式获取，保证成功
     fn decide_action(
         &self,
         status: &PinStatus,
         signal: &MinSignalOutput,
         price: Decimal,
     ) -> Option<StrategySignal> {
-        // P1-2 修复：获取持仓，锁失败时添加日志
-        let pos = match self.position.try_read() {
-            Ok(guard) => guard,
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "同步决策：获取持仓锁失败，跳过本次决策"
-                );
-                return None;
-            }
-        };
+        // v2.4 FIX: parking_lot RwLock::read() 同步获取，不会失败
+        let pos = self.position.read();
 
         let has_position = pos
             .as_ref()
@@ -1223,9 +1217,9 @@ impl Trader {
 
             PinStatus::HedgeEnter => {
                 if signal.exit_high_volatility {
-                    if let Ok(mut machine) = self.status_machine.try_write() {
-                        machine.set_status(PinStatus::PosLocked);
-                    }
+                    // v2.4 FIX: parking_lot RwLock::write() 同步获取，保证成功
+                    let mut machine = self.status_machine.write();
+                    machine.set_status(PinStatus::PosLocked);
                 }
             }
 
@@ -1261,17 +1255,12 @@ impl Trader {
 
     /// 构建平仓信号
     /// P1-2 修复：锁竞争时添加 warn 日志
+    /// v2.4 FIX: 使用 parking_lot::RwLock，read() 阻塞式获取，保证成功
     fn build_close_signal(&self, side: PositionSide, _order_type: OrderType) -> StrategySignal {
-        let qty = match self.position.try_read() {
-            Ok(guard) => guard.as_ref().map(|p| p.qty).unwrap_or(Decimal::ZERO),
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "构建平仓信号：获取持仓锁失败，使用零数量"
-                );
-                Decimal::ZERO
-            }
+        // v2.4 FIX: parking_lot RwLock::read() 同步获取，保证成功
+        let qty = {
+            let guard = self.position.read();
+            guard.as_ref().map(|p| p.qty).unwrap_or(Decimal::ZERO)
         };
 
         StrategySignal {
@@ -1292,36 +1281,20 @@ impl Trader {
 
     /// 更新持仓
     /// P1-2 修复：锁竞争时添加 warn 日志
+    /// v2.4 FIX: 使用 parking_lot::RwLock，write() 阻塞式获取，保证成功
     pub fn update_position(&self, position: Option<LocalPosition>) {
-        match self.position.try_write() {
-            Ok(mut guard) => {
-                *guard = position;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "更新持仓：获取写锁失败，跳过更新"
-                );
-            }
-        }
+        // v2.4 FIX: parking_lot RwLock::write() 同步获取，保证成功
+        let mut guard = self.position.write();
+        *guard = position;
     }
 
     /// 更新状态
     /// P1-2 修复：锁竞争时添加 warn 日志
+    /// v2.4 FIX: 使用 parking_lot::RwLock，write() 阻塞式获取，保证成功
     pub fn update_status(&self, status: PinStatus) {
-        match self.status_machine.try_write() {
-            Ok(mut guard) => {
-                guard.set_status(status);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    symbol = %self.config.symbol,
-                    error = %e,
-                    "更新状态：获取写锁失败，跳过更新"
-                );
-            }
-        }
+        // v2.4 FIX: parking_lot RwLock::write() 同步获取，保证成功
+        let mut guard = self.status_machine.write();
+        guard.set_status(status);
     }
 
     /// 启动交易循环（改造后：优雅停止 + 心跳 + WAL）
@@ -1395,11 +1368,18 @@ impl Trader {
     }
 
     /// 健康检查（异步）
+    /// v2.4 FIX: 使用 spawn_blocking 访问 Arc<ParkingRwLock>
     pub async fn health(&self) -> TraderHealth {
+        // v2.4 FIX: Arc<ParkingRwLock> 可以直接 clone 进入 spawn_blocking
+        let status_machine = Arc::clone(&self.status_machine);
+        let status = tokio::task::spawn_blocking(move || status_machine.read().current_status())
+            .await
+            .unwrap_or(PinStatus::Initial);
+
         TraderHealth {
             symbol: self.config.symbol.clone(),
             is_running: self.is_running.load(Ordering::SeqCst),
-            status: self.status_machine.read().await.current_status().as_str().to_string(),
+            status: status.as_str().to_string(),
             price: self.current_price().map(|p| p.to_string()),
             volatility: self.volatility_value(),
             pending_records: None,
