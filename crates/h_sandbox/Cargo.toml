@@ -8,6 +8,10 @@ name = "full_production_sandbox"
 path = "src/bin/sandbox_full_production.rs"
 
 [[bin]]
+name = "download_hotusdt"
+path = "src/bin/download_hotusdt.rs"
+
+[[bin]]
 name = "download_hotusdt_history"
 path = "src/bin/download_hotusdt_history.rs"
 
