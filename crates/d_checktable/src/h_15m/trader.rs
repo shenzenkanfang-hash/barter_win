@@ -26,6 +26,7 @@ use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategyId, StrategySignal, TradeCommand};
 
 use crate::h_15m::executor::{Executor, OrderType};
+use crate::h_15m::quantity_calculator::{MinQuantityCalculator, MinQuantityConfig};
 use crate::h_15m::repository::{RepoError, Repository, TradeRecord};
 use crate::h_15m::{MinSignalGenerator, PinStatus, PinStatusMachine};
 use crate::types::{MinSignalInput, MinSignalOutput, VolatilityTier};
@@ -154,6 +155,41 @@ impl GcConfig {
     }
 }
 
+/// 数量计算器配置（v2.2: P1-2 集成 quantity_calculator）
+#[derive(Debug, Clone)]
+pub struct QuantityCalculatorConfig {
+    /// 基础开仓数量
+    pub base_open_qty: Decimal,
+    /// 最大持仓数量
+    pub max_position_qty: Decimal,
+    /// 加仓倍数
+    pub add_multiplier: Decimal,
+    /// 波动率调整启用
+    pub vol_adjustment: bool,
+}
+
+impl Default for QuantityCalculatorConfig {
+    fn default() -> Self {
+        Self {
+            base_open_qty: dec!(0.05),
+            max_position_qty: dec!(0.15),
+            add_multiplier: dec!(1.5),
+            vol_adjustment: true,
+        }
+    }
+}
+
+/// 订单数量计算结果
+#[derive(Debug, Clone)]
+pub struct OrderQuantityResult {
+    /// 计算数量
+    pub qty: Decimal,
+    /// 是否全平
+    pub full_close: bool,
+    /// 计算说明
+    pub reason: String,
+}
+
 /// 品种交易器
 pub struct Trader {
     config: TraderConfig,
@@ -173,12 +209,15 @@ pub struct Trader {
     /// v2.1: GC 任务句柄（用于优雅停止）
     /// 使用 Arc<Mutex<Option<...>>> 解决 &self 不可变借用问题
     gc_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// v2.2: P1-2 数量计算器（可选，不配置时使用 executor 默认逻辑）
+    quantity_calculator: Option<MinQuantityCalculator>,
 }
 
 impl Trader {
     /// 创建 Trader（需要注入 executor、repository 和 store）
     /// P0-3 修复：使用此构造函数时，风控将被禁用（不安全，生产环境禁止）
     /// v2.1: 使用默认 GC 配置
+    /// v2.2: quantity_calculator = None，使用 executor 默认逻辑
     pub fn new(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -199,12 +238,14 @@ impl Trader {
             shutdown: Notify::new(),
             gc_config: GcConfig::default(),
             gc_handle: Arc::new(Mutex::new(None)),
+            quantity_calculator: None,
         }
     }
 
     /// 创建带账户服务的 Trader（推荐）
     /// P0-3 修复：必须配置 AccountProvider 才能下单
     /// v2.1: 使用默认 GC 配置
+    /// v2.2: quantity_calculator = None，使用 executor 默认逻辑
     pub fn with_account_provider(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -226,6 +267,7 @@ impl Trader {
             shutdown: Notify::new(),
             gc_config: GcConfig::default(),
             gc_handle: Arc::new(Mutex::new(None)),
+            quantity_calculator: None,
         }
     }
 
@@ -393,6 +435,101 @@ impl Trader {
         self.is_running.store(false, Ordering::SeqCst);
         // 通知所有等待者
         self.shutdown.notify_waiters();
+    }
+
+    // ==================== v2.2: P1-2 数量计算器集成 ====================
+
+    /// 创建带数量计算器的 Trader（v2.2）
+    /// 在已有 Trader 基础上添加 quantity_calculator
+    pub fn with_quantity_calculator(
+        mut self,
+        qty_config: QuantityCalculatorConfig,
+    ) -> Self {
+        self.quantity_calculator = Some(MinQuantityCalculator::new(MinQuantityConfig {
+            base_open_qty: qty_config.base_open_qty,
+            max_position_qty: qty_config.max_position_qty,
+            add_multiplier: qty_config.add_multiplier,
+            vol_adjustment: qty_config.vol_adjustment,
+        }));
+        tracing::debug!(
+            symbol = %self.config.symbol,
+            base_open_qty = %qty_config.base_open_qty,
+            max_position_qty = %qty_config.max_position_qty,
+            vol_adjustment = qty_config.vol_adjustment,
+            "数量计算器已启用"
+        );
+        self
+    }
+
+    /// 计算订单数量（v2.2）
+    /// - 如果配置了 quantity_calculator，使用它计算
+    /// - 否则降级到 executor.calculate_order_qty()
+    fn calculate_order_quantity(
+        &self,
+        order_type: OrderType,
+        current_qty: Decimal,
+        current_side: Option<PositionSide>,
+        signal_output: &MinSignalOutput,
+    ) -> OrderQuantityResult {
+        let vol_tier = self.volatility_tier();
+        
+        match &self.quantity_calculator {
+            Some(calc) => {
+                // 使用 MinQuantityCalculator
+                match order_type {
+                    OrderType::InitialOpen => {
+                        let qty = calc.calc_open_quantity(&vol_tier);
+                        OrderQuantityResult {
+                            qty,
+                            full_close: false,
+                            reason: format!("初始开仓 qty={}", qty),
+                        }
+                    }
+                    OrderType::DoubleAdd => {
+                        let qty = calc.calc_add_quantity(current_qty, &vol_tier);
+                        OrderQuantityResult {
+                            qty,
+                            full_close: false,
+                            reason: format!("加仓 qty={}", qty),
+                        }
+                    }
+                    OrderType::DoubleClose | OrderType::DayClose => {
+                        let (qty, full_close) = 
+                            calc.calc_close_quantity(current_qty, signal_output);
+                        OrderQuantityResult {
+                            qty,
+                            full_close,
+                            reason: format!("平仓 qty={} full_close={}", qty, full_close),
+                        }
+                    }
+                    OrderType::HedgeOpen => {
+                        let qty = if current_qty > Decimal::ZERO { current_qty } else { Decimal::ZERO };
+                        OrderQuantityResult {
+                            qty,
+                            full_close: false,
+                            reason: format!("对冲开仓 qty={}", qty),
+                        }
+                    }
+                    OrderType::DayHedge => {
+                        let qty = current_qty.abs();
+                        OrderQuantityResult {
+                            qty,
+                            full_close: false,
+                            reason: format!("日线对冲 qty={}", qty),
+                        }
+                    }
+                }
+            }
+            None => {
+                // 降级到 executor.calculate_order_qty
+                let qty = self.executor.calculate_order_qty(order_type, current_qty, current_side);
+                OrderQuantityResult {
+                    qty,
+                    full_close: false,
+                    reason: "降级到 executor".to_string(),
+                }
+            }
+        }
     }
 
     // ==================== v2.1: P2-1 GC 定时任务 ====================
@@ -584,14 +721,40 @@ impl Trader {
             PositionDirection::Flat => x_data::position::PositionSide::None,
         });
 
-        // 计算订单价值
-        let order_qty = self.executor.calculate_order_qty(order_type, current_qty, current_side_for_order);
-        let order_value = order_qty * current_price;
+        // v2.2: 计算订单数量（使用 quantity_calculator 或降级到 executor）
+        let qty_result = self.calculate_order_quantity(
+            order_type,
+            current_qty,
+            current_side_for_order,
+            &signal_output,
+        );
+        
+        tracing::debug!(
+            symbol = %self.config.symbol,
+            ?order_type,
+            qty = %qty_result.qty,
+            full_close = qty_result.full_close,
+            reason = %qty_result.reason,
+            "计算订单数量"
+        );
+        
+        // 校验数量
+        if qty_result.qty <= Decimal::ZERO {
+            tracing::warn!(
+                symbol = %self.config.symbol,
+                ?order_type,
+                "计算下单数量为 0，跳过"
+            );
+            self.repository.mark_failed(pending_id, "ZERO_QUANTITY").ok();
+            return Ok(ExecutionResult::Skipped("计算数量为零"));
+        }
+        
+        let order_value = qty_result.qty * current_price;
 
         // 7. P0-3 修复：执行下单（使用真实风控参数）
         match self.executor.send_order(
             order_type,
-            current_qty,
+            qty_result.qty,
             current_side_for_order,
             order_value,
             account_info.available_balance,
@@ -1130,5 +1293,123 @@ impl Default for Trader {
                 .expect("Failed to create default repository"),
         );
         Self::with_default_store(config, executor, repository)
+    }
+}
+
+// ==================== v2.2: 测试模块 ====================
+
+#[cfg(test)]
+mod trader_tests {
+    use super::*;
+
+    /// 测试 quantity_calculator 降级逻辑
+    #[test]
+    fn test_quantity_calculator_fallback() {
+        let config = TraderConfig::default();
+        let executor = Arc::new(Executor::new(crate::h_15m::executor::ExecutorConfig {
+            symbol: config.symbol.clone(),
+            order_interval_ms: config.order_interval_ms,
+            initial_ratio: config.initial_ratio,
+            lot_size: config.lot_size,
+            max_position: config.max_position,
+        }));
+        let repository = Arc::new(
+            Repository::new(&config.symbol, ":memory:")
+                .unwrap(),
+        );
+        let store: StoreRef = b_data_source::default_store().clone();
+        
+        // 不配置 quantity_calculator，应该降级到 executor
+        let trader = Trader::new(config, executor, repository, store);
+        
+        assert!(trader.quantity_calculator.is_none());
+        
+        // 测试降级逻辑
+        let result = trader.calculate_order_quantity(
+            OrderType::InitialOpen,
+            Decimal::ZERO,
+            None,
+            &MinSignalOutput::default(),
+        );
+        
+        assert_eq!(result.reason, "降级到 executor");
+    }
+
+    /// 测试 quantity_calculator 配置
+    #[test]
+    fn test_quantity_calculator_enabled() {
+        let config = TraderConfig::default();
+        let executor = Arc::new(Executor::new(crate::h_15m::executor::ExecutorConfig {
+            symbol: config.symbol.clone(),
+            order_interval_ms: config.order_interval_ms,
+            initial_ratio: config.initial_ratio,
+            lot_size: config.lot_size,
+            max_position: config.max_position,
+        }));
+        let repository = Arc::new(
+            Repository::new(&config.symbol, ":memory:")
+                .unwrap(),
+        );
+        let store: StoreRef = b_data_source::default_store().clone();
+        
+        let qty_config = QuantityCalculatorConfig {
+            base_open_qty: dec!(0.05),
+            max_position_qty: dec!(0.15),
+            add_multiplier: dec!(1.5),
+            vol_adjustment: true,
+        };
+        
+        let trader = Trader::new(config, executor, repository, store)
+            .with_quantity_calculator(qty_config);
+        
+        assert!(trader.quantity_calculator.is_some());
+        
+        // 测试使用 quantity_calculator 计算
+        let result = trader.calculate_order_quantity(
+            OrderType::InitialOpen,
+            Decimal::ZERO,
+            None,
+            &MinSignalOutput::default(),
+        );
+        
+        assert!(result.reason.contains("初始开仓"));
+    }
+
+    /// 测试加仓数量限制
+    #[test]
+    fn test_add_quantity_respects_max() {
+        let config = TraderConfig::default();
+        let executor = Arc::new(Executor::new(crate::h_15m::executor::ExecutorConfig {
+            symbol: config.symbol.clone(),
+            order_interval_ms: config.order_interval_ms,
+            initial_ratio: config.initial_ratio,
+            lot_size: config.lot_size,
+            max_position: config.max_position,
+        }));
+        let repository = Arc::new(
+            Repository::new(&config.symbol, ":memory:")
+                .unwrap(),
+        );
+        let store: StoreRef = b_data_source::default_store().clone();
+        
+        let qty_config = QuantityCalculatorConfig {
+            base_open_qty: dec!(0.05),
+            max_position_qty: dec!(0.15),
+            add_multiplier: dec!(2.0),
+            vol_adjustment: false,
+        };
+        
+        let trader = Trader::new(config, executor, repository, store)
+            .with_quantity_calculator(qty_config);
+        
+        // 已有 0.14，再加应限制为 0.01
+        let result = trader.calculate_order_quantity(
+            OrderType::DoubleAdd,
+            dec!(0.14),
+            None,
+            &MinSignalOutput::default(),
+        );
+        
+        assert_eq!(result.qty, dec!(0.01));
     }
 }
