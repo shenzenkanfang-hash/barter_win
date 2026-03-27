@@ -226,6 +226,72 @@ impl Indicators {
 }
 
 // ============================================================================
+// 检查点数据（用于崩溃恢复）
+// ============================================================================
+
+/// 检查点数据 - 可序列化用于持久化
+#[derive(Debug, Clone)]
+struct Checkpoint {
+    /// 最后处理的序列号
+    last_sequence_id: u64,
+    /// 检查点时间戳（毫秒）
+    timestamp_ms: i64,
+}
+
+impl Default for Checkpoint {
+    fn default() -> Self {
+        Self {
+            last_sequence_id: 0,
+            timestamp_ms: Utc::now().timestamp_millis(),
+        }
+    }
+}
+
+/// 检查点管理器接口（为将来 WAL 集成预留）
+trait CheckpointManager {
+    fn save_checkpoint(&self, checkpoint: &Checkpoint);
+    fn load_checkpoint(&self) -> Option<Checkpoint>;
+}
+
+/// 内存检查点管理器（沙盒用，不持久化）
+struct MemoryCheckpointManager {
+    latest: std::sync::Mutex<Checkpoint>,
+}
+
+impl MemoryCheckpointManager {
+    fn new() -> Self {
+        Self {
+            latest: std::sync::Mutex::new(Checkpoint::default()),
+        }
+    }
+}
+
+impl CheckpointManager for MemoryCheckpointManager {
+    fn save_checkpoint(&self, checkpoint: &Checkpoint) {
+        let mut latest = self.latest.lock().unwrap();
+        *latest = checkpoint.clone();
+        tracing::debug!(
+            seq = %checkpoint.last_sequence_id,
+            ts = %checkpoint.timestamp_ms,
+            "[Checkpoint] Saved"
+        );
+    }
+
+    fn load_checkpoint(&self) -> Option<Checkpoint> {
+        let latest = self.latest.lock().unwrap();
+        if latest.last_sequence_id > 0 {
+            tracing::info!(
+                seq = %latest.last_sequence_id,
+                "[Checkpoint] Restored from memory"
+            );
+            Some(latest.clone())
+        } else {
+            None
+        }
+    }
+}
+
+// ============================================================================
 // 引擎状态（引擎内部，无锁共享）
 // ============================================================================
 
@@ -260,6 +326,8 @@ impl Default for PositionState {
 const SLOW_TICK_THRESHOLD_MS: u64 = 10;
 /// 策略执行默认间隔（毫秒）
 const DEFAULT_STRATEGY_INTERVAL_MS: i64 = 100;
+/// 检查点保存间隔（每 N 个 Tick 保存一次）
+const CHECKPOINT_INTERVAL: u64 = 1000;
 
 #[derive(Debug, Default)]
 struct EngineStats {
@@ -322,6 +390,8 @@ struct TradingEngine {
     risk_checker: Arc<ShadowRiskChecker>,
     /// 最后处理的序列号（用于幂等性去重）
     last_processed_seq: u64,
+    /// 检查点管理器（用于崩溃恢复）
+    checkpoint_manager: Arc<MemoryCheckpointManager>,
 }
 
 impl TradingEngine {
@@ -336,6 +406,7 @@ impl TradingEngine {
             gateway,
             risk_checker,
             last_processed_seq: 0,
+            checkpoint_manager: Arc::new(MemoryCheckpointManager::new()),
         }
     }
 
@@ -364,6 +435,15 @@ impl TradingEngine {
             
             // 处理单个 Tick - 串行，无并发
             self.on_tick(tick).await;
+            
+            // === 定期保存检查点 ===
+            if self.last_processed_seq % CHECKPOINT_INTERVAL == 0 {
+                let checkpoint = Checkpoint {
+                    last_sequence_id: self.last_processed_seq,
+                    timestamp_ms: Utc::now().timestamp_millis(),
+                };
+                self.checkpoint_manager.save_checkpoint(&checkpoint);
+            }
         }
 
         tracing::info!("[Engine] {} 事件循环结束", self.symbol);
