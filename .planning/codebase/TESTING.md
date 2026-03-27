@@ -1,446 +1,309 @@
 ================================================================================
-TESTING PATTERNS - Rust Barter-rs Trading System
+TESTING.md - Rust 量化交易系统测试规范
 ================================================================================
 
-================================================================================
-1. TEST FRAMEWORK
-================================================================================
-
-Primary test framework: Rust built-in test harness with #[cfg(test)]
-
-Dependencies:
-    [dev-dependencies]
-    rust_decimal_macros = "1.x"    # For dec!() macro in tests
-    tokio = { version = "1.x", features = ["full"] }  # For async tests
-    tempfile = "3.x"               # For temporary files
-
-Test file location: Inline with source files or in dedicated test crate (g_test)
-
-
-================================================================================
-2. TEST STRUCTURE AND LOCATIONS
+Author: 代码分析
+Created: 2026-03-28
+Status: 已确认
 ================================================================================
 
-2.1 INLINE TESTS (#[cfg(test)] modules)
 
-Tests are placed in a separate mod at the bottom of source files:
-
-    // f_engine/src/core/tests.rs
-    #![cfg(test)]
-
-    #[cfg(test)]
-    mod business_types_tests {
-        use super::*;
-
-        #[test]
-        fn test_position_side() {
-            assert!(PositionSide::LONG.is_long());
-            assert!(!PositionSide::LONG.is_short());
-        }
-    }
-
-    #[cfg(test)]
-    mod triggers_tests {
-        #[test]
-        fn test_trigger_config_default() {
-            let config = TriggerConfig::default();
-            assert_eq!(config.minute_volatility_threshold, dec!(13));
-        }
-    }
-
-Files with inline tests (examples):
-    - crates/f_engine/src/core/tests.rs (738 lines, 25+ tests)
-    - crates/b_data_source/src/symbol_rules/mod.rs
-    - crates/c_data_process/src/strategy_state/mod.rs
-    - crates/e_risk_monitor/src/risk/common/thresholds.rs
-
-2.2 DEDICATED TEST CRATE (g_test)
-
-Dedicated test crate: crates/g_test/src/
-
-    g_test/src/
-    ├── lib.rs                     # Test module root
-    ├── b_data_source/
-    │   ├── mod.rs
-    │   ├── replay_source_test.rs  # ReplaySource black box tests
-    │   ├── trader_pool_test.rs
-    │   ├── api/
-    │   │   ├── mod.rs
-    │   │   ├── account.rs
-    │   │   └── symbol_registry.rs
-    │   ├── models/
-    │   │   ├── mod.rs
-    │   │   └── models.rs
-    │   ├── ws/
-    │   │   ├── mod.rs
-    │   │   ├── kline.rs
-    │   │   └── orderbook.rs
-    │   └── recovery.rs
-    └── strategy/
-        ├── mod.rs
-        ├── mock_gateway.rs        # Mock implementations
-        ├── strategy_executor_test.rs
-        └── trading_integration_test.rs
-
-
-================================================================================
-3. TEST NAMING CONVENTIONS
+一、测试模块架构
 ================================================================================
 
-3.1 TEST FUNCTION PATTERNS
+1. g_test crate - 集中测试模块
 
-Standard pattern: test_<unit>_<scenario>_<expected>
-
-    #[test]
-    fn test_position_side() { }
-
-    #[test]
-    fn test_volatility_tier() { }
-
-    #[test]
-    fn test_strategy_response_execute() { }
-
-    #[test]
-    fn test_order_lifecycle() { }
-
-    #[test]
-    fn test_risk_check_result() { }
-
-    #[test]
-    fn test_replay_source_next_kline_exhausted() { }
-
-3.2 TEST MODULE PATTERNS
-
-Group related tests in mod blocks:
-
-    #[cfg(test)]
-    mod business_types_tests { }
-
-    #[cfg(test)]
-    mod triggers_tests { }
-
-    #[cfg(test)]
-    mod execution_tests { }
-
-    #[cfg(test)]
-    mod fund_pool_tests { }
-
-    #[cfg(test)]
-    mod risk_manager_tests { }
-
-    #[cfg(test)]
-    mod monitoring_tests { }
-
-    #[cfg(test)]
-    mod rollback_tests { }
-
-    #[cfg(test)]
-    mod trade_lock_tests { }
-
-3.3 INTEGRATION TEST PATTERNS
-
-Black box test files: test_<component>_<type>
-
-    test_replay_source_from_data()
-    test_replay_source_next_kline()
-    test_replay_source_from_csv()
-    test_executor_register_and_count()
-    test_signal_aggregator_priority_order()
+   crates/g_test/src/
+   ├── lib.rs           # 模块入口
+   ├── b_data_source/   # b_data_source 相关测试
+   │   ├── trader_pool_test.rs
+   │   ├── replay_source_test.rs
+   │   └── ...
+   └── strategy/        # 策略层黑盒测试
+       ├── strategy_executor_test.rs
+       ├── trading_integration_test.rs
+       └── mock_gateway.rs
 
 
-================================================================================
-4. ASYNC TESTS
+二、测试文件组织
 ================================================================================
 
-Use #[tokio::test] for async tests:
+1. 集成测试 (g_test crate)
 
-    #[tokio::test]
-    async fn test_replay_source_from_csv() {
-        use std::io::Write;
-        use tempfile::NamedTempFile;
+   特点:
+   - 黑盒测试，通过公共 API 测试功能
+   - 集中管理，所有 crate 的测试在一处
+   - 模拟真实交易流程
 
-        let mut temp_file = NamedTempFile::new().unwrap();
-        writeln!(temp_file, "symbol,period,open,high,low,close,volume,timestamp").unwrap();
-        writeln!(temp_file, "BTCUSDT,1m,50000,50500,49500,50200,100,2024-01-01T00:00:00Z").unwrap();
+2. 命名规范
 
-        let path = temp_file.path();
-        let replay = ReplaySource::from_csv(path).await.unwrap();
-        assert_eq!(replay.len(), 3);
-    }
+   - 测试文件: *_test.rs
+   - 测试模块: #[cfg(test)] mod tests
+   - 测试函数: test_功能_场景()
 
-    #[tokio::test]
-    async fn test_replay_source_from_csv_multi_line() {
-        // ...
-    }
+3. 测试分组结构
 
+   // ========================================================================
+   // 分组标题
+   // ========================================================================
 
-================================================================================
-5. MOCKING PATTERNS
-================================================================================
-
-5.1 STRUCT MOCK IMPLEMENTATION
-
-Create test structs implementing traits:
-
-    #[allow(dead_code)]
-    struct TestStrategy {
-        id: String,
-        name: String,
-        symbols: Vec<String>,
-        enabled: RwLock<bool>,
-        state: StrategyState,
-        signals_to_return: RwLock<Vec<TradingSignal>>,
-    }
-
-    impl Strategy for TestStrategy {
-        fn id(&self) -> &str { &self.id }
-        fn name(&self) -> &str { &self.name }
-        fn symbols(&self) -> Vec<String> { self.symbols.clone() }
-        fn is_enabled(&self) -> bool { *self.enabled.read() }
-        fn on_bar(&self, _bar: &StrategyKLine) -> Option<TradingSignal> {
-            self.signals_to_return.read().first().cloned()
-        }
-        fn state(&self) -> &StrategyState { &self.state }
-    }
-
-5.2 MOCK GATEWAY
-
-From g_test/src/strategy/mock_gateway.rs:
-
-    pub struct MockExchangeGateway {
-        pub orders: Arc<Mutex<Vec<PlacedOrder>>>,
-        pub position: Arc<Mutex<PositionSnapshot>>,
-    }
-
-5.3 HELPER FUNCTIONS
-
-Mark test helpers with #[allow(dead_code)]:
-
-    #[allow(dead_code)]
-    fn create_sample_klines() -> Vec<KLine> {
-        vec![
-            KLine {
-                symbol: "BTCUSDT".to_string(),
-                period: Period::Minute(1),
-                open: dec!(50000),
-                // ...
-            },
-        ]
-    }
-
-    #[allow(dead_code)]
-    fn create_multi_symbol_klines() -> Vec<KLine> {
-        // ...
-    }
+   #[test]
+   fn test_xxx() {
+       // 测试代码
+   }
 
 
-================================================================================
-6. ASSERTION PATTERNS
+三、测试辅助工具
 ================================================================================
 
-Standard assertions:
+1. Mock 实现
 
-    assert!(PositionSide::LONG.is_long());
-    assert!(!PositionSide::LONG.is_short());
+   a) MockExchangeGateway (b_data_source/src/api/mock_api/)
 
-    assert_eq!(pool.available(), dec!(10000));
-    assert_eq!(replay.len(), 5);
+      pub struct MockExchangeGateway {
+          balance: RwLock<Decimal>,
+          positions: RwLock<HashMap<String, Position>>,
+          orders: RwLock<Vec<OrderResult>>,
+          reject: RwLock<Option<String>>,
+      }
 
-    assert!(result.is_ok());
-    assert!(result.is_err());
+      impl MockExchangeGateway {
+          pub fn new(initial_balance: Decimal) -> Self
+          pub fn default_test() -> Self  // 默认测试实例
+          pub fn set_reject(&self, msg: Option<String>)
+      }
 
-    assert!(signal.is_valid());
-    assert!(!invalid_signal.is_valid());
+   b) MockMarketConnector (a_common/src/ws/)
 
-With failure messages (Chinese):
+      提供模拟市场数据流
 
-    assert_eq!(executor.count(), 1, "初始策略数量应为 0");
-    assert_eq!(signals.len(), 1, "应返回 1 个信号");
-    assert!(signals.is_empty(), "不应返回任何信号");
+   c) StreamTickGenerator (b_data_source/src/ws/mock_ws/)
+
+      K线生成Tick流 (Iterator模式)
+
+2. Test Strategy Trait Implementation
+
+   struct TestStrategy { ... }
+
+   impl Strategy for TestStrategy {
+       fn id(&self) -> &str { &self.id }
+       fn on_bar(&self, _bar: &StrategyKLine) -> Option<TradingSignal> {
+           self.signals_to_return.read().first().cloned()
+       }
+   }
+
+3. Builder 模式测试数据
+
+   创建复杂测试数据:
+
+   fn create_pinbar_long_entry_input() -> MinSignalInput {
+       MinSignalInput {
+           tr_base_60min: dec!(0.20),
+           zscore_14_1m: dec!(2.5),
+           pine_bg_color: "纯绿".to_string(),
+           // ...
+       }
+   }
 
 
+四、测试用例编写规范
 ================================================================================
-7. TEST DATA CREATION
+
+1. 基本结构
+
+   #[test]
+   fn test_功能_预期结果() {
+       // Arrange - 准备测试数据
+       let pool = TraderPool::new();
+
+       // Act - 执行被测操作
+       pool.register(SymbolMeta::new("BTCUSDT".to_string()));
+
+       // Assert - 验证结果
+       assert!(pool.is_trading("BTCUSDT"));
+   }
+
+2. 断言风格
+
+   assert!(condition, "失败信息");
+   assert_eq!(actual, expected, "相等性检查");
+   assert!(result.is_ok(), "Result 检查");
+   assert!(result.is_err(), "Error 检查");
+
+3. 测试用例命名
+
+   test_trader_pool_register_and_unregister
+   test_signal_generator_long_entry
+   test_end_to_end_signal_to_decision
+
+4. 边界条件测试
+
+   #[test]
+   fn test_boundary_tr_ratio_threshold() {
+       // 边界: tr_base_60min = 0.15 (刚好等于阈值)
+       let input = create_test_signal_input(dec!(0.15), ...);
+       let output = generator.generate(&input, &VolatilityTier::High);
+       assert!(!output.long_entry);
+   }
+
+
+五、测试覆盖范围
 ================================================================================
 
-7.1 DECIMAL VALUES
+1. TraderPool 测试 (trader_pool_test.rs)
 
-Use rust_decimal_macros:
+   覆盖:
+   - 注册/注销
+   - 重复注册
+   - 状态更新
+   - 批量操作
+   - 清理功能
 
-    dec!(50000)
-    dec!(0.1)
-    dec!(3.5)
-    dec!(0.05)
-    dec!(0.02)
+   #[test]
+   fn test_trader_pool_register_and_unregister()
+   #[test]
+   fn test_trader_pool_duplicate_register()
+   #[test]
+   fn test_trader_pool_update_status()
+   #[test]
+   fn test_trader_pool_register_batch()
+   #[test]
+   fn test_trader_pool_clear()
 
-7.2 KLINE CREATION
+2. StrategyExecutor 测试 (strategy_executor_test.rs)
 
-    KLine {
-        symbol: "BTCUSDT".to_string(),
-        period: Period::Minute(1),
-        open: dec!(50000),
-        high: dec!(50500),
-        low: dec!(49500),
-        close: dec!(50200),
-        volume: dec!(100),
-        timestamp: Utc::now(),
-    }
+   覆盖:
+   - 策略注册与计数
+   - 信号分发
+   - 多策略调度
+   - 禁用策略处理
+   - 信号聚合
 
-7.3 TRADING SIGNAL CREATION
+   #[test]
+   fn test_executor_register_and_count()
+   #[test]
+   fn test_executor_dispatch_to_multiple_strategies()
+   #[test]
+   fn test_executor_dispatch_disabled_strategy()
+   #[test]
+   fn test_signal_aggregator_same_direction_max_qty()
 
-    let signal = TradingSignal::new(
-        "BTCUSDT".to_string(),
-        Direction::Long,
-        dec!(0.1),
-        "test_strategy".to_string(),
-    )
-    .with_price(dec!(50000))
-    .with_stop_loss(dec!(49000))
-    .with_take_profit(dec!(52000))
-    .with_signal_type(SignalType::Open)
-    .with_priority(80);
+3. TradingSignal 测试
 
-7.4 STRATEGY KLINE
+   覆盖:
+   - Builder 模式
+   - 有效性验证
+   - 方向判断
+   - 枚举默认值
 
-    let bar = StrategyKLine {
-        symbol: "BTCUSDT".to_string(),
-        period: "1m".to_string(),
-        open: dec!(50000),
-        high: dec!(51000),
-        low: dec!(49000),
-        close: dec!(50500),
-        volume: dec!(100),
-        timestamp: Utc::now(),
-    };
+   #[test]
+   fn test_trading_signal_builder_pattern()
+   #[test]
+   fn test_trading_signal_is_valid()
+   #[test]
+   fn test_direction_default()
+
+4. 集成测试 (trading_integration_test.rs)
+
+   覆盖完整流程:
+   - 数据流: Tick -> K线合成 -> 指标计算
+   - 信号生成: MinSignalGenerator
+   - 风控检查: RiskPreChecker
+   - 引擎执行: TradingEngineV2
+
+   #[test]
+   fn test_end_to_end_signal_to_decision()
+   #[test]
+   fn test_end_to_end_short_entry_flow()
+   #[test]
+   fn test_rejected_order_handling()
+
+
+六、Mock 组件使用
+================================================================================
+
+1. MockExchangeGateway 使用
+
+   let gateway = Arc::new(MockExchangeGateway::default_test());
+
+   // 测试订单执行
+   let result = gateway.place_order(OrderRequest { ... });
+   assert!(result.is_ok());
+
+   // 测试持仓跟踪
+   let position = gateway.get_position("BTCUSDT").unwrap().unwrap();
+   assert_eq!(position.long_qty, dec!(0.1));
+
+   // 测试拒绝订单
+   gateway.set_reject(Some("Rate limit".to_string()));
+   let result = gateway.place_order(...);
+   assert_eq!(result.unwrap().status, OrderStatus::Rejected);
+
+2. MinSignalGenerator 使用
+
+   let generator = MinSignalGenerator::new();
+   let input = create_pinbar_long_entry_input();
+   let output = generator.generate(&input, &VolatilityTier::High);
+
+   assert!(output.long_entry);
+   assert!(!output.short_entry);
+
+3. RiskPreChecker 使用
+
+   let checker = RiskPreChecker::new(dec!(0.95), dec!(1000));
+   let result = checker.pre_check("BTCUSDT", available, order_value, equity);
+
+   assert!(result.is_ok());  // 或
+   assert!(result.is_err()); // 检查错误
+
+
+七、测试配置
+================================================================================
+
+1. 依赖
+
+   [dev-dependencies] (各 crate Cargo.toml)
+
+   # g_test/Cargo.toml
+   parking_lot = "0.12"
+   rust_decimal_macros = "1.36"
+
+2. 测试宏
+
+   #![forbid(unsafe_code)]  // 保持与生产代码一致
+
+   use rust_decimal_macros::dec;  // 便捷Decimal字面量
+
+
+八、测试最佳实践
+================================================================================
+
+1. 独立性
+
+   每个测试独立运行，不依赖其他测试的状态
+
+2. 可重复性
+
+   测试结果确定，不受执行顺序影响
+
+3. 清晰断言
+
+   包含有意义的断言消息
+
+   assert_eq!(pool.count(), 1, "注册后策略数量应为 1");
+
+4. 覆盖边界
+
+   - 零值、空集合
+   - 阈值边界
+   - 相反方向
+   - 错误路径
+
+5. 中文注释
+
+   测试用例使用中文注释说明测试目的
 
 
 ================================================================================
-8. CONCURRENCY TESTS
-================================================================================
-
-Use std::thread for concurrent testing:
-
-    #[test]
-    fn test_rollback_manager_concurrent() {
-        use std::sync::Arc;
-
-        let fund_pool = Arc::new(FundPoolManager::new(dec!(100000), dec!(200000)));
-        let manager = Arc::new(RollbackManager::new(fund_pool.clone()));
-
-        fund_pool.freeze(ChannelType::HighSpeed, dec!(10000));
-
-        let mut handles = vec![];
-        for i in 0..10 {
-            let m = manager.clone();
-            let fp = fund_pool.clone();
-            let handle = std::thread::spawn(move || {
-                let result = m.rollback_order(ChannelType::HighSpeed, dec!(1000));
-                assert!(result.success, "并发回滚应该成功");
-            });
-            handles.push(handle);
-        }
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        assert_eq!(fund_pool.available(ChannelType::HighSpeed), dec!(100000));
-    }
-
-
-================================================================================
-9. COVERAGE APPROACH
-================================================================================
-
-9.1 UNIT TEST COVERAGE (inline tests)
-
-Cover:
-    - Business types: enums, structs, methods
-    - State transitions
-    - Configuration defaults
-    - Edge cases (empty, boundary values)
-    - Error conditions
-
-9.2 INTEGRATION TEST COVERAGE (g_test crate)
-
-Cover:
-    - Cross-module communication
-    - Trait implementations
-    - Full workflows (register -> dispatch -> signal)
-    - CSV parsing and file I/O
-    - Concurrent operations
-
-9.3 TEST CATEGORIES
-
-From codebase analysis:
-
-    business_types_tests: PositionSide, VolatilityTier, RiskState, ChannelType,
-                         StrategyQuery, StrategyResponse, RiskCheckResult,
-                         OrderLifecycle, OrderInfo, FundPool, PriceControlOutput
-
-    triggers_tests:      TriggerConfig, MinuteTrigger, DailyTrigger, TriggerManager
-
-    execution_tests:     ExecutionConfig, OrderExecutor, TradingPipeline, StateSyncer
-
-    fund_pool_tests:     FundPoolManager, freeze, confirm_usage, rollback
-
-    risk_manager_tests:  RiskConfig, RiskManager pre_check/lock_check
-
-    monitoring_tests:    TimeoutMonitor, HealthChecker, TimeoutSeverity
-
-    rollback_tests:      RollbackManager, OrderRollbackHelper, concurrent rollback
-
-    trade_lock_tests:    TradeLock try_lock, is_stale, position
-
-
-================================================================================
-10. TEST EXECUTION
-================================================================================
-
-Run all tests:
-    cargo test --all
-
-Run tests for specific crate:
-    cargo test -p f_engine
-    cargo test -p g_test
-
-Run with output:
-    cargo test -- --nocapture
-
-Run specific test:
-    cargo test test_position_side
-    cargo test test_executor_register
-
-Check coverage (requires tarpaulin):
-    cargo tarpaulin --all-crates
-
-
-================================================================================
-11. TEST FILE DOCUMENTATION
-================================================================================
-
-Test files should have module documentation:
-
-    //! ReplaySource 黑盒测试
-    //!
-    //! 测试历史数据回放功能
-
-    //! StrategyExecutor 黑盒测试
-    //!
-    //! 测试策略调度器的完整功能
-
-Test module documentation:
-
-    // ============================================================================
-    // TradeLock 测试
-    // ============================================================================
-
-    #[cfg(test)]
-    mod trade_lock_tests {
-        // ...
-    }
-
-
-================================================================================
-END OF TESTING PATTERNS
+END OF TESTING.md
 ================================================================================

@@ -1,295 +1,253 @@
 ================================================================================
-CODE CONVENTIONS - Rust Barter-rs Trading System
+CONVENTIONS.md - Rust 量化交易系统编码规范
 ================================================================================
 
-================================================================================
-1. LIB.RS HEADER - FORBIDDEN UNSAFE CODE
-================================================================================
-
-All lib.rs files MUST start with:
-
-    #![forbid(unsafe_code)]
-    #![allow(dead_code)]
-
-Example (from a_common/src/lib.rs):
-
-    #![forbid(unsafe_code)]
-    #![allow(dead_code)]
-
-    //! a_common - 基础设施层
-    //!
-    //! 提供 API/WS 网关、配置、通用错误、数据模型等基础设施组件。
-
-Rationale: This project explicitly forbids unsafe code in library crates to ensure memory safety in the trading engine.
-
-
-================================================================================
-2. DERIVE MACRO ORDERING
+Author: 代码分析
+Created: 2026-03-28
+Status: 已确认
 ================================================================================
 
-Standard order for derive macros on structs and enums:
 
-    #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-
-For enums with Error trait:
-
-    #[derive(Debug, Clone, Eq, PartialEq, Error)]
-
-For simple types without Serialize/Deserialize:
-
-    #[derive(Debug, Clone, Default)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-
-For types needing Hash:
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-
-Order priority: Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Error
-
-Examples from codebase:
-
-    // d_checktable/src/types.rs
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-    #[derive(Debug, Clone)]
-
-    // c_data_process/src/types.rs
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-
-    // Error types
-    #[derive(Debug, Clone, Eq, PartialEq, Error)]           // thiserror
-    #[derive(Debug, Clone, Error)]                            // thiserror (no Eq/PartialEq needed)
-
-
-================================================================================
-3. ERROR HANDLING - THISERROR PATTERN
+一、基础配置规范
 ================================================================================
 
-All error types use thiserror::Error for clear error hierarchy.
+1. Rust 版本与 Edition
+   - Edition: 2024
+   - Workspace 管理多 crate
 
-Pattern A - Standard Error Enum:
+2. rustfmt.toml 规范
+   - edition = "2024"
+   - imports_granularity = "crate" (按 crate 聚合导入)
 
-    use thiserror::Error;
-
-    #[derive(Debug, Clone, Eq, PartialEq, Error)]
-    pub enum MarketError {
-        #[error("WebSocket连接失败: {0}")]
-        WebSocketConnectionFailed(String),
-
-        #[error("WebSocket错误: {0}")]
-        WebSocketError(String),
-
-        #[error("序列化错误: {0}")]
-        SerializeError(String),
-
-        #[error("订阅失败: {0}")]
-        SubscribeFailed(String),
-    }
-
-Pattern B - Unified AppError with From implementations:
-
-    #[derive(Debug, Clone, Error)]
-    pub enum AppError {
-        #[error("[Engine] 风控检查失败: {0}")]
-        RiskCheckFailed(String),
-
-        #[error("[Market] WebSocket连接失败: {0}")]
-        WebSocketConnectionFailed(String),
-
-        #[error("[Data] 序列化错误: {0}")]
-        SerializeError(String),
-    }
-
-    impl From<EngineError> for AppError {
-        fn from(e: EngineError) -> Self {
-            match e {
-                EngineError::RiskCheckFailed(msg) => AppError::RiskCheckFailed(msg),
-                // ... other variants
-            }
-        }
-    }
-
-Key conventions:
-- Error messages in Chinese with category prefix: [Engine], [Market], [Data], [Infra]
-- Use String for error context, not &'static str
-- Implement From<> for error conversion between layers
-- Error variants grouped by module with comments
+3. 全局安全规则
+   - #![forbid(unsafe_code)] (强制禁止 unsafe 代码)
+   - #![allow(dead_code)] (允许死代码警告抑制)
 
 
-================================================================================
-4. FORBIDDEN PATTERNS
+二、派生宏 (Derive) 顺序规范
 ================================================================================
 
-4.1 NO panic!()
+标准类型派生顺序:
+   #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 
-    PROHIBITED:
-        panic!("something went wrong");
-        panic!("position limit exceeded");
+数据结构派生顺序:
+   #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 
-    REQUIRED:
-        Return Result<T, SomeError> and handle errors properly.
+枚举类型派生顺序:
+   #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 
-    Rationale: Panic would crash the trading engine, losing state and money.
+仅 Debug:
+   #[derive(Debug, Clone, Copy)]
 
-4.2 NO unsafe CODE
-
-    PROHIBITED:
-        unsafe { ... }
-        #![allow(unsafe_code)]  // in lib.rs
-
-    REQUIRED:
-        #![forbid(unsafe_code)]
-
-    Rationale: Trading systems require memory safety guarantees.
-
-4.3 NO EXCESSIVE clone()
-
-    PROHIBITED (in hot paths):
-        let data = big_struct.clone();
-
-    PREFERRED:
-        Use references (&T) or Arc/Rc for shared ownership.
-        Only clone when necessary (e.g., returning owned data).
-
-4.4 NO MUTEX IN HOT PATHS
-
-    PROHIBITED (in Tick receive, indicator update, strategy judgment):
-        let guard = mutex.lock().unwrap();
-
-    REQUIRED:
-        Use parking_lot::RwLock for read-heavy workloads.
-        Use atomic types for simple counters.
-
-    Rationale: Lock contention destroys performance in high-frequency trading.
+仅 Debug + Clone:
+   #[derive(Debug, Clone)]
 
 
-================================================================================
-5. NAMING CONVENTIONS
+三、错误处理规范
 ================================================================================
 
-5.1 MODULES
-    - lowercase_with_underscores: api, ws, risk_monitor, position_manager
-    - No pluralization: data_source not data_sources
+1. 使用 thiserror 库定义错误类型
 
-5.2 TYPES/STRUCTS/ENUMS
-    - PascalCase: TradingEngine, OrderRequest, PositionSide
-    - Exception: acronyms stay uppercase: OKX, BTCUSDT, KLine
+   #[derive(Debug, Clone, Eq, PartialEq, Error)]
+   pub enum MyError {
+       #[error("描述: {0}")]
+       MyVariant(String),
+   }
 
-5.3 FUNCTIONS/METHODS
-    - snake_case: calculate_position(), validate_order()
-    - Builder pattern methods: with_price(), with_stop_loss()
+2. 错误类型层次结构
 
-5.4 CONSTANTS
-    - SCREAMING_SNAKE_CASE: MAX_POSITION_SIZE, DEFAULT_TIMEOUT_MS
-    - Or UPPER_SNAKE for config: KLINE_1M_REALTIME_DIR
+   a_common/src/claint/error.rs 定义三层错误体系:
 
-5.5 TRAIT NAMES
-    - PascalCase: Strategy, ExchangeGateway, MarketDataProvider
-    - Behavior nouns: Read, Write, Clone
+   - EngineError: 引擎相关错误
+     * RiskCheckFailed, OrderExecutionFailed, LockFailed
+     * InsufficientFund, PositionLimitExceeded, ModeSwitchFailed
+     * SymbolNotFound, Network, MemoryBackup
 
-5.6 ERROR VARIANTS
-    - PascalCase: InsufficientFunds, PositionLimitExceeded
-    - Verb past tense: ConnectionFailed, OrderRejected
-    - Category prefix in AppError: [Engine], [Market]
+   - MarketError: 市场数据错误
+     * WebSocketConnectionFailed, WebSocketError
+     * SubscribeFailed, UnsubscribeFailed
+     * ParseError, KLineError, OrderBookError
+     * Timeout, RedisError, NetworkError
 
+   - AppError: 统一应用错误 (整合 Engine + Market)
+     * 使用 [Engine], [Market], [Data], [Infra], [Other] 前缀
 
-================================================================================
-6. DOCUMENTATION
-================================================================================
+3. From 实现用于错误转换
 
-Every module should have a doc comment:
-
-    //! Module Name - Purpose
-    //!
-    //! Additional description of what this module does and its responsibilities.
-
-Example:
-
-    //! a_common - 基础设施层
-    //!
-    //! 提供 API/WS 网关、配置、通用错误、数据模型等基础设施组件。
+   impl From<EngineError> for AppError {
+       fn from(e: EngineError) -> Self {
+           match e {
+               EngineError::Xxx(msg) => AppError::Xxx(msg),
+           }
+       }
+   }
 
 
-================================================================================
-7. MODULE STRUCTURE
+四、模块结构规范
 ================================================================================
 
-f_engine/src/ subdirectory structure (enforced):
+1. 目录结构 (6层架构)
 
-    f_engine/src/
-    ├── core/               # 核心引擎 (engine.rs, pipeline.rs, pipeline_form.rs)
-    ├── risk/               # 风控 (risk.rs, risk_rechecker.rs, order_check.rs, thresholds.rs, minute_risk.rs)
-    ├── order/              # 订单 (order.rs, gateway.rs, mock_binance_gateway.rs)
-    ├── position/           # 持仓 (position_manager.rs, position_exclusion.rs)
-    ├── persistence/        # 持久化 (sqlite_persistence.rs, memory_backup.rs, disaster_recovery.rs, persistence.rs)
-    ├── channel/            # 通道 (channel.rs, mode.rs)
-    └── shared/             # 共享 (account_pool.rs, check_table.rs, pnl_manager.rs, symbol_rules.rs, etc.)
+   crates/
+   ├── a_common/      # 基础设施层: API/WS网关、配置、错误、数据模型
+   ├── b_data_source/ # 业务数据层: 市场数据处理、K线合成、订单簿
+   ├── c_data_process/# 数据处理层: 交易信号类型 (TradingDecision/TradingAction)
+   ├── d_checktable/  # 检查表层: 15分钟Trader/Executor/Repository
+   ├── e_risk_monitor/ # 风控监控层
+   ├── f_engine/      # 引擎层: 事件驱动引擎
+   ├── g_test/        # 测试模块 (黑盒测试)
+   └── x_data/        # 数据相关模块
 
-Key rule: No new files outside submodules. All new functionality goes into existing submodules.
+2. lib.rs 模块导出规范
+
+   - 顶层 #![forbid(unsafe_code)]
+   - 模块可见性: pub mod, pub use
+   - Re-exports 集中管理 (类型、函数、错误)
+   - 清晰的中文注释说明模块职责
+
+3. 子模块组织
+
+   每个 crate 按功能划分 submodules:
+   - ws/       - WebSocket 数据接口
+   - api/      - REST API 数据接口
+   - models/   - 数据类型
+   - 内部模块  - 私有实现
 
 
+五、命名规范
 ================================================================================
-8. IMPORT CONVENTIONS
+
+1. 类型命名
+
+   - 枚举成员: PascalCase (如 LongEntry, ShortEntry)
+   - 结构体字段: snake_case
+   - 泛型参数: PascalCase (如 T, R)
+
+2. 函数命名
+
+   - 查询型: get_xxx(), is_xxx(), has_xxx()
+   - 动作型: update_xxx(), set_xxx(), process_xxx()
+   - 创建型: new(), with_xxx() (builder模式)
+   - 布尔型: is_xxx(), is_active(), is_enabled()
+
+3. 常量与配置
+
+   - 全局常量: SCREAMING_SNAKE_CASE (如 MAX_KLINE_ENTRIES)
+   - 配置结构: PascalCase (如 VolatilityConfig)
+
+4. 文件命名
+
+   - 模块文件: snake_case (如 market_data.rs)
+   - 模块目录: snake_case (如 market_data/)
+   - 测试文件: *_test.rs 或 tests/*.rs
+
+
+六、同步与并发规范
 ================================================================================
 
-Use crate:: for internal imports:
+1. 使用 parking_lot 替代标准库锁
 
-    use crate::core::engine_v2::{TradingEngineV2, TradingEngineConfig};
-    use crate::types::TradingAction;
+   parking_lot = "0.12"
 
-Use external crate names as imported:
+   - RwLock: 读多写少场景
+   - Mutex: 独占访问
 
-    use rust_decimal_macros::dec;
-    use chrono::{DateTime, Utc};
-    use parking_lot::RwLock;
-    use thiserror::Error;
+2. 锁使用原则 (高频路径无锁)
 
-Group imports by external crate:
+   - Tick接收、指标更新、策略判断: 无锁
+   - 下单和资金更新: 使用锁
+   - 锁外预检所有风控条件
 
-    use rust_decimal_macros::dec;
-    use rust_decimal::Decimal;
 
-    use chrono::{DateTime, Utc};
+七、宏规范
+================================================================================
 
-    use parking_lot::RwLock;
+1. 便捷宏命名
 
-    use serde::{Serialize, Deserialize};
+   #[macro_export]
+   macro_rules! store_write_kline {
+       ($symbol:expr, $kline:expr, $closed:expr) => {
+           $crate::default_store().write_kline($symbol, $kline, $closed)
+       };
+   }
+
+2. 宏命名: snake_case (如 store_write_kline)
+
+
+八、代码风格规范
+================================================================================
+
+1. 导入顺序
+
+   - 标准库导入
+   - 第三方库导入
+   - 当前 crate 导入
+   - 按 crate 聚合 (imports_granularity = "crate")
+
+2. 文档注释
+
+   //! 用于 lib.rs 顶部模块文档
+   /// 用于函数/结构体文档
+
+3. 访问控制
+
+   - pub: 公开 API
+   - pub(crate): crate 内部
+   - private: 默认
+
+4. 类型别名
+
+   使用 type 别名提高可读性:
+   type Result<T> = std::result::Result<T, EngineError>;
+
+
+九、Builder 模式规范
+================================================================================
+
+类型实现 with_xxx() 方法链式调用:
+
+   #[derive(Debug, Clone)]
+   pub struct Signal {
+       pub price: Option<Decimal>,
+       pub stop_loss: Option<Decimal>,
+   }
+
+   impl Signal {
+       pub fn with_price(mut self, price: Decimal) -> Self {
+           self.price = Some(price);
+           self
+       }
+       pub fn with_stop_loss(mut self, sl: Decimal) -> Self {
+           self.stop_loss = Some(sl);
+           self
+       }
+   }
+
+   // 使用:
+   let signal = TradingSignal::new(...).with_price(dec!(50000));
+
+
+十、代码组织原则
+================================================================================
+
+1. 高频路径无锁设计
+   - Tick -> Store -> 策略 -> 决策 (无锁)
+   - 锁仅用于下单和资金更新
+
+2. 增量计算 O(1)
+   - EMA, SMA, MACD 等指标增量计算
+   - K线增量更新当前K线
+
+3. 三层指标体系
+   - TR (True Range): 波动率突破判断
+   - Pine颜色: 趋势信号 (MACD + EMA10/20 + RSI)
+   - 价格位置: 周期极值判断
+
+4. 混合持仓模式
+   - 资金池 RwLock 保护 (低频)
+   - 策略持仓独立计算 (无锁)
 
 
 ================================================================================
-9. TEST HELPER CONVENTIONS
-================================================================================
-
-Test helper functions marked with #[allow(dead_code)]:
-
-    #[allow(dead_code)]
-    fn create_sample_klines() -> Vec<KLine> {
-        vec![
-            KLine {
-                symbol: "BTCUSDT".to_string(),
-                // ...
-            },
-        ]
-    }
-
-Decimal creation uses rust_decimal_macros:
-
-    dec!(50000)
-    dec!(0.1)
-    dec!(3.5)
-
-
-================================================================================
-10. TRAIT BOUND ORDERING
-================================================================================
-
-When multiple trait bounds are needed:
-
-    impl<T: Clone + Send + Sync + 'static> SomeTrait for T
-
-Order: Clone, Send, Sync, 'static, then any custom trait bounds.
-
-================================================================================
-END OF CONVENTIONS
+END OF CONVENTIONS.md
 ================================================================================
