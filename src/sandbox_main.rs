@@ -37,6 +37,7 @@ use rust_decimal::Decimal;
 use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 use dashmap::DashMap;
 
@@ -58,6 +59,25 @@ const DEFAULT_FUND: f64 = 10000.0;
 const VOLATILITY_THRESHOLD: Decimal = dec!(0.02);  // 2% 波动率阈值
 
 // ============================================================================
+// 背压模式
+// ============================================================================
+
+/// 背压模式 - 决定 channel 满时的行为
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackpressureMode {
+    /// 回放模式：阻塞生产者，保时间线一致性
+    Replay,
+    /// 实盘模式：非阻塞，channel 满了弹最旧的、留最新的
+    Realtime,
+}
+
+impl Default for BackpressureMode {
+    fn default() -> Self {
+        BackpressureMode::Replay  // 默认回放模式
+    }
+}
+
+// ============================================================================
 // SandboxConfig
 // ============================================================================
 
@@ -68,6 +88,8 @@ struct SandboxConfig {
     duration_secs: u64,
     start_date: String,
     end_date: String,
+    /// 背压模式
+    backpressure_mode: BackpressureMode,
 }
 
 impl Default for SandboxConfig {
@@ -78,6 +100,7 @@ impl Default for SandboxConfig {
             duration_secs: 60,
             start_date: "2025-10-10".to_string(),
             end_date: "2025-10-12".to_string(),
+            backpressure_mode: BackpressureMode::Replay,
         }
     }
 }
@@ -560,6 +583,46 @@ enum TradingAction {
 // 辅助函数
 // ============================================================================
 
+/// 发送 Tick（根据背压模式选择策略）
+async fn send_tick_with_backpressure(
+    tx: &mpsc::Sender<Tick>,
+    tick: Tick,
+    mode: BackpressureMode,
+) -> Result<(), ()> {
+    match mode {
+        BackpressureMode::Replay => {
+            // 回放模式：阻塞保时间线
+            if tx.send(tick).await.is_err() {
+                tracing::info!("通道关闭，停止注入");
+                return Err(());
+            }
+            Ok(())
+        }
+        BackpressureMode::Realtime => {
+            // 实盘模式：非阻塞
+            // 注：tokio mpsc Sender 不支持 try_recv，无法主动弹旧数据
+            // 所以满了就丢弃最新的 Tick，保留队列中更早的
+            let symbol = tick.symbol.clone();
+            let seq = tick.sequence_id;
+            match tx.try_send(tick) {
+                Ok(()) => Ok(()),
+                Err(TrySendError::Full(_)) => {
+                    tracing::warn!(
+                        symbol = %symbol,
+                        seq = %seq,
+                        "[Producer] Channel full, drop newest tick to avoid latency"
+                    );
+                    Ok(())
+                }
+                Err(TrySendError::Closed(_)) => {
+                    tracing::info!("通道关闭，停止注入");
+                    Err(())
+                }
+            }
+        }
+    }
+}
+
 fn parse_args() -> SandboxConfig {
     let args: Vec<String> = std::env::args().collect();
     // 简化版，实际应解析命令行参数
@@ -684,6 +747,7 @@ async fn main() -> Result<()> {
     // 沙盒只负责生成数据，不负责计算
     let tick_tx_clone = tick_tx.clone();
     let symbol_clone = config.symbol.clone();
+    let backpressure_mode = config.backpressure_mode;  // 获取背压模式
     let ws_converter = TickToWsConverter::new(config.symbol.clone(), "1m".to_string());
 
     let tick_gen = StreamTickGenerator::from_loader(symbol_clone.clone(), klines.into_iter());
@@ -732,9 +796,8 @@ async fn main() -> Result<()> {
                     tick_index += 1;
                 }
 
-                // 背压驱动：channel 满时阻塞
-                if tick_tx_clone.send(tick).await.is_err() {
-                    tracing::info!("通道关闭，停止注入");
+                // 根据背压模式发送 Tick
+                if send_tick_with_backpressure(&tick_tx_clone, tick, backpressure_mode).await.is_err() {
                     break;
                 }
 
