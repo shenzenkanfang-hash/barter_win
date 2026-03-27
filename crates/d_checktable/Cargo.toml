@@ -27,3 +27,8 @@ x_data = { path = "../x_data" }
 [dev-dependencies]
 tempfile = "3"
 futures = { workspace = true }
+tracing-subscriber = "0.3"
+
+[[example]]
+name = "h_15m_test"
+path = "examples/h_15m_test.rs"

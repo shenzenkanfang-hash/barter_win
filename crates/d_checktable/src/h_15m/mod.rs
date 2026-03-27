@@ -17,7 +17,7 @@ pub use signal::MinSignalGenerator;
 pub use status::{PinStatus, PinStatusMachine};
 // P0-3 修复：导出新增类型
 pub use trader::{
-    AccountInfo, AccountProvider, ExecutionResult, Trader, TraderConfig, TraderError,
+    AccountInfo, AccountProvider, ExecutionResult, QuantityCalculatorConfig, Trader, TraderConfig, TraderError,
     TraderHealth,
 };
 
