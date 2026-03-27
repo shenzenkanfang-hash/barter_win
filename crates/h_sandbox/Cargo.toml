@@ -19,6 +19,10 @@ path = "src/bin/download_hotusdt_history.rs"
 name = "generate_mock_hotusdt"
 path = "src/bin/generate_mock_hotusdt.rs"
 
+[[bin]]
+name = "download_btc_shanghai"
+path = "src/bin/download_btc_shanghai_time.rs"
+
 [dependencies]
 a_common = { path = "../a_common" }
 b_data_source = { path = "../b_data_source" }
