@@ -1,31 +1,19 @@
-//! 风控接口
+//! 风控接口（最小化）
 //!
-//! 定义风控检查的统一接口。
+//! 仅导出 h_sandbox 沙箱测试需要的 trait 和类型。
 
-use a_common::ExchangeAccount;
-use crate::types::OrderRequest;
+use a_common::exchange::ExchangeAccount;
+pub use crate::types::{OrderRequest, RiskCheckResult};
 
-// Re-export DTO from a_common
+/// 从 a_common 导出风控相关类型
 pub use a_common::models::dto::{
-    RiskLevel, PositionDirection, PositionInfo, ExecutedOrder,
-    RiskWarning, RiskThresholds,
+    ExecutedOrder, PositionInfo, RiskThresholds, RiskWarning,
 };
 
-use crate::core::RiskCheckResult;
-
-/// 风控检查器接口
-///
-/// 封装所有风控检查逻辑。
+/// 风控检查器 trait（sandbox 用）
 pub trait RiskChecker: Send + Sync {
-    /// 预下单检查
     fn pre_check(&self, order: &OrderRequest, account: &ExchangeAccount) -> RiskCheckResult;
-
-    /// 订单成交后检查
     fn post_check(&self, order: &ExecutedOrder, account: &ExchangeAccount) -> RiskCheckResult;
-
-    /// 定期风险扫描
     fn scan(&self, positions: &[PositionInfo], account: &ExchangeAccount) -> Vec<RiskWarning>;
-
-    /// 获取风控阈值
     fn thresholds(&self) -> RiskThresholds;
 }

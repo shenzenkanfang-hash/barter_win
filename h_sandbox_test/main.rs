@@ -1,37 +1,93 @@
 //! Trading System Rust Version - Main Entry
-//!
-//! 【v4.0 重构后】
-//! - TradingEngineV2 已迁移到 h_15m 层（自循环架构）
-//! - 实盘使用 sandbox_main.rs 进行沙盒测试
-//! - main.rs 仅保留数据源订阅功能
 
-use a_common::BinanceApiGateway;
-use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}};
+use a_common::{BinanceApiGateway, ExchangeAccount};
+use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}, MockMarketStream};
+use f_engine::core::TradingEngineV2;
+use f_engine::{RiskChecker, RiskThresholds, PositionInfo, ExecutedOrder, RiskWarning, RiskCheckResult, OrderRequest};
+use f_engine::order::mock_binance_gateway::{MockBinanceGateway, MockGatewayConfig};
+use rust_decimal_macros::dec;       
+use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
+
+struct MockRiskChecker;
+
+impl RiskChecker for MockRiskChecker {
+    fn pre_check(&self, _order: &OrderRequest, _account: &ExchangeAccount) -> RiskCheckResult {
+        RiskCheckResult::new(true, false)
+    }
+
+    fn post_check(&self, _order: &ExecutedOrder, _account: &ExchangeAccount) -> RiskCheckResult {
+        RiskCheckResult::new(true, false)
+    }
+
+    fn scan(&self, _positions: &[PositionInfo], _account: &ExchangeAccount) -> Vec<RiskWarning> {
+        vec![]
+    }
+
+    fn thresholds(&self) -> RiskThresholds {
+        RiskThresholds::default()
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
-                .with_target(true)
-                .with_level(true)
-                .with_thread_ids(false)
+                .with_target(true)   // 显示 target
+                .with_level(true)   // 显示日志级别
+                .with_thread_ids(false) // 不显示线程ID
         )
-        .with(LevelFilter::INFO)
+        .with(LevelFilter::INFO)  // 显示 info/warn/error
         .init();
 
-    tracing::info!("Trading system starting (Data Source Mode)");
+    tracing::info!("Trading system starting");
 
     let paths = Paths::new();
     tracing::info!("Platform: {:?}", paths.platform());
     tracing::info!("Memory backup: {}", paths.memory_backup_dir);
 
     // ========================================
+    // TradingEngine 示例
+    // ========================================
+    tracing::info!("=== TradingEngine Example ===");
+
+    // 创建 Mock 网关（用于测试）
+    let _gateway_config = MockGatewayConfig {
+        initial_balance: dec!(10000.0),
+        commission_rate: dec!(0.0004),
+        slippage_rate: dec!(0.0001),
+        simulate_fill: true,
+        fill_delay_ms: 100,
+    };
+    let gateway: Arc<dyn f_engine::interfaces::ExchangeGateway> = 
+        Arc::new(MockBinanceGateway::with_config(_gateway_config.clone()));
+
+    // 创建 Mock 风控检查器
+    let risk_checker: Arc<dyn RiskChecker> = Arc::new(MockRiskChecker);
+
+    // 创建 Mock 市场数据流
+    let _market_stream = Box::new(MockMarketStream::new(
+        "BTCUSDT".to_string(),
+        dec!(50000.0),
+    ));
+
+    // 创建 TradingEngineV2 实例
+    let mut config = TradingEngineV2::default_config();
+    config.gateway = Some(gateway);
+    config.risk_checker = Some(risk_checker);
+    let _engine = TradingEngineV2::new(config);
+    tracing::info!("TradingEngineV2 created successfully");
+
+    // 获取网关信息
+    tracing::info!("Gateway configured");
+
+    // ========================================
     // 数据源订阅示例
     // ========================================
     tracing::info!("=== Data Source Example ===");
 
+    // 1. 从交易所拉取交易规则（同时保存原始 JSON 到 symbols_rules/）
     let mut gateway = BinanceApiGateway::new();
     let all_symbols = gateway.fetch_and_save_all_usdt_symbol_rules().await?;
 
@@ -47,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kline_1m_stream = Kline1mStream::new(trading_symbols.clone()).await?;
     tracing::info!("1m KLine WS subscription started");
 
+    // 短暂等待后启动 1d
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     // 3. 启动 1d K线 WS 订阅 (分片: 50个/批, 500ms间隔)
@@ -54,6 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kline_1d_stream = Kline1dStream::new(trading_symbols).await?;
     tracing::info!("1d KLine WS subscription started");
 
+    // 短暂等待后启动 Depth
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // 4. 启动 Depth 订单簿 WS (仅 BTC)

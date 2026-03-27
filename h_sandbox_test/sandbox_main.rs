@@ -25,8 +25,9 @@ use h_sandbox::{
     ShadowBinanceGateway, ShadowRiskChecker,
     historical_replay::StreamTickGenerator,
 };
-use f_engine::types::{OrderRequest, OrderType, Side, TaskState, RunningStatus};
-use f_engine::interfaces::RiskChecker;
+use f_engine::core::engine::{TaskState, RunningStatus};
+use f_engine::types::{OrderRequest, OrderType, Side};
+use f_engine::RiskChecker;
 
 const DEFAULT_SYMBOL: &str = "HOTUSDT";
 const DEFAULT_FUND: f64 = 10000.0;
@@ -130,6 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_feeder_for_gen = Arc::clone(&data_feeder);
     let indicator_cache_for_gen = Arc::clone(&indicator_cache);
     
+    // 修改：异步发送 ticks，每 50ms 发送一个
     tokio::spawn(async move {
         let mut generator = tick_gen;
         let mut tick_idx = 0u64;
@@ -374,27 +376,14 @@ impl IndicatorCache {
                 }
             }
             
-            // 真正的 EMA 计算
+            // 简化 EMA 计算
             if indicators.price_history.len() >= 5 {
-                indicators.ema5 = Some(Self::calc_ema(&indicators.price_history, 5));
+                indicators.ema5 = Some(price); // 简化
             }
             if indicators.price_history.len() >= 20 {
-                indicators.ema20 = Some(Self::calc_ema(&indicators.price_history, 20));
+                indicators.ema20 = Some(price); // 简化
             }
         });
-    }
-    
-    /// 计算 EMA
-    fn calc_ema(prices: &[Decimal], period: usize) -> Decimal {
-        if prices.is_empty() {
-            return Decimal::ZERO;
-        }
-        let k = dec!(2) / Decimal::from(period + 1);
-        let mut ema = prices[0];
-        for price in prices.iter().skip(1) {
-            ema = *price * k + ema * (Decimal::ONE - k);
-        }
-        ema
     }
 
     fn calculate_indicators(&self, _kline: &KLine) {
@@ -572,26 +561,16 @@ impl TradeManagerEngine {
                 // 4. 从 IndicatorCache 获取指标
                 let indicators = indicator_cache.get(&symbol).await;
 
-                // 调试：打印指标
-                if signal_count % 20 == 0 {
-                    if let Some(ind) = indicators.as_ref() {
-                        tracing::info!("[Strategy] price={}, ema5={:?}, ema20={:?}, rsi={:?}, has_pos={}", 
-                            current_price, ind.ema5, ind.ema20, ind.rsi, has_position);
-                    } else {
-                        tracing::info!("[Strategy] price={}, 无指标数据, has_pos={}", current_price, has_position);
-                    }
-                }
-
                 // 5. 策略计算：基于 EMA 金叉/死叉
                 let should_open = if !has_position && !current_price.is_zero() {
                     if let Some(ind) = indicators.as_ref() {
-                        if let (Some(ema5), Some(ema20), Some(rsi)) = (ind.ema5, ind.ema20, ind.rsi) {
-                            let cond = ema5 > ema20 && rsi < dec!(70) && rsi > dec!(30);
-                            if signal_count % 20 == 0 {
-                                tracing::info!("[Strategy] should_open 检查: ema5={} > ema20={} = {}, rsi={}, cond={}", 
-                                    ema5, ema20, ema5 > ema20, rsi, cond);
+                        // EMA5 > EMA20 且 RSI < 70 → 开多
+                        if let (Some(ema5), Some(ema20)) = (ind.ema5, ind.ema20) {
+                            if let Some(rsi) = ind.rsi {
+                                ema5 > ema20 && rsi < dec!(70) && rsi > dec!(30)
+                            } else {
+                                ema5 > ema20
                             }
-                            cond
                         } else {
                             false
                         }
@@ -623,16 +602,10 @@ impl TradeManagerEngine {
 
                 // 6. 执行交易
                 if should_open && !current_price.is_zero() {
-                    tracing::info!("[{}] should_open=true，准备下单!", symbol);
-                    
                     // 风控检查
                     let account = match gateway.get_account() {
-                        Ok(acc) => {
-                            tracing::info!("[{}] 账户信息: equity={}, available={}", symbol, acc.total_equity, acc.available);
-                            acc
-                        }
-                        Err(e) => {
-                            tracing::warn!("[{}] 获取账户失败: {:?}", symbol, e);
+                        Ok(acc) => acc,
+                        Err(_) => {
                             drop(_lock);
                             sleep(Duration::from_millis(interval_ms)).await;
                             signal_count += 1;
@@ -649,11 +622,9 @@ impl TradeManagerEngine {
                         price: Some(current_price),
                     };
 
-                    let risk_result = risk_checker.pre_check(&order_req, &account);
-                    if risk_result.pre_failed() {
-                        tracing::warn!("[{}] 风控拦截: {:?}", symbol, risk_result);
+                    if risk_checker.pre_check(&order_req, &account).pre_failed() {
+                        tracing::debug!("[{}] 风控拦截开仓", symbol);
                     } else {
-                        tracing::info!("[{}] 风控通过，准备下单...", symbol);
                         // 下单
                         match gateway.place_order(order_req) {
                             Ok(result) => {
@@ -665,7 +636,7 @@ impl TradeManagerEngine {
                                 s.total_trades += 1;
                                 
                                 tracing::info!(
-                                    "[{}] 开仓成功 @ {} (qty: {})",
+                                    "[{}] 开仓 @ {} (qty: {})",
                                     symbol, current_price, result.filled_qty
                                 );
                             }

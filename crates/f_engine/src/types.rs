@@ -1,11 +1,12 @@
 //! f_engine 核心类型定义
 //!
-//! # 模块划分
+//! # 精简后保留
 //! - `StrategyId` - 策略标识符
 //! - `TradingDecision` - 交易决策
 //! - `OrderRequest` - 订单请求
+//! - `TaskState` / `RunningStatus` - sandbox_main 任务状态
+//! - `RiskCheckResult` - h_sandbox 风控结果
 //! - `Side`, `OrderType`, `TradingAction` - 来自 a_common 的类型重导出
-//! - `Mode`, `ModeSwitcher` - 移至 `channel` 模块
 
 #![forbid(unsafe_code)]
 
@@ -135,11 +136,94 @@ impl OrderRequest {
 }
 
 // ============================================================================
-// 通道模块类型重导出
+// 沙箱任务状态（sandbox_main 用）
 // ============================================================================
 
-/// 交易模式
-pub use crate::channel::Mode;
+/// 任务运行状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunningStatus {
+    Running,
+    Stopped,
+    Ended,
+}
 
-/// 模式切换器
-pub use crate::channel::ModeSwitcher;
+impl Default for RunningStatus {
+    fn default() -> Self {
+        RunningStatus::Stopped
+    }
+}
+
+/// 任务状态（sandbox TradeManager 用）
+///
+/// 精简版：心跳 + 禁止状态 + 结束状态
+#[derive(Debug, Clone)]
+pub struct TaskState {
+    /// 品种
+    pub symbol: String,
+    /// 运行状态
+    pub status: RunningStatus,
+    /// 最后心跳时间（Unix 秒）
+    pub last_beat: i64,
+    /// 禁止交易截止时间（Unix 秒）
+    pub forbid_until: Option<i64>,
+    /// 禁止原因
+    pub forbid_reason: Option<String>,
+    /// 结束原因
+    pub done_reason: Option<String>,
+}
+
+impl TaskState {
+    pub fn new(symbol: String, _interval_ms: u64) -> Self {
+        Self {
+            symbol,
+            status: RunningStatus::Running,
+            last_beat: chrono::Utc::now().timestamp(),
+            forbid_until: None,
+            forbid_reason: None,
+            done_reason: None,
+        }
+    }
+
+    /// 是否被禁止
+    pub fn is_forbidden(&self) -> bool {
+        if let Some(ts) = self.forbid_until {
+            chrono::Utc::now().timestamp() < ts
+        } else {
+            false
+        }
+    }
+
+    /// 更新心跳
+    pub fn heartbeat(&mut self) {
+        self.last_beat = chrono::Utc::now().timestamp();
+    }
+
+    /// 结束任务
+    pub fn end(&mut self, reason: String) {
+        self.status = RunningStatus::Ended;
+        self.done_reason = Some(reason);
+    }
+}
+
+// ============================================================================
+// 风控结果（h_sandbox 用）
+// ============================================================================
+
+/// 风控检查结果
+#[derive(Debug, Clone)]
+pub struct RiskCheckResult {
+    /// 是否通过
+    pub passed: bool,
+    /// 是否通过二次检查
+    pub secondary_passed: bool,
+}
+
+impl RiskCheckResult {
+    pub fn new(passed: bool, secondary_passed: bool) -> Self {
+        Self { passed, secondary_passed }
+    }
+
+    pub fn pre_failed(&self) -> bool {
+        !self.passed
+    }
+}
