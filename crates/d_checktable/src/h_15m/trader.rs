@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use b_data_source::{default_store, MarketDataStore};
+use b_data_source::MarketDataStore;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -21,6 +21,9 @@ use crate::h_15m::executor::{Executor, OrderType};
 use crate::h_15m::repository::{RepoError, Repository, TradeRecord};
 use crate::h_15m::{MinSignalGenerator, PinStatus, PinStatusMachine};
 use crate::types::{MinSignalInput, MinSignalOutput, VolatilityTier};
+
+/// MarketDataStore trait object for dependency injection
+pub type StoreRef = Arc<dyn MarketDataStore + Send + Sync>;
 
 /// 品种交易器配置
 #[derive(Debug, Clone)]
@@ -56,14 +59,20 @@ pub struct Trader {
     position: TokioRwLock<Option<LocalPosition>>,
     executor: Arc<Executor>,
     repository: Arc<Repository>,
+    store: StoreRef,
     last_order_ms: AtomicU64,
     is_running: AtomicBool,
     shutdown: Notify,
 }
 
 impl Trader {
-    /// 创建 Trader（需要注入 executor 和 repository）
-    pub fn new(config: TraderConfig, executor: Arc<Executor>, repository: Arc<Repository>) -> Self {
+    /// 创建 Trader（需要注入 executor、repository 和 store）
+    pub fn new(
+        config: TraderConfig,
+        executor: Arc<Executor>,
+        repository: Arc<Repository>,
+        store: StoreRef,
+    ) -> Self {
         Self {
             config,
             status_machine: TokioRwLock::new(PinStatusMachine::new()),
@@ -71,20 +80,28 @@ impl Trader {
             position: TokioRwLock::new(None),
             executor,
             repository,
+            store,
             last_order_ms: AtomicU64::new(0),
             is_running: AtomicBool::new(false),
             shutdown: Notify::new(),
         }
     }
 
+    /// 创建 Trader（使用默认 store）
+    pub fn with_default_store(config: TraderConfig, executor: Arc<Executor>, repository: Arc<Repository>) -> Self {
+        // Clone the Arc to convert &Arc<impl> to Arc<dyn Trait>
+        let store: StoreRef = b_data_source::default_store().clone();
+        Self::new(config, executor, repository, store)
+    }
+
     /// 从 Store 获取当前K线
     pub fn get_current_kline(&self) -> Option<b_data_source::ws::kline_1m::ws::KlineData> {
-        default_store().get_current_kline(&self.config.symbol)
+        self.store.get_current_kline(&self.config.symbol)
     }
 
     /// 从 Store 获取波动率
     pub fn get_volatility(&self) -> Option<b_data_source::store::VolatilityData> {
-        default_store().get_volatility(&self.config.symbol)
+        self.store.get_volatility(&self.config.symbol)
     }
 
     /// 获取当前价格
@@ -270,6 +287,7 @@ impl Trader {
         // 5. 获取当前持仓状态
         let current_side = self.current_position_side().await;
         let current_qty = self.current_position_qty().await;
+        let current_price = self.current_price().unwrap_or(Decimal::ZERO);
 
         // 转换为 PositionSide（用于下单）
         let current_side_for_order = current_side.map(|dir| match dir {
@@ -278,9 +296,21 @@ impl Trader {
             PositionDirection::Flat => x_data::position::PositionSide::None,
         });
 
-        // 6. 执行下单
-        match self.executor.send_order(order_type, current_qty, current_side_for_order) {
-            Ok(()) => {
+        // 计算订单价值（用于风控检查）
+        // 注意：实际风控参数应通过 ExecutorConfig 或外部注入获取
+        let order_qty = self.executor.calculate_order_qty(order_type, current_qty, current_side_for_order);
+        let order_value = order_qty * current_price;
+
+        // 6. 执行下单（传入风控参数，如果 Executor 未配置风控则使用默认值跳过检查）
+        match self.executor.send_order(
+            order_type,
+            current_qty,
+            current_side_for_order,
+            order_value,
+            Decimal::MAX,      // available_balance: 使用最大值跳过风控
+            Decimal::MAX,      // total_equity: 使用最大值跳过风控
+        ) {
+            Ok(_) => {
                 // 7. WAL 确认
                 if let Err(e) = self.repository.confirm_record(pending_id, "OK") {
                     tracing::error!(
@@ -636,6 +666,6 @@ impl Default for Trader {
             Repository::new(&config.symbol, &config.db_path)
                 .expect("Failed to create default repository"),
         );
-        Self::new(config, executor, repository)
+        Self::with_default_store(config, executor, repository)
     }
 }

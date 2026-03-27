@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::sync::atomic::{AtomicU64, Ordering};
 use x_data::position::PositionSide;
+use e_risk_monitor::RiskPreChecker;
 
 /// Executor 错误类型
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +27,9 @@ pub enum ExecutorError {
 
     #[error("超时: {0}")]
     Timeout(String),
+
+    #[error("CAS 重试超限")]
+    CasRetryExceeded,
 }
 
 /// 下单类型枚举（对齐 Python place_order order_type）
@@ -65,6 +69,8 @@ impl Default for ExecutorConfig {
 pub struct Executor {
     config: ExecutorConfig,
     last_order_ms: AtomicU64,
+    /// 风控预检器（可选，不提供时跳过风控）
+    risk_checker: Option<RiskPreChecker>,
 }
 
 impl Executor {
@@ -72,17 +78,31 @@ impl Executor {
         Self {
             config,
             last_order_ms: AtomicU64::new(0),
+            risk_checker: None,
+        }
+    }
+
+    /// 创建带风控的 Executor
+    pub fn with_risk_checker(config: ExecutorConfig, risk_checker: RiskPreChecker) -> Self {
+        Self {
+            config,
+            last_order_ms: AtomicU64::new(0),
+            risk_checker: Some(risk_checker),
         }
     }
 
     /// 频率限制检查（原子操作，CAS 循环）
-    pub fn rate_limit_check(&self, interval_ms: u64) -> bool {
+    ///
+    /// 最大重试次数防止高并发场景下无限自旋
+    pub fn rate_limit_check(&self, interval_ms: u64) -> Result<(), ExecutorError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
 
-        loop {
+        const MAX_CAS_RETRIES: usize = 10;
+
+        for _ in 0..MAX_CAS_RETRIES {
             let last = self.last_order_ms.load(Ordering::Relaxed);
 
             if now.saturating_sub(last) < interval_ms {
@@ -93,7 +113,7 @@ impl Executor {
                     interval_ms = interval_ms,
                     "下单频率过高，跳过"
                 );
-                return false;
+                return Err(ExecutorError::RateLimited);
             }
 
             match self.last_order_ms.compare_exchange_weak(
@@ -101,10 +121,19 @@ impl Executor {
                 Ordering::SeqCst,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return true,
-                Err(_) => continue,
+                Ok(_) => return Ok(()),
+                Err(_) => {
+                    // CAS 失败，重试
+                    continue;
+                }
             }
         }
+
+        tracing::error!(
+            symbol = %self.config.symbol,
+            "CAS 重试超限，频率限制检查失败"
+        );
+        Err(ExecutorError::CasRetryExceeded)
     }
 
     /// 计算下单数量（Decimal 精度 + 步长裁剪）
@@ -141,16 +170,23 @@ impl Executor {
     }
 
     /// 发送订单（完整流程）
+    ///
+    /// 流程:
+    /// 1. 频率限制检查
+    /// 2. 计算下单数量
+    /// 3. 风控前置检查
+    /// 4. 记录订单日志
     pub fn send_order(
         &self,
         order_type: OrderType,
         current_qty: Decimal,
         current_side: Option<PositionSide>,
-    ) -> Result<(), ExecutorError> {
+        order_value: Decimal,
+        available_balance: Decimal,
+        total_equity: Decimal,
+    ) -> Result<Decimal, ExecutorError> {
         // 1. 频率限制
-        if !self.rate_limit_check(self.config.order_interval_ms) {
-            return Err(ExecutorError::RateLimited);
-        }
+        self.rate_limit_check(self.config.order_interval_ms)?;
 
         // 2. 计算数量
         let qty = self.calculate_order_qty(order_type, current_qty, current_side);
@@ -163,8 +199,24 @@ impl Executor {
             return Err(ExecutorError::ZeroQuantity);
         }
 
-        // 3. 风控前置检查（TODO: 实际实现）
-        // self.pre_risk_check(qty)?;
+        // 3. 风控前置检查
+        if let Some(ref checker) = self.risk_checker {
+            if let Err(e) = checker.pre_check(
+                &self.config.symbol,
+                available_balance,
+                order_value,
+                total_equity,
+            ) {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    order_type = ?order_type,
+                    order_value = %order_value,
+                    error = %e,
+                    "风控前置检查拒绝"
+                );
+                return Err(ExecutorError::RiskCheckFailed(e.to_string()));
+            }
+        }
 
         tracing::info!(
             symbol = %self.config.symbol,
@@ -173,6 +225,18 @@ impl Executor {
             "下单请求"
         );
 
+        Ok(qty)
+    }
+
+    /// 发送订单（简化版，无风控参数，用于向后兼容）
+    #[deprecated(note = "请使用 send_order_full 版本提供完整风控参数")]
+    pub fn send_order_simple(
+        &self,
+        order_type: OrderType,
+        current_qty: Decimal,
+        current_side: Option<PositionSide>,
+    ) -> Result<(), ExecutorError> {
+        self.send_order(order_type, current_qty, current_side, Decimal::ZERO, Decimal::MAX, Decimal::MAX)?;
         Ok(())
     }
 }

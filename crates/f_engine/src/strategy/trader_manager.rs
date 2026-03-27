@@ -80,7 +80,10 @@ impl TraderManager {
             Repository::new(&symbol, &config.db_path)
                 .map_err(|e| TraderError::InitFailed(symbol.clone(), e.to_string()))?,
         );
-        let trader = Arc::new(Trader::new(config, executor, repository));
+        // 使用默认 store 克隆（转换为 trait object）
+        let store: std::sync::Arc<dyn b_data_source::MarketDataStore + Send + Sync> =
+            b_data_source::default_store().clone();
+        let trader = Arc::new(Trader::new(config, executor, repository, store));
 
         // 启动异步循环（后台任务），保存 JoinHandle 以便 abort 和监控
         let trader_clone = trader.clone();
