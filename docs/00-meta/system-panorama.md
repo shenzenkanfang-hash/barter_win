@@ -8,7 +8,7 @@
 
 ## 第一层：物理结构
 
-系统由 8 个逻辑层级构成，物理上组织在 `crates/` 工作空间目录：
+系统由 9 个逻辑层级构成，物理上组织在 `crates/` 工作空间目录：
 
 ```
 crates/
@@ -16,22 +16,32 @@ crates/
 ├── b_data_source/   # 数据层：市场数据接口
 ├── c_data_process/  # 信号层：指标计算
 ├── d_checktable/    # 检查层：策略验证
-├── e_risk_monitor/   # 风控层：风险管理
-├── f_engine/         # 引擎层：交易协调
-├── g_test/           # 测试层
-├── h_sandbox/        # 沙盒层：模拟环境
+│   ├── h_15m/      #   高频15分钟策略
+│   └── l_1d/       #   低频1天策略
+├── e_risk_monitor/  # 风控层：风险管理
+├── f_engine/        # 引擎层：交易协调
+├── g_test/          # 测试层
+├── h_sandbox/       # 沙盒层：模拟环境
+│   ├── gateway/     #   ShadowBinanceGateway
+│   ├── simulator/   #   订单引擎/风控检查
+│   └── historical_replay/  # 历史数据回放
 └── x_data/          # 数据状态管理
 ```
 
 依赖关系（按 Cargo.toml workspace members 顺序）：
 ```toml
-a_common = { path = "crates/a_common" }
-b_data_source = { path = "crates/b_data_source" }
-c_data_process = { path = "crates/c_data_process" }
-d_checktable = { path = "crates/d_checktable" }
-e_risk_monitor = { path = "crates/e_risk_monitor" }
-f_engine = { path = "crates/f_engine" }
-h_sandbox = { path = "crates/h_sandbox" }
+[workspace]
+members = [
+    "crates/a_common",
+    "crates/b_data_source",
+    "crates/c_data_process",
+    "crates/d_checktable",
+    "crates/e_risk_monitor",
+    "crates/f_engine",
+    "crates/g_test",
+    "crates/h_sandbox",
+    "crates/x_data",
+]
 ```
 
 ---
@@ -42,20 +52,20 @@ h_sandbox = { path = "crates/h_sandbox" }
 
 | 层级 | 名称 | 核心职责 | 关键文件 |
 |------|------|----------|----------|
-| a_common | 工具层 | API网关、WS连接器、配置、错误类型、备份 | `crates/a_common/src/lib.rs` |
-| b_data_source | 数据层 | 数据订阅、K线合成、DataFeeder统一接口 | `crates/b_data_source/src/lib.rs` |
-| c_data_process | 信号层 | Pine指标计算、策略状态、信号处理 | `crates/c_data_process/src/lib.rs` |
-| d_checktable | 检查层 | 15分钟/1分钟/1天周期策略检查 | `crates/d_checktable/src/lib.rs` |
-| e_risk_monitor | 风控层 | 风控检查、持仓管理、灾难恢复 | `crates/e_risk_monitor/src/lib.rs` |
-| f_engine | 引擎层 | 策略协程管理、Trader生命周期 | `crates/f_engine/src/lib.rs` |
+| a_common | 工具层 | API网关、WS连接器、配置、错误类型、备份、波动率计算 | `crates/a_common/src/lib.rs` |
+| b_data_source | 数据层 | 数据订阅、K线合成、DataFeeder统一接口、MarketDataStore | `crates/b_data_source/src/lib.rs` |
+| c_data_process | 信号层 | Pine指标计算、策略状态、信号处理、EMA/RSI | `crates/c_data_process/src/lib.rs` |
+| d_checktable | 检查层 | 15分钟/1分钟/1天周期策略检查、Trader | `crates/d_checktable/src/lib.rs` |
+| e_risk_monitor | 风控层 | 风控检查、持仓管理、灾难恢复、账户池 | `crates/e_risk_monitor/src/lib.rs` |
+| f_engine | 引擎层 | 策略协程管理、Trader生命周期、核心类型 | `crates/f_engine/src/lib.rs` |
 | h_sandbox | 沙盒层 | 历史回放、订单拦截、账户模拟 | `crates/h_sandbox/src/lib.rs` |
 
 沙盒边界职责：
 ```
 h_sandbox 职责：
-- historical_replay: K线转Tick，50ms间隔推送
-- gateway/interceptor: 拦截API调用，走模拟账户
-- simulator: 完整交易流程（账户/订单/风控）
+- historical_replay/：K线转Tick（60 ticks/K线）
+- gateway/interceptor：ShadowBinanceGateway 拦截API
+- simulator/：OrderEngine 完整交易流程
 
 沙盒禁止：
 - 计算业务指标
@@ -67,106 +77,130 @@ h_sandbox 职责：
 
 ## 第三层：数据流动
 
-市场数据从进入系统到触发交易的完整旅程：
+市场数据从进入系统到触发交易的完整旅程（事件驱动）：
 
 ```
 1. 外部市场
-   | Binance WebSocket (fapi.binance.com)
+   | Binance REST API (fapi.binance.com)
    
-2. b_data_source (数据层)
-   |   ws/kline_1m/: 接收 1m K线回调
-   |   ws/kline_1d/: 接收 1d K线回调  
-   |   ws/depth/: 接收订单簿深度
-   |   api/: REST API 账户/持仓查询
-   | Tick { symbol, price, qty, timestamp, kline_1m }
+2. sandbox_main.rs:fetch_klines_from_api()
+   | 分页拉取历史K线
+   | 最大1000条/页，最大100页
+   | url: "https://fapi.binance.com/fapi/v1/klines?..."
    
-3. DataFeeder (统一数据接口)
-   | pub fn push_tick(&self, tick: Tick)
-   | crates/b_data_source/src/api/data_feeder.rs:65
+3. StreamTickGenerator (historical_replay)
+   | 1根K线 → 60个Tick (50ms间隔)
+   | tick_generator.rs:100-200
+   
+4. 事件通道 (mpsc::channel)
+   | tick_tx.send(tick).await  // 背压处理
+   | sandbox_main.rs:180-220
+   
+5. TradingLoop (事件驱动核心)
+   | tick_rx.recv().await  // 阻塞等待
+   | on_tick() → 串行处理
+   | sandbox_main.rs:280-340
+   
+6. 数据写入路径
    |
-4. MarketDataStore (共享存储)
-   | pub struct MarketDataStoreImpl
-   | crates/b_data_source/src/store/store_impl.rs:14
-   |   - memory: Arc<MemoryStore> (实时分区)
-   |   - history: Arc<HistoryStore> (历史分区)
+   +--→ DataFeeder::push_tick()
+   |    b_data_source/src/api/data_feeder.rs:65
+   |    latest_ticks.insert(symbol, tick)
    |
-5. c_data_process (信号层)
-   | IndicatorCache::update() 计算 RSI/EMA/波动率
-   | sandbox_main.rs:150-200
-   
-6. f_engine (引擎层)
-   | TradeManagerEngine::get_volatility()
-   | sandbox_main.rs:350
-   
-7. 策略执行 (并行任务)
-   |   - DataFeeder::ws_get_1m() 获取当前价格
-   |   - IndicatorCache::get() 获取指标
-   |   - ShadowRiskChecker::pre_check() 风控检查
-   |   - ShadowBinanceGateway::place_order() 下单
+   +--→ IndicatorCache::update()
+        sandbox_main.rs:145-230
+        ├── price_history 更新
+        ├── 波动率计算 (O(n))
+        ├── RSI 计算 (14周期)
+        └── EMA5/EMA20 计算
+        
+7. 策略决策路径
+   |
+   +--→ TradingLoop::check_volatility()
+   |    volatility > 2% 阈值 → 触发策略
+   |
+   +--→ TradeManagerEngine::spawn_strategy_task()
+        sandbox_main.rs:450-600
+        
+8. 交易执行路径
+   |
+   +--→ ShadowRiskChecker::pre_check()
+   |    h_sandbox/src/simulator/risk_checker.rs
+   |
+   +--→ ShadowBinanceGateway::place_order()
+        h_sandbox/src/gateway/interceptor.rs
 ```
 
 ---
 
 ## 第四层：执行模型
 
-系统采用异步并行执行模型：
+系统采用**事件驱动 + 通道背压**的异步执行模型：
 
 ```rust
-// 入口：src/sandbox_main.rs
+// src/sandbox_main.rs
 
-// 并行任务1：数据源层 (50ms/tick)
+// 1. 事件通道（核心通信）
+let (tick_tx, tick_rx) = mpsc::channel(1024);  // 背压: 1024
+
+// 2. TradingLoop - 事件驱动串行循环
+let trading_loop = Arc::new(TradingLoop::new(...));
+tokio::spawn(async move {
+    trading_loop.run(tick_rx).await;  // 阻塞等待
+});
+
+// 3. 数据注入层 - 事件生产者
 tokio::spawn(async move {
     while let Some(tick_data) = generator.next() {
-        data_feeder.push_tick(tick);  // 写入共享存储
-        indicator_cache.update(&tick);
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // 背压：channel 满时阻塞
+        tick_tx.send(tick).await?;
     }
 });
 
-// 并行任务2：指标层 (50ms/周期)
+// 4. 策略任务 - 独立异步任务
 tokio::spawn(async move {
     loop {
-        if let Some(kline) = data_feeder.ws_get_1m(&symbol) {
-            indicator_cache.calculate_indicators(&kline);
-        }
+        // 从 DataFeeder 读取价格
+        let price = data_feeder.ws_get_1m(&symbol)?;
+        
+        // 策略计算
+        if should_open { ... }
+        
         sleep(Duration::from_millis(50)).await;
-    }
-});
-
-// 并行任务3：引擎主循环 (1s/周期)
-let engine_handle = tokio::spawn(async move {
-    loop {
-        let volatility = engine.get_volatility(&symbol).await;
-        if volatility > threshold && !engine.has_task(&symbol).await {
-            engine.spawn_strategy_task(symbol, 50).await;
-        }
-        engine.check_tasks().await;
-        sleep(Duration::from_secs(1)).await;
-    }
-});
-
-// 策略任务 (50ms/周期)
-tokio::spawn(async move {
-    loop {
-        // 1. 检查禁止状态
-        // 2. 获取全局锁 global_lock
-        // 3. 从 DataFeeder 获取价格
-        // 4. 从 IndicatorCache 获取指标
-        // 5. 策略计算 (EMA金叉/死叉)
-        // 6. 风控检查
-        // 7. 下单
-        // 8. 更新心跳
-        sleep(Duration::from_millis(interval_ms)).await;
     }
 });
 ```
 
-关键并发参数：
-- Tick 间隔：50ms (sandbox_main.rs:120)
-- 指标计算：每 50ms 一次 (sandbox_main.rs:130)
-- 引擎检查：1s 一次 (sandbox_main.rs:143)
-- 心跳超时：90秒 (sandbox_main.rs:305)
-- 策略间隔：50ms (sandbox_main.rs:325)
+### 并发结构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Tokio Runtime                          │
+│                                                              │
+│  ┌─────────────┐    mpsc::channel    ┌──────────────────┐   │
+│  │ 数据注入任务  │ ───────────────→ │  TradingLoop      │   │
+│  │ (生产者)     │    背压 1024      │  (事件驱动核心)    │   │
+│  └─────────────┘                    │  - 串行处理 Tick   │   │
+│                                      │  - 无 sleep 轮询  │   │
+│                                      └────────┬─────────┘   │
+│                                               │              │
+│  ┌─────────────┐                               │ 克隆引用      │
+│  │ 策略任务     │ ←────────────────────────────┘              │
+│  │ (50ms间隔)  │                                             │
+│  └─────────────┘                                             │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 关键并发参数
+
+| 参数 | 值 | 位置 |
+|------|-----|------|
+| Channel 背压 | 1024 | sandbox_main.rs:180 |
+| 策略执行间隔 | 50ms | sandbox_main.rs:460 |
+| 心跳超时 | 90秒 | sandbox_main.rs:540 |
+| Tick 生成间隔 | 50ms | generator.next() |
+| K线 → Tick 比率 | 60:1 | 1根K线 = 60个Tick |
 
 ---
 
@@ -177,13 +211,28 @@ tokio::spawn(async move {
 ### DataFeeder 接口
 ```rust
 // crates/b_data_source/src/api/data_feeder.rs
-pub trait DataFeederInterface {
-    fn ws_get_1m(&self, symbol: &str) -> Option<KLine>;
-    fn ws_get_15m(&self, symbol: &str) -> Option<KLine>;
-    fn ws_get_1d(&self, symbol: &str) -> Option<KLine>;
-    fn ws_get_depth_book(&self, symbol: &str) -> Option<OrderBook>;
-    fn ws_get_volatility(&self, symbol: &str) -> Option<VolatilityEntry>;
-    fn push_tick(&self, tick: Tick);  // 沙盒注入数据
+pub struct DataFeeder {
+    kline_1m: Arc<RwLock<Option<Kline1mStream>>>,  // WS K线合成器
+    depth_stream: Arc<RwLock<Option<DepthStream>>>,  // 订单簿
+    volatility_manager: Arc<VolatilityManager>,     // 波动率管理
+    account_syncer: FuturesDataSyncer,               // 账户同步
+    latest_ticks: RwLock<HashMap<String, Tick>>,     // 最新Tick缓存
+}
+
+impl DataFeeder {
+    // WS 数据查询
+    pub fn ws_get_1m(&self, symbol: &str) -> Option<KLine>
+    pub fn ws_get_15m(&self, symbol: &str) -> Option<KLine>
+    pub fn ws_get_1d(&self, symbol: &str) -> Option<KLine>
+    pub fn ws_get_depth_book(&self, symbol: &str) -> Option<OrderBook>
+    pub fn ws_get_volatility(&self, symbol: &str) -> Option<VolatilityEntry>
+    
+    // API 数据查询
+    pub async fn api_get_account(&self) -> Result<FuturesAccountData, MarketError>
+    pub async fn api_get_positions(&self) -> Result<Vec<FuturesPositionData>, MarketError>
+    
+    // 数据注入
+    pub fn push_tick(&self, tick: Tick)  // 沙盒用
 }
 ```
 
@@ -208,6 +257,9 @@ pub struct OrderRequest {
     pub qty: Decimal,
     pub price: Option<Decimal>,
 }
+
+pub enum Side { Buy, Sell }
+pub enum OrderType { Market, Limit }
 ```
 
 ### ExchangeAccount 接口
@@ -221,96 +273,140 @@ pub struct ExchangeAccount {
 }
 ```
 
+### TaskState 结构
+```rust
+// crates/f_engine/src/types.rs:110
+pub struct TaskState {
+    pub symbol: String,
+    pub status: RunningStatus,    // Running/Stopped/Ended
+    pub last_beat: i64,          // 心跳时间戳
+    pub forbid_until: Option<i64>,
+    pub forbid_reason: Option<String>,
+    pub done_reason: Option<String>,
+}
+```
+
 ---
 
 ## 第六层：状态管理
 
-系统通过共享存储实例实现跨组件状态同步：
+系统通过共享存储实例和 DashMap 实现跨组件状态同步：
 
 ```rust
-// 共享存储实例创建
+// src/sandbox_main.rs:80-130
+
+// 共享组件创建
 let data_feeder = Arc::new(DataFeeder::new());
 let indicator_cache = Arc::new(IndicatorCache::new());
 let gateway = Arc::new(ShadowBinanceGateway::with_default_config(initial_fund));
 let risk_checker = Arc::new(ShadowRiskChecker::new());
+let engine = Arc::new(TradeManagerEngine::new(...));
 
-// 克隆引用传递给并行任务
-let data_feeder_for_gen = Arc::clone(&data_feeder);
-let indicator_cache_for_gen = Arc::clone(&indicator_cache);
+// IndicatorCache 使用 DashMap 避免锁竞争
+struct IndicatorCache {
+    cache: dashmap::DashMap<String, Indicators>,  // 无锁并发
+}
 
-// MarketDataStoreImpl 结构
+struct Indicators {
+    rsi: Option<Decimal>,
+    ema5: Option<Decimal>,
+    ema20: Option<Decimal>,
+    volatility: Decimal,
+    price_history: Vec<Decimal>,  // 滚动窗口 100
+}
+```
+
+### MarketDataStore 结构
+```rust
+// crates/b_data_source/src/store/store_impl.rs
 pub struct MarketDataStoreImpl {
-    memory: Arc<MemoryStore>,      // 实时K线、订单簿
-    history: Arc<HistoryStore>,    // 历史K线、订单簿
+    memory: Arc<MemoryStore>,      // 实时分区
+    history: Arc<HistoryStore>,   // 历史分区
     volatility: Arc<VolatilityManager>,
 }
 
-// MemoryStore 结构
 pub struct MemoryStore {
     klines: RwLock<HashMap<String, KlineData>>,
     orderbooks: RwLock<HashMap<String, OrderBookData>>,
 }
 ```
 
-状态同步机制：
-- Tick 数据通过 DataFeeder::push_tick() 写入 MemoryStore
-- 指标计算读取 DataFeeder::ws_get_1m() 获取最新 K 线
-- 引擎通过 TradeManager.tasks: Arc<TokioRwLock<TaskMap>> 管理任务状态
-- 账户通过 ShadowBinanceGateway.engine: Arc<RwLock<OrderEngine>> 管理
+### 任务注册表
+```rust
+// sandbox_main.rs:400-410
+type TaskMap = std::collections::HashMap<String, Arc<TokioRwLock<TaskState>>>;
+
+struct TradeManagerEngine {
+    tasks: Arc<TokioRwLock<TaskMap>>,  // 策略任务注册
+    global_lock: Arc<tokio::sync::Mutex<()>>,  // 下单互斥
+    stats: Arc<TokioRwLock<EngineStats>>,
+}
+```
 
 ---
 
 ## 第七层：边界处理
 
-系统对异常情况的处理：
+### 事件驱动边界
 
-### 数据缺失处理
 ```rust
-// 禁止使用默认值掩盖错误
-let kline = store.get_current_kline().unwrap_or_default();  // 错误！
-
-// 正确做法：让系统自己处理
-let kline = trader.get_current_kline().await?;  // 返回 Error
-```
-
-### 沙盒数据注入边界
-```rust
-// sandbox_main.rs:100-140
-// 数据源层只负责注入原始 Tick，不预计算指标
-while let Some(tick_data) = generator.next() {
-    let tick = Tick { ... };  // 原始数据
-    data_feeder.push_tick(tick.clone());  // 写入 Store
-    indicator_cache.update(&tick);        // 沙盒只更新缓存
+// TradingLoop 串行处理保证数据一致性
+// sandbox_main.rs:300-340
+async fn run(self: Arc<Self>, mut tick_rx: mpsc::Receiver<Tick>) {
+    while let Some(tick) = tick_rx.recv().await {
+        // 关键：每个 Tick 处理完才接收下一个
+        if let Err(e) = self.on_tick(tick, counter).await {
+            tracing::error!("处理 Tick 出错: {:?}", e);
+        }
+    }
 }
 ```
 
-### 风控拦截
+### 背压处理
+
 ```rust
-// crates/h_sandbox/src/simulator/risk_checker.rs
+// 数据注入层阻塞等待
+// sandbox_main.rs:220-240
+if tick_tx_clone.send(tick).await.is_err() {
+    tracing::info!("事件通道已关闭，停止注入");
+    break;
+}
+```
+
+### 风控拦截（临时跳过）
+
+```rust
+// h_sandbox/src/simulator/risk_checker.rs
 impl RiskChecker for ShadowRiskChecker {
     fn pre_check(&self, order: &OrderRequest, account: &ExchangeAccount) -> RiskCheckResult {
         // 当前：临时跳过所有检查专注架构测试
-        // 真实环境应启用：
-        // - 杠杆检查: leverage <= 20
-        // - 订单金额: value >= 5 USDT
-        // - 余额检查: order_value <= available
+        // TODO: 后续启用真实风控规则
         RiskCheckResult::new(true, true)
     }
 }
 ```
 
-### 心跳超时检测
+### 波动率触发
+
 ```rust
-// sandbox_main.rs:380-390
-async fn check_heartbeat(&self) {
-    let now = Utc::now().timestamp();
-    for (symbol, state_arc) in tasks.iter() {
-        let s = state_arc.read().await;
-        if s.status == RunningStatus::Running 
-           && s.last_beat < now - self.heartbeat_timeout {
-            // 任务心跳超时，标记处理
-        }
+// sandbox_main.rs:350-380
+async fn check_volatility(&self, tick: &Tick) {
+    let volatility = self.indicator_cache.get_volatility(&tick.symbol);
+    let threshold = dec!(0.02);  // 2%
+    
+    if volatility > threshold && !self.engine.has_task(&tick.symbol).await {
+        // 触发策略任务
+        self.engine.spawn_strategy_task(tick.symbol.clone()).await;
     }
+}
+```
+
+### 策略互斥
+
+```rust
+// sandbox_main.rs:200-210
+struct TradingLoop {
+    strategy_locks: Arc<DashMap<String, ()>>,  // 防止重复触发
 }
 ```
 
@@ -320,63 +416,67 @@ async fn check_heartbeat(&self) {
 
 ### 核心设计思想
 
-1. 模块隔离原则
-   - 模块之间禁止直接访问内部数据
-   - 所有交互必须通过公开接口 (Trait/公共方法)
-   - 字段必须设为私有 (private)
+1. **事件驱动架构**
+   - Tick 到达触发完整处理链
+   - mpsc::channel 替代轮询
+   - 串行处理保证数据一致性
 
-2. 沙盒边界清晰
+2. **模块隔离原则**
+   - 模块之间禁止直接访问内部数据
+   - 所有交互必须通过公开接口
+   - 字段必须设为私有
+
+3. **沙盒边界清晰**
    ```
    沙盒职责：
-   - 注入原始 Tick/K线
-   - 拦截交易所请求
-   - 模拟网络故障
+   - historical_replay：注入原始 Tick
+   - gateway：拦截 API 调用
+   - simulator：模拟账户/订单
    
    沙盒禁止：
-   - 预计算指标
-   - 补全数据
+   - 计算业务指标
    - 修改订单逻辑
+   - 构造业务数据
    ```
 
-3. 共享存储实例
+4. **共享存储实例**
    ```rust
-   // 正确：所有组件共享同一实例
-   let shared_store = Arc::new(MarketDataStore::new());
-   let data_feeder = DataFeeder::new(shared_store.clone());
-   let trader = Trader::new(shared_store);
-   
-   // 错误：实例隔离
-   let data_feeder = DataFeeder::new(default_store());
-   let trader = Trader::new(default_store());  // 不同实例！
+   // 所有组件共享同一实例
+   let data_feeder = Arc::new(DataFeeder::new());
+   let indicator_cache = Arc::new(IndicatorCache::new());
    ```
 
-4. 诚实暴露问题
-   - 绝不构造假数据
-   - 绝不默认值降级
-   - 绝不帮系统绕过错误
+5. **DashMap 替代 RwLock**
+   - 减少锁竞争
+   - 适合读多写少场景
+   - `dashmap::DashMap` 用于 `IndicatorCache`
 
 ### 关键权衡
 
 | 权衡点 | 选择 | 原因 |
 |--------|------|------|
-| 并发模型 | tokio::spawn 异步任务 | IO密集型，充分利用异步 |
-| 存储架构 | MemoryStore + HistoryStore 分离 | 热数据/冷数据分离，内存效率 |
-| 风控时机 | pre_check + post_check 两阶段 | 订单前后双重把关 |
-| 指标计算 | 沙盒层独立计算 | 保持真实系统计算路径一致 |
-| 数据注入 | 原始Tick注入 | 不污染业务逻辑计算路径 |
+| 并发模型 | mpsc::channel + 串行循环 | Tick 有序处理，数据一致性 |
+| 存储并发 | DashMap | 读多写少，无锁设计 |
+| 背压机制 | channel 容量 1024 | 生产者阻塞，防止内存溢出 |
+| 策略触发 | 波动率阈值 + 互斥锁 | 避免重复任务 |
+| 指标计算 | 滚动窗口 + 增量 | O(n) 但可控 |
 
 ---
 
 ## 附录：关键文件索引
 
-| 功能 | 文件路径 |
-|------|----------|
-| 沙盒入口 | src/sandbox_main.rs |
-| DataFeeder | crates/b_data_source/src/api/data_feeder.rs |
-| MarketDataStore | crates/b_data_source/src/store/store_impl.rs |
-| RiskChecker trait | crates/f_engine/src/interfaces/risk.rs |
-| OrderRequest | crates/f_engine/src/types.rs |
-| ShadowGateway | crates/h_sandbox/src/gateway/interceptor.rs |
-| ShadowRiskChecker | crates/h_sandbox/src/simulator/risk_checker.rs |
-| VolatilityManager | crates/b_data_source/src/ws/volatility.rs |
-| 配置结构 | crates/a_common/src/config.rs |
+| 功能 | 文件路径 | 行号 |
+|------|----------|------|
+| 沙盒入口 | `src/sandbox_main.rs` | 1-700 |
+| TradingLoop | `src/sandbox_main.rs` | 260-400 |
+| TradeManagerEngine | `src/sandbox_main.rs` | 380-550 |
+| IndicatorCache | `src/sandbox_main.rs` | 130-250 |
+| DataFeeder | `crates/b_data_source/src/api/data_feeder.rs` | 1-120 |
+| MarketDataStore | `crates/b_data_source/src/store/store_impl.rs` | 1-80 |
+| RiskChecker trait | `crates/f_engine/src/interfaces/risk.rs` | 1-30 |
+| OrderRequest | `crates/f_engine/src/types.rs` | 70-100 |
+| ShadowBinanceGateway | `crates/h_sandbox/src/gateway/interceptor.rs` | 1-100 |
+| ShadowRiskChecker | `crates/h_sandbox/src/simulator/risk_checker.rs` | 1-80 |
+| StreamTickGenerator | `crates/h_sandbox/src/historical_replay/tick_generator.rs` | 1-200 |
+| VolatilityManager | `crates/b_data_source/src/ws/volatility.rs` | - |
+| 配置结构 | `crates/a_common/src/config.rs` | - |

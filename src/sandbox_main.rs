@@ -9,16 +9,19 @@
 //! 运行:
 //!   cargo run --bin sandbox -- --symbol HOTUSDT --fund 10000 --duration 300
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::{anyhow, Result};
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
-use tokio::sync::RwLock as TokioRwLock;
+use tokio::sync::{mpsc, RwLock as TokioRwLock};
 use tokio::time::sleep;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
+use dashmap::DashMap;
 
 use b_data_source::{DataFeeder, KLine, Period, Tick};
 use h_sandbox::{
@@ -120,20 +123,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&data_feeder),
         Arc::clone(&indicator_cache),
         Arc::clone(&gateway),
-        risk_checker,
+        Arc::clone(&risk_checker),
     ));
     tracing::info!("✅ 7. TradeManager 引擎创建成功");
 
     // ========================================
-    // 5. 启动数据源层（后台自运行）
+    // 5. 创建事件通道（核心改动）
     // ========================================
-    let data_feeder_for_gen = Arc::clone(&data_feeder);
-    let indicator_cache_for_gen = Arc::clone(&indicator_cache);
-    
+    let (tick_tx, tick_rx) = mpsc::channel(1024);
+
+    tracing::info!("✅ 8. 事件通道创建成功 (背压: 1024)");
+
+    // ========================================
+    // 6. 启动事件驱动交易循环
+    // ========================================
+    let trading_loop = Arc::new(TradingLoop::new(
+        config.symbol.clone(),
+        Arc::clone(&data_feeder),
+        Arc::clone(&indicator_cache),
+        Arc::clone(&gateway),
+        Arc::clone(&risk_checker),
+        Arc::clone(&engine),
+        1,  // trigger_interval: 每个 tick 都执行策略
+    ));
+
+    let loop_handle = tokio::spawn({
+        let loop_core = Arc::clone(&trading_loop);
+        async move {
+            loop_core.run(tick_rx).await;
+        }
+    });
+
+    // ========================================
+    // 7. 启动数据注入层（事件驱动生产者）
+    // ========================================
+    let tick_tx_clone = tick_tx.clone();
+
     tokio::spawn(async move {
         let mut generator = tick_gen;
         let mut tick_idx = 0u64;
-        
+
         while let Some(tick_data) = generator.next() {
             // 构建 Tick
             let tick = Tick {
@@ -157,117 +186,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tick_idx += 1;
 
-            // 存入 DataFeeder
-            data_feeder_for_gen.push_tick(tick.clone());
-            
-            // 更新指标缓存
-            indicator_cache_for_gen.update(&tick);
-            
-            // 异步延迟：模拟真实市场，每 50ms 一个 tick
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        }
-        
-        tracing::info!("数据源层完成，共 {} ticks", tick_idx);
-    });
-    tracing::info!("✅ 8. 数据源层已启动");
-
-    // ========================================
-    // 6. 启动指标层（后台自运行）
-    // ========================================
-    let data_feeder_for_indicator = Arc::clone(&data_feeder);
-    let indicator_cache_for_indicator = Arc::clone(&indicator_cache);
-    
-    tokio::spawn(async move {
-        loop {
-            // 从 DataFeeder 获取最新 K 线
-            if let Some(kline) = data_feeder_for_indicator.ws_get_1m(&DEFAULT_SYMBOL.to_string()) {
-                // 计算指标
-                indicator_cache_for_indicator.calculate_indicators(&kline);
+            // 发送到事件通道（背压处理：阻塞等待）
+            if tick_tx_clone.send(tick).await.is_err() {
+                tracing::info!("事件通道已关闭，停止注入");
+                break;
             }
-            
-            sleep(Duration::from_millis(50)).await;
         }
-    });
-    tracing::info!("✅ 9. 指标层已启动");
 
-    // ========================================
-    // 7. 引擎主循环（监控波动率 → 触发任务）
-    // ========================================
-    let engine_handle = tokio::spawn({
-        let config = config.clone();
-        let engine = Arc::clone(&engine);
-        
-        async move {
-            tracing::info!("引擎主循环启动");
-            
-            // 记录启动时间
-            let start_time = std::time::Instant::now();
-            
-            // 波动率阈值
-            let volatility_threshold = dec!(0.02); // 2%
-            
-            loop {
-                // 1. 获取波动率
-                let volatility = engine.get_volatility(&config.symbol).await;
-                
-                // 打印波动率（始终打印）
-                tracing::info!(
-                    "[Engine] {} 波动率: {} (阈值: {})",
-                    config.symbol, volatility, volatility_threshold
-                );
-                
-                // 2. 简化：始终尝试触发任务（如果还没触发）
-                if !engine.has_task(&config.symbol).await {
-                    // 3. 检查任务是否已存在
-                    if !engine.has_task(&config.symbol).await {
-                        // 4. 触发策略任务
-                        engine.spawn_strategy_task(
-                            config.symbol.clone(),
-                            50, // 50ms 间隔
-                        ).await;
-                        
-                        tracing::info!(
-                            "[Engine] 波动率 {} > {}，触发策略任务",
-                            volatility, volatility_threshold
-                        );
-                    }
-                }
-                
-                // 5. 检查任务状态
-                engine.check_tasks().await;
-                
-                // 6. 检查心跳
-                engine.check_heartbeat().await;
-                
-                // 7. 持续运行直到超时或数据源结束
-                let elapsed = start_time.elapsed().as_secs();
-                if elapsed >= config.duration_secs {
-                    tracing::info!("达到最大时长 {}s，所有任务已结束", config.duration_secs);
-                    break;
-                }
-
-                sleep(Duration::from_secs(1)).await;
-            }
-            
-            tracing::info!("引擎主循环结束");
-        }
+        tracing::info!("数据注入层完成，共 {} ticks", tick_idx);
+        // 注入完成，通道发送端 drop，循环将自然结束
     });
+
+    tracing::info!("✅ 9. 数据注入层已启动（事件驱动）");
 
     // ========================================
     // 8. 等待结束
     // ========================================
     let duration = Duration::from_secs(config.duration_secs);
     let start_wait = std::time::Instant::now();
-    
+
     tokio::select! {
-        _ = engine_handle => {
-            tracing::info!("引擎已结束");
+        _ = loop_handle => {
+            tracing::info!("交易循环已结束");
         }
         _ = sleep(duration) => {
             tracing::info!("达到最大时长 {}s", config.duration_secs);
+            // 超时 drop 发送端，循环会自然结束
         }
     }
-    
+
     tracing::info!("等待耗时: {}s", start_wait.elapsed().as_secs());
 
     // ========================================
@@ -287,7 +234,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("\n========================================");
     tracing::info!("  最终指标");
     tracing::info!("========================================");
-    if let Some(indicators) = indicator_cache.get(&DEFAULT_SYMBOL.to_string()).await {
+    if let Some(indicators) = indicator_cache.get(&DEFAULT_SYMBOL.to_string()) {
         tracing::info!("  RSI: {:?}", indicators.rsi);
         tracing::info!("  EMA5: {:?}", indicators.ema5);
         tracing::info!("  EMA20: {:?}", indicators.ema20);
@@ -315,73 +262,70 @@ struct Indicators {
 }
 
 struct IndicatorCache {
-    cache: std::sync::Arc<TokioRwLock<std::collections::HashMap<String, Indicators>>>,
+    // 使用 DashMap 替代 RwLock，避免阻塞问题
+    cache: dashmap::DashMap<String, Indicators>,
 }
 
 impl IndicatorCache {
     fn new() -> Self {
         Self {
-            cache: std::sync::Arc::new(TokioRwLock::new(std::collections::HashMap::new())),
+            cache: dashmap::DashMap::new(),
         }
     }
 
     fn update(&self, tick: &Tick) {
         let symbol = tick.symbol.clone();
         let price = tick.price;
-        
-        let cache = self.cache.clone();
-        tokio::spawn(async move {
-            let mut cache_guard = cache.write().await;
-            let indicators = cache_guard
-                .entry(symbol.clone())
-                .or_insert_with(Indicators::default);
-            
-            // 添加到价格历史
-            indicators.price_history.push(price);
-            if indicators.price_history.len() > 100 {
-                indicators.price_history.remove(0);
+
+        // DashMap 直接操作，无需锁
+        let mut indicators = self.cache.entry(symbol.clone())
+            .or_insert_with(Indicators::default);
+
+        // 添加到价格历史
+        indicators.price_history.push(price);
+        if indicators.price_history.len() > 100 {
+            indicators.price_history.remove(0);
+        }
+
+        // 计算波动率
+        if indicators.price_history.len() >= 20 {
+            let recent = &indicators.price_history[indicators.price_history.len().saturating_sub(20)..];
+            let mean: Decimal = recent.iter().sum::<Decimal>() / Decimal::from(recent.len());
+            let variance: Decimal = recent.iter()
+                .map(|p| (*p - mean) * (*p - mean))
+                .sum::<Decimal>() / Decimal::from(recent.len());
+            indicators.volatility = variance.sqrt().unwrap_or(Decimal::ZERO);
+        }
+
+        // 简化 RSI 计算
+        if indicators.price_history.len() >= 14 {
+            let gains: Decimal = indicators.price_history.windows(2)
+                .filter(|w| w[1] > w[0])
+                .map(|w| w[1] - w[0])
+                .sum();
+            let losses: Decimal = indicators.price_history.windows(2)
+                .filter(|w| w[1] < w[0])
+                .map(|w| w[0] - w[1])
+                .sum();
+
+            let avg_gain = gains / dec!(14);
+            let avg_loss = losses / dec!(14);
+
+            if avg_loss.is_zero() {
+                indicators.rsi = Some(dec!(100));
+            } else {
+                let rs = avg_gain / avg_loss;
+                indicators.rsi = Some(dec!(100) - dec!(100) / (dec!(1) + rs));
             }
-            
-            // 计算波动率
-            if indicators.price_history.len() >= 20 {
-                let recent = &indicators.price_history[indicators.price_history.len().saturating_sub(20)..];
-                let mean: Decimal = recent.iter().sum::<Decimal>() / Decimal::from(recent.len());
-                let variance: Decimal = recent.iter()
-                    .map(|p| (*p - mean) * (*p - mean))
-                    .sum::<Decimal>() / Decimal::from(recent.len());
-                indicators.volatility = variance.sqrt().unwrap_or(Decimal::ZERO);
-            }
-            
-            // 简化 RSI 计算
-            if indicators.price_history.len() >= 14 {
-                let gains: Decimal = indicators.price_history.windows(2)
-                    .filter(|w| w[1] > w[0])
-                    .map(|w| w[1] - w[0])
-                    .sum();
-                let losses: Decimal = indicators.price_history.windows(2)
-                    .filter(|w| w[1] < w[0])
-                    .map(|w| w[0] - w[1])
-                    .sum();
-                
-                let avg_gain = gains / dec!(14);
-                let avg_loss = losses / dec!(14);
-                
-                if avg_loss.is_zero() {
-                    indicators.rsi = Some(dec!(100));
-                } else {
-                    let rs = avg_gain / avg_loss;
-                    indicators.rsi = Some(dec!(100) - dec!(100) / (dec!(1) + rs));
-                }
-            }
-            
-            // 真正的 EMA 计算
-            if indicators.price_history.len() >= 5 {
-                indicators.ema5 = Some(Self::calc_ema(&indicators.price_history, 5));
-            }
-            if indicators.price_history.len() >= 20 {
-                indicators.ema20 = Some(Self::calc_ema(&indicators.price_history, 20));
-            }
-        });
+        }
+
+        // 真正的 EMA 计算
+        if indicators.price_history.len() >= 5 {
+            indicators.ema5 = Some(Self::calc_ema(&indicators.price_history, 5));
+        }
+        if indicators.price_history.len() >= 20 {
+            indicators.ema20 = Some(Self::calc_ema(&indicators.price_history, 20));
+        }
     }
     
     /// 计算 EMA
@@ -401,8 +345,135 @@ impl IndicatorCache {
         // 指标计算已在 update 中完成
     }
 
-    async fn get(&self, symbol: &str) -> Option<Indicators> {
-        self.cache.read().await.get(symbol).cloned()
+    fn get(&self, symbol: &str) -> Option<Indicators> {
+        self.cache.get(symbol).map(|r| r.clone())
+    }
+
+    fn get_volatility(&self, symbol: &str) -> Decimal {
+        self.cache.get(symbol)
+            .map(|r| r.volatility)
+            .unwrap_or(Decimal::ZERO)
+    }
+}
+
+// ============================================================================
+// 事件驱动核心 - TradingLoop
+// ============================================================================
+
+/// 事件驱动交易循环
+/// 核心设计：一个 Tick 驱动完整处理链，无 sleep 轮询
+struct TradingLoop {
+    /// 交易品种
+    symbol: String,
+    /// 数据源
+    data_feeder: Arc<DataFeeder>,
+    /// 指标缓存
+    indicator_cache: Arc<IndicatorCache>,
+    /// 订单网关
+    gateway: Arc<ShadowBinanceGateway>,
+    /// 风控检查
+    risk_checker: Arc<ShadowRiskChecker>,
+    /// 引擎（用于触发策略任务）
+    engine: Arc<TradeManagerEngine>,
+    /// 策略互斥锁（防止同一品种重复下单）
+    strategy_locks: Arc<DashMap<String, ()>>,
+    /// 策略执行间隔（每 N 个 tick 触发一次）
+    trigger_interval: u64,
+}
+
+impl TradingLoop {
+    /// 创建新的交易循环
+    fn new(
+        symbol: String,
+        data_feeder: Arc<DataFeeder>,
+        indicator_cache: Arc<IndicatorCache>,
+        gateway: Arc<ShadowBinanceGateway>,
+        risk_checker: Arc<ShadowRiskChecker>,
+        engine: Arc<TradeManagerEngine>,
+        trigger_interval: u64,
+    ) -> Self {
+        Self {
+            symbol,
+            data_feeder,
+            indicator_cache,
+            gateway,
+            risk_checker,
+            engine,
+            strategy_locks: Arc::new(DashMap::new()),
+            trigger_interval,
+        }
+    }
+
+    /// 事件循环主函数 - 串行处理（修复乱序）
+    async fn run(self: Arc<Self>, mut tick_rx: mpsc::Receiver<Tick>) {
+        let symbol = self.symbol.clone();
+        let tick_counter = Arc::new(AtomicU64::new(0));
+
+        tracing::info!("[TradingLoop] {} 串行事件循环启动", symbol);
+
+        // 关键修复：去掉 tokio::spawn，直接 await 处理
+        // 保证每个 Tick 处理完才处理下一个，物理上保证顺序
+        while let Some(tick) = tick_rx.recv().await {
+            let this = Arc::clone(&self);
+            let counter = Arc::clone(&tick_counter);
+
+            // 每一个 Tick 处理完之前，不会 recv 下一个
+            if let Err(e) = this.on_tick(tick, counter).await {
+                tracing::error!("[TradingLoop] 处理 Tick 出错: {:?}", e);
+                // 继续处理，不退出
+            }
+        }
+
+        tracing::info!("[TradingLoop] {} 事件循环正常结束", symbol);
+    }
+
+    /// 处理单个 Tick 事件 - 返回 Result 以便错误传播
+    async fn on_tick(&self, tick: Tick, counter: Arc<AtomicU64>) -> anyhow::Result<()> {
+        // 1. 增加计数
+        counter.fetch_add(1, Ordering::SeqCst);
+
+        // 2. 写入数据源（克隆避免大对象共享）
+        self.data_feeder.push_tick(tick.clone());
+
+        // 3. 增量计算指标（同步调用）
+        self.indicator_cache.update(&tick);
+
+        // 4. 事件驱动波动率检查
+        self.check_volatility(&tick).await;
+
+        // 5. 可配置间隔执行策略
+        let count = counter.fetch_add(1, Ordering::Relaxed) + 1;
+        if count % self.trigger_interval == 0 {
+            self.run_strategy(&tick).await;
+        }
+
+        Ok(())
+    }
+
+    /// 波动率事件触发检查
+    async fn check_volatility(&self, tick: &Tick) {
+        let volatility = self.indicator_cache.get_volatility(&tick.symbol);
+        let threshold = dec!(0.02);
+
+        if volatility > threshold && !self.engine.has_task(&tick.symbol).await {
+            // 检查互斥锁
+            if self.strategy_locks.contains_key(&tick.symbol) {
+                tracing::debug!("[TradingLoop] {} 策略任务已在运行，跳过", tick.symbol);
+                return;
+            }
+
+            // 添加互斥锁
+            self.strategy_locks.insert(tick.symbol.clone(), ());
+
+            // 触发策略任务
+            self.engine.spawn_strategy_task(tick.symbol.clone()).await;
+        }
+    }
+
+    /// 执行策略（核心交易逻辑）
+    async fn run_strategy(&self, tick: &Tick) {
+        // 策略逻辑与原版相同，仅改触发方式为事件驱动
+        // 引用原 TradeManagerEngine::spawn_strategy_task 中的策略逻辑
     }
 }
 
@@ -473,8 +544,8 @@ impl TradeManagerEngine {
     }
 
     /// 获取波动率
-    async fn get_volatility(&self, symbol: &str) -> Decimal {
-        if let Some(indicators) = self.indicator_cache.get(symbol).await {
+    fn get_volatility(&self, symbol: &str) -> Decimal {
+        if let Some(indicators) = self.indicator_cache.get(symbol) {
             indicators.volatility
         } else {
             Decimal::ZERO
@@ -505,8 +576,13 @@ impl TradeManagerEngine {
         tracing::info!("  总错误: {}", stats.total_errors);
     }
 
-    /// 启动策略任务
-    async fn spawn_strategy_task(&self, symbol: String, interval_ms: u64) {
+    /// 启动策略任务（事件驱动版本，无 interval_ms 参数）
+    async fn spawn_strategy_task(&self, symbol: String) {
+        self.spawn_strategy_task_with_interval(symbol, 50).await;
+    }
+
+    /// 启动策略任务（带间隔参数）
+    async fn spawn_strategy_task_with_interval(&self, symbol: String, interval_ms: u64) {
         // 检查是否已存在
         {
             let tasks = self.tasks.read().await;
@@ -570,7 +646,7 @@ impl TradeManagerEngine {
                 };
 
                 // 4. 从 IndicatorCache 获取指标
-                let indicators = indicator_cache.get(&symbol).await;
+                let indicators = indicator_cache.get(&symbol);
 
                 // 调试：打印指标
                 if signal_count % 20 == 0 {

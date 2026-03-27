@@ -53,6 +53,8 @@ tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 native-tls = "0.2"
 futures-util = "0.3"
 serde = { workspace = true }
+dashmap = "5.5"
+anyhow = "1.0"
 
 [workspace.dependencies]
 parking_lot = "0.12"
