@@ -25,10 +25,6 @@ path = "src/main.rs"
 name = "sandbox"
 path = "src/sandbox_main.rs"
 
-[[bin]]
-name = "sandbox_prod"
-path = "src/sandbox_prod.rs"
-
 
 [dependencies]
 a_common = { path = "crates/a_common" }
