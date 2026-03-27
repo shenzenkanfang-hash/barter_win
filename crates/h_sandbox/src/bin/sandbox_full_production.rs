@@ -86,63 +86,139 @@ impl SandboxContext {
     }
 }
 
-// ==================== 历史数据拉取 ====================
+// ==================== 历史数据加载 ====================
 
-/// 将历史 K 线转换为模型 K 线
-fn convert_history_kline(history_kline: b_data_source::history::KLine) -> KLine {
-    KLine {
-        symbol: history_kline.symbol,
-        period: b_data_source::Period::Minute(1),
-        open: history_kline.open,
-        high: history_kline.high,
-        low: history_kline.low,
-        close: history_kline.close,
-        volume: history_kline.volume,
-        timestamp: chrono::Utc.timestamp_millis_opt(history_kline.timestamp_ms).unwrap(),
-    }
-}
-
-/// 拉取历史 K 线数据
-/// 【关键】调用币安 API 获取历史数据，而非预加载
-async fn fetch_historical_klines(
+/// 加载历史 K 线数据（优先本地， fallback API）
+async fn load_klines(
     symbol: &str,
     start_time: DateTime<Utc>,
     end_time: DateTime<Utc>,
-    limit: u32,
 ) -> Result<Vec<KLine>, Box<dyn std::error::Error>> {
-    info!(
-        symbol = symbol,
-        start = %start_time,
-        end = %end_time,
-        limit = limit,
-        "[Data] 拉取历史数据 {} 条，end_time={}",
-        limit, end_time
-    );
+    // 构建本地文件路径
+    let start_date = start_time.format("%Y%m%d").to_string();
+    let end_date = end_time.format("%Y%m%d").to_string();
+    let local_path = format!("data/{}_1m_{}_{}.csv", symbol, start_date, end_date);
 
-    // 转换时间戳为毫秒
+    info!("[Data] 检查本地数据: {}", local_path);
+
+    // 1. 尝试从本地文件加载
+    if std::path::Path::new(&local_path).exists() {
+        info!("[Data] 从本地文件加载: {}", local_path);
+        return load_klines_from_csv(&local_path, symbol);
+    }
+
+    // 2. 本地没有，从 API 拉取
+    info!("[Data] 本地文件不存在，从 API 拉取");
+    fetch_from_api(symbol, start_time, end_time).await
+}
+
+/// 从 CSV 文件加载 K 线
+fn load_klines_from_csv(path: &str, symbol: &str) -> Result<Vec<KLine>, Box<dyn std::error::Error>> {
+    info!("[Data] 读取 CSV: {}", path);
+
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_path(path)?;
+
+    let mut klines = Vec::new();
+    for result in reader.records() {
+        let record = result?;
+
+        // 使用 ok_or 处理 Option
+        let timestamp_ms: i64 = record.get(0).ok_or("missing timestamp")?.parse()
+            .map_err(|e| format!("parse timestamp: {}", e))?;
+        let open: Decimal = record.get(1).ok_or("missing open")?.parse()
+            .map_err(|e| format!("parse open: {}", e))?;
+        let high: Decimal = record.get(2).ok_or("missing high")?.parse()
+            .map_err(|e| format!("parse high: {}", e))?;
+        let low: Decimal = record.get(3).ok_or("missing low")?.parse()
+            .map_err(|e| format!("parse low: {}", e))?;
+        let close: Decimal = record.get(4).ok_or("missing close")?.parse()
+            .map_err(|e| format!("parse close: {}", e))?;
+        let volume: Decimal = record.get(5).ok_or("missing volume")?.parse()
+            .map_err(|e| format!("parse volume: {}", e))?;
+
+        klines.push(KLine {
+            symbol: symbol.to_string(),
+            period: Period::Minute(1),
+            open,
+            high,
+            low,
+            close,
+            volume,
+            timestamp: Utc.timestamp_millis_opt(timestamp_ms).unwrap(),
+        });
+    }
+
+    info!("[Data] 从 CSV 加载 {} 条 K 线", klines.len());
+    Ok(klines)
+}
+
+/// 从 API 拉取历史数据
+async fn fetch_from_api(
+    symbol: &str,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+) -> Result<Vec<KLine>, Box<dyn std::error::Error>> {
     let end_ms = end_time.timestamp_millis();
     let start_ms = start_time.timestamp_millis();
 
-    // 创建历史 API 客户端（期货）
-    let history_client = HistoryApiClient::new_futures();
-
-    // 调用币安 API 获取历史 K 线
-    let history_klines = history_client
-        .fetch_klines(symbol, "1m", Some(start_ms), Some(end_ms), limit)
-        .await
-        .map_err(|e| format!("历史数据拉取失败: {}", e))?;
-
-    // 转换为模型 K 线
-    let klines: Vec<KLine> = history_klines.into_iter().map(convert_history_kline).collect();
-
     info!(
-        symbol = symbol,
-        count = klines.len(),
-        "[Data] 成功拉取 {} 条历史 K 线",
-        klines.len()
+        "[Data] 拉取 API: {} {} ~ {}",
+        symbol, start_time, end_time
     );
 
-    Ok(klines)
+    // 创建历史 API 客户端
+    let history_client = HistoryApiClient::new_futures();
+
+    // 下载所有数据（分批，每批1000条）
+    let mut all_klines = Vec::new();
+    let mut current_start = start_ms;
+
+    while current_start < end_ms {
+        let batch_end = (current_start + 1000 * 60 * 1000).min(end_ms);
+
+        let history_klines = history_client
+            .fetch_klines(symbol, "1m", Some(current_start), Some(batch_end), 1000)
+            .await
+            .map_err(|e| format!("API 拉取失败: {}", e))?;
+
+        // 转换为模型 K 线
+        for hk in history_klines {
+            all_klines.push(KLine {
+                symbol: hk.symbol,
+                period: Period::Minute(1),
+                open: hk.open,
+                high: hk.high,
+                low: hk.low,
+                close: hk.close,
+                volume: hk.volume,
+                timestamp: Utc.timestamp_millis_opt(hk.timestamp_ms).unwrap(),
+            });
+        }
+
+        if current_start + 1000 * 60 * 1000 > end_ms {
+            break;
+        }
+        current_start = batch_end;
+    }
+
+    // 保存到本地（可选）
+    let csv_path = format!("data/{}_1m_{}_{}.csv", symbol,
+        start_time.format("%Y%m%d"), end_time.format("%Y%m%d"));
+    let mut csv_content = String::from("timestamp,open,high,low,close,volume\n");
+    for kline in &all_klines {
+        csv_content.push_str(&format!(
+            "{},{},{},{},{},{}\n",
+            kline.timestamp.timestamp_millis(),
+            kline.open, kline.high, kline.low, kline.close, kline.volume
+        ));
+    }
+    std::fs::write(&csv_path, csv_content)?;
+    info!("[Data] 已缓存到: {}", csv_path);
+
+    info!("[Data] API 拉取 {} 条 K 线", all_klines.len());
+    Ok(all_klines)
 }
 
 // ==================== 数据注入 ====================
@@ -152,19 +228,18 @@ async fn start_data_replay(
     ctx: &SandboxContext,
     start_time: DateTime<Utc>,
     end_time: DateTime<Utc>,
+    klines: Vec<KLine>,
 ) {
     let symbol = ctx.symbol.clone();
     info!(
         symbol = %symbol,
         start = %start_time,
         end = %end_time,
+        kline_count = klines.len(),
         "[Data] 启动数据回放"
     );
 
-    // 读取历史 K 线数据（从缓存或文件）
-    // TODO: 读取实际历史数据文件
-    let klines: Vec<KLine> = vec![];
-
+    // 使用已加载的 K 线数据
     // 创建生成器
     let generator = StreamTickGenerator::new(
         symbol.clone(),
@@ -296,21 +371,18 @@ async fn run_sandbox(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let end_time: DateTime<Utc> = args.end.parse()
         .map_err(|e| format!("Invalid end time: {}", e))?;
 
-    // 4. 拉取历史数据（关键步骤）
-    // 【关键】不预加载，真实触发历史数据拉取
-    let _historical_klines = fetch_historical_klines(
+    // 4. 加载历史数据（优先本地，没有则从 API 拉取）
+    // 【关键】优先本地缓存，减少 API 调用
+    let historical_klines = load_klines(
         &args.symbol,
         start_time,
         end_time,
-        1000, // 往前 1000 条
     ).await?;
 
-    // 5. 检查数据充足性
-    // 【关键】由业务层检测，不是沙盒预判断
-    info!(symbol = %args.symbol, "[Engine] 检查数据充足性");
+    info!(symbol = %args.symbol, count = historical_klines.len(), "[Data] 历史数据准备完成");
 
-    // 6. 启动数据回放（注入 DataFeeder）
-    start_data_replay(&ctx, start_time, end_time).await;
+    // 5. 启动数据回放（注入 DataFeeder）
+    start_data_replay(&ctx, start_time, end_time, historical_klines).await;
 
     // 7. 启动 Trader（完整 WAL 模式）
     start_trader(&ctx).await?;
