@@ -172,6 +172,16 @@ impl ReplaySource {
     }
 }
 
+/// 为 ReplaySource 实现 Iterator trait
+/// 这样可以直接传给 StreamTickGenerator
+impl Iterator for ReplaySource {
+    type Item = KLine;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_kline()
+    }
+}
+
 /// 解析 CSV 行
 ///
 /// 修复：
@@ -182,25 +192,37 @@ impl ReplaySource {
 /// 返回 ReplayError::Parse 如果字段数量不足或解析失败
 fn parse_csv_line(line: &str, line_num: usize) -> Result<KLine, ReplayError> {
     let parts: Vec<&str> = line.split(',').collect();
-    
-    if parts.len() < 8 {
+
+    // 支持两种格式：
+    // 1. 简单格式（6字段）: timestamp,open,high,low,close,volume
+    // 2. 完整格式（8字段）: symbol,period,open,high,low,close,volume,timestamp
+
+    let (symbol, period_str, timestamp_idx, field_start) = if parts.len() == 6 {
+        // 简单格式
+        ("BTCUSDT".to_string(), "1m", 0, 0)
+    } else if parts.len() >= 8 {
+        // 完整格式
+        (parts[0].to_string(), parts[1], 7, 2)
+    } else {
         return Err(ReplayError::Parse {
             line: line_num,
-            message: format!("Expected 8 fields, got {}", parts.len()),
+            message: format!("Expected 6 or 8 fields, got {}", parts.len()),
         });
-    }
+    };
 
-    let symbol = parts[0].to_string();
-    let period_str = parts[1];
-    
-    // 修复：使用 Decimal 替代 f64，避免浮点精度问题
-    let open = parse_decimal(parts[2], line_num, "open")?;
-    let high = parse_decimal(parts[3], line_num, "high")?;
-    let low = parse_decimal(parts[4], line_num, "low")?;
-    let close = parse_decimal(parts[5], line_num, "close")?;
-    let volume = parse_decimal(parts[6], line_num, "volume")?;
-    
-    let timestamp_str = parts[7];
+    // 解析价格字段
+    let open = parse_decimal(parts[field_start], line_num, "open")?;
+    let high = parse_decimal(parts[field_start + 1], line_num, "high")?;
+    let low = parse_decimal(parts[field_start + 2], line_num, "low")?;
+    let close = parse_decimal(parts[field_start + 3], line_num, "close")?;
+    let volume = parse_decimal(parts[field_start + 4], line_num, "volume")?;
+
+    // 解析时间戳
+    let timestamp_str = if parts.len() == 6 {
+        parts[0]
+    } else {
+        parts[timestamp_idx]
+    };
 
     let period = match period_str {
         "1m" => Period::Minute(1),
@@ -219,21 +241,7 @@ fn parse_csv_line(line: &str, line_num: usize) -> Result<KLine, ReplayError> {
     };
 
     // 解析时间戳
-    let timestamp = if timestamp_str.contains('T') {
-        DateTime::parse_from_rfc3339(timestamp_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|_| ReplayError::Parse {
-                line: line_num,
-                message: format!("Invalid RFC3339 timestamp: {}", timestamp_str),
-            })?
-    } else {
-        NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S")
-            .map(|dt| dt.and_utc())
-            .map_err(|_| ReplayError::Parse {
-                line: line_num,
-                message: format!("Invalid datetime format: {}", timestamp_str),
-            })?
-    };
+    let timestamp = parse_timestamp(timestamp_str, line_num)?;
 
     Ok(KLine {
         symbol,
@@ -258,6 +266,48 @@ fn parse_decimal(s: &str, line_num: usize, field_name: &str) -> Result<Decimal, 
         .map_err(|_| ReplayError::Parse {
             line: line_num,
             message: format!("Invalid {}: '{}'", field_name, s),
+        })
+}
+
+/// 解析时间戳
+///
+/// 支持多种格式：
+/// - RFC3339: 2024-01-01T00:00:00Z
+/// - 简单格式: 2024-01-01 00:00:00
+/// - 毫秒时间戳: 1759968000000
+fn parse_timestamp(s: &str, line_num: usize) -> Result<DateTime<Utc>, ReplayError> {
+    // 检查是否是纯数字（毫秒时间戳）
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        // 毫秒时间戳
+        let ms: i64 = s.parse().map_err(|_| ReplayError::Parse {
+            line: line_num,
+            message: format!("Invalid timestamp (ms): {}", s),
+        })?;
+        let secs = ms / 1000;
+        let nanos = ((ms % 1000) as u32) * 1_000_000;
+        return DateTime::from_timestamp(secs, nanos)
+            .ok_or_else(|| ReplayError::Parse {
+                line: line_num,
+                message: format!("Timestamp out of range: {}", ms),
+            });
+    }
+
+    // RFC3339 格式
+    if s.contains('T') || s.ends_with('Z') {
+        return DateTime::parse_from_rfc3339(s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|_| ReplayError::Parse {
+                line: line_num,
+                message: format!("Invalid RFC3339 timestamp: {}", s),
+            });
+    }
+
+    // 简单日期格式
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+        .map(|dt| dt.and_utc())
+        .map_err(|_| ReplayError::Parse {
+            line: line_num,
+            message: format!("Invalid datetime format: {}", s),
         })
 }
 

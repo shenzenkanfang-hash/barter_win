@@ -192,11 +192,16 @@ impl TickReceiver {
 // ============================================================================
 
 /// Tick 发送错误
-#[derive(Debug, thiserror::Error)]
-pub enum TickSendError {
-    #[error("channel closed")]
-    Closed,
+#[derive(Debug)]
+pub struct TickSendError(pub String);
+
+impl std::fmt::Display for TickSendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TickSendError: {}", self.0)
+    }
 }
+
+impl std::error::Error for TickSendError {}
 
 /// Tick 尝试发送错误
 #[derive(Debug, thiserror::Error)]
@@ -267,10 +272,18 @@ impl HandshakeGenerator {
 }
 
 /// 引擎侧的 Tick 处理循环
-pub async fn engine_loop(
-    mut receiver: TickReceiver,
-    mut process_fn: impl FnMut(SimulatedTick) -> std::future::Future<Output = ()>,
-) {
+///
+/// # 示例
+/// ```ignore
+/// engine_loop(receiver, |tick| async move {
+///     // 处理 tick
+/// }).await;
+/// ```
+pub async fn engine_loop<F, Fut>(mut receiver: TickReceiver, mut process_fn: F)
+where
+    F: FnMut(SimulatedTick) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
     while let Some(tick) = receiver.recv_and_ack().await {
         process_fn(tick).await;
         receiver.ack().await.ok();

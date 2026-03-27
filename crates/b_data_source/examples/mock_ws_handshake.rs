@@ -13,13 +13,14 @@
 use std::sync::Arc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use tokio::time::{Instant, Duration};
+use tokio::time::Instant;
 
 // 导入 b_data_source 组件
 use b_data_source::{
     ReplaySource,
     ws::{StreamTickGenerator, SimulatedTick},
-    api::mock_api::{MockApiGateway, EngineOrderRequest},
+    api::mock_api::MockApiGateway,
+    api::mock_api::gateway::EngineOrderRequest,
     api::mock_api::account::Side,
     create_handshake_channel,
     HandshakeGenerator,
@@ -36,6 +37,7 @@ struct SimpleStrategy {
     ema_period_fast: usize,
     ema_period_slow: usize,
     price_history: Vec<Decimal>,
+    order_count: usize,
 }
 
 impl SimpleStrategy {
@@ -46,6 +48,7 @@ impl SimpleStrategy {
             ema_period_fast: 5,
             ema_period_slow: 20,
             price_history: Vec::new(),
+            order_count: 0,
         }
     }
 
@@ -53,31 +56,23 @@ impl SimpleStrategy {
     fn update(&mut self, price: Decimal, is_kline_closed: bool) -> Option<Signal> {
         self.price_history.push(price);
 
-        // 计算 EMA
-        self.ema_fast = Some(self.calc_ema(price, self.ema_period_fast));
-        self.ema_slow = Some(self.calc_ema(price, self.ema_period_slow));
-
         // K 线闭合时检查交叉
         if is_kline_closed {
-            if let (Some(fast), Some(slow)) = (self.ema_fast, self.ema_slow) {
-                if self.price_history.len() >= 2 {
-                    let prev_fast = self.calc_ema(
-                        self.price_history[self.price_history.len() - 2],
-                        self.ema_period_fast,
-                    );
-                    let prev_slow = self.calc_ema(
-                        self.price_history[self.price_history.len() - 2],
-                        self.ema_period_slow,
-                    );
+            if self.price_history.len() >= self.ema_period_slow {
+                let fast_ema = self.calc_ema(self.ema_period_fast);
+                let slow_ema = self.calc_ema(self.ema_period_slow);
+                let prev_fast_ema = self.calc_prev_ema(self.ema_period_fast);
+                let prev_slow_ema = self.calc_prev_ema(self.ema_period_slow);
 
-                    // 金叉
-                    if prev_fast <= prev_slow && fast > slow {
-                        return Some(Signal::Buy);
-                    }
-                    // 死叉
-                    if prev_fast >= prev_slow && fast < slow {
-                        return Some(Signal::Sell);
-                    }
+                // 金叉
+                if prev_fast_ema <= prev_slow_ema && fast_ema > slow_ema {
+                    self.order_count += 1;
+                    return Some(Signal::Buy);
+                }
+                // 死叉
+                if prev_fast_ema >= prev_slow_ema && fast_ema < slow_ema {
+                    self.order_count += 1;
+                    return Some(Signal::Sell);
                 }
             }
         }
@@ -85,21 +80,32 @@ impl SimpleStrategy {
         None
     }
 
-    fn calc_ema(&self, price: Decimal, period: usize) -> Decimal {
-        let multiplier = dec!(2) / Decimal::from(period + 1);
-        if self.price_history.len() < period {
-            // 数据不足，返回简单平均
-            let sum: Decimal = self.price_history.iter().sum();
-            sum / Decimal::from(self.price_history.len())
-        } else {
-            // 使用最近的 period 个数据计算 EMA
-            let start = self.price_history.len() - period;
-            let slice: Vec<Decimal> = self.price_history[start..].to_vec();
-            let sum: Decimal = slice.iter().sum();
-            let sma = sum / Decimal::from(period);
-            // 简化：使用 SMA
-            sma
+    fn calc_ema(&self, period: usize) -> Decimal {
+        let start = self.price_history.len().saturating_sub(period);
+        let slice: Vec<Decimal> = self.price_history[start..].to_vec();
+        let sum: Decimal = slice.iter().sum();
+        sum / Decimal::from(period)
+    }
+
+    fn calc_prev_ema(&self, period: usize) -> Decimal {
+        if self.price_history.len() <= period {
+            return self.calc_ema(period);
         }
+        let start = self.price_history.len().saturating_sub(period + 1);
+        let end = self.price_history.len().saturating_sub(1);
+        let slice: Vec<Decimal> = self.price_history[start..end].to_vec();
+        let sum: Decimal = slice.iter().sum();
+        sum / Decimal::from(period)
+    }
+
+    fn get_order_count(&self) -> usize {
+        self.order_count
+    }
+}
+
+impl Default for SimpleStrategy {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -172,11 +178,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let csv_path = args.get(1).cloned().unwrap_or_else(|| "data/btcusdt_1m.csv".to_string());
 
-    // 初始化日志
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .init();
-
     println!("=== Mock WS 握手模式回测 ===");
     println!("数据源: {}", csv_path);
 
@@ -209,12 +210,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (sender, receiver) = create_handshake_channel(1, 1);
 
     // 创建 Tick 生成器
-    let klines = replay; // ReplaySource 实现 Iterator
+    let klines = replay; // ReplaySource 现在实现了 Iterator
     let generator = StreamTickGenerator::new("BTCUSDT".to_string(), Box::new(klines));
 
     // 创建握手生成器
     let mut handshake_gen = HandshakeGenerator::new(generator, sender);
-    let mut tick_receiver = receiver;
+    let tick_receiver = receiver;
 
     // =========================================================================
     // 3. 握手回测循环
@@ -274,7 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("总 K 线: {}", stats.kline_count);
     println!("买入信号: {}", stats.buy_signals);
     println!("卖出信号: {}", stats.sell_signals);
-    println!("总订单数: {}", gateway.engine().read().order_count());
+    println!("策略订单数: {}", strategy.get_order_count());
     println!("{}", "-".repeat(60));
     println!("初始余额: 10000 USDT");
     println!("最终余额: {} USDT", account.available);
