@@ -365,6 +365,7 @@ impl ShardReader {
             close,
             volume,
             timestamp,
+            is_closed: false,
         })
     }
 }

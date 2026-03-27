@@ -244,6 +244,7 @@ fn parse_csv_line(line: &str, line_num: usize) -> Result<KLine, ReplayError> {
         close,
         volume,
         timestamp,
+        is_closed: false,
     })
 }
 

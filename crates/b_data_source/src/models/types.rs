@@ -32,4 +32,6 @@ pub struct KLine {
     pub close: Decimal,
     pub volume: Decimal,
     pub timestamp: DateTime<Utc>,
+    /// K线是否已闭合（最后一根tick时为true）
+    pub is_closed: bool,
 }

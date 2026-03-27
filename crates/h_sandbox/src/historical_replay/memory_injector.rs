@@ -122,6 +122,7 @@ impl MemoryInjector {
                 close: tick.price,
                 volume: tick.volume,
                 timestamp: tick.kline_timestamp,
+                is_closed: false,
             });
             self.kline_ticks.clear();
         }

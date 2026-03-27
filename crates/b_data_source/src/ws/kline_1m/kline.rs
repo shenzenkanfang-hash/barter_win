@@ -82,6 +82,7 @@ impl KLineSynthesizer {
             close: tick.price,
             volume: tick.qty,
             timestamp,
+            is_closed: false,
         }
     }
 }
