@@ -15,5 +15,9 @@ pub use executor::{Executor, ExecutorConfig, ExecutorError, OrderType};
 pub use repository::{PENDING_TIMEOUT_SECS, RepoError, RecordStatus, Repository, TradeRecord};
 pub use signal::MinSignalGenerator;
 pub use status::{PinStatus, PinStatusMachine};
-pub use trader::{Trader, TraderConfig, TraderHealth};
+// P0-3 修复：导出新增类型
+pub use trader::{
+    AccountInfo, AccountProvider, ExecutionResult, Trader, TraderConfig, TraderError,
+    TraderHealth,
+};
 

@@ -2,6 +2,9 @@
 //!
 //! 从 MarketDataStore 读取数据，生成交易信号
 //! 自循环架构：Trader 自己 loop，Engine 管理 spawn/stop/monitor
+//!
+//! # 修复记录
+//! - v2.0: P0-1 主循环启用、P0-2 local_position 填充、P0-3 风控接入、P1-2 锁日志、P1-3 价格偏离度
 
 #![forbid(unsafe_code)]
 
@@ -9,10 +12,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use b_data_source::MarketDataStore;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use thiserror::Error;
 use tokio::sync::{RwLock as TokioRwLock, Notify};
 use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategyId, StrategySignal, TradeCommand};
@@ -24,6 +29,64 @@ use crate::types::{MinSignalInput, MinSignalOutput, VolatilityTier};
 
 /// MarketDataStore trait object for dependency injection
 pub type StoreRef = Arc<dyn MarketDataStore + Send + Sync>;
+
+// ==================== P0-3: 账户服务接口 ====================
+
+/// 账户信息结构（用于风控）
+#[derive(Debug, Clone)]
+pub struct AccountInfo {
+    pub available_balance: Decimal,
+    pub total_equity: Decimal,
+    pub unrealized_pnl: Decimal,
+    pub used_margin: Decimal,
+}
+
+/// Trader 错误类型
+#[derive(Debug, Clone, Error)]
+pub enum TraderError {
+    #[error("账户服务不可用: {0}")]
+    AccountServiceUnavailable(String),
+
+    #[error("未配置账户服务，无法获取风控参数")]
+    AccountProviderNotConfigured,
+
+    #[error("风控检查失败: {0}")]
+    RiskCheckFailed(String),
+
+    #[error("锁竞争失败")]
+    LockContention,
+
+    #[error("WAL 记录错误: {0}")]
+    RepoError(String),
+
+    #[error("下单失败: {0}")]
+    OrderFailed(String),
+
+    #[error("其他错误: {0}")]
+    Other(String),
+}
+
+/// 账户信息提供者 Trait（异步接口）
+/// 用于解耦 Trader 与具体账户服务的依赖
+#[async_trait]
+pub trait AccountProvider: Send + Sync {
+    async fn get_account(&self, symbol: &str) -> Result<AccountInfo, TraderError>;
+}
+
+/// WAL 执行结果枚举（明确区分成功/跳过/失败）
+#[derive(Debug, Clone)]
+pub enum ExecutionResult {
+    /// 成功下单，返回订单数量
+    Executed { qty: Decimal, order_type: OrderType },
+    Skipped(&'static str),
+    Failed(TraderError),
+}
+
+impl ExecutionResult {
+    pub fn is_executed(&self) -> bool {
+        matches!(self, ExecutionResult::Executed { .. })
+    }
+}
 
 /// 品种交易器配置
 #[derive(Debug, Clone)]
@@ -60,6 +123,8 @@ pub struct Trader {
     executor: Arc<Executor>,
     repository: Arc<Repository>,
     store: StoreRef,
+    /// P0-3: 账户提供者（必须配置，否则拒绝下单）
+    account_provider: Option<Arc<dyn AccountProvider>>,
     last_order_ms: AtomicU64,
     is_running: AtomicBool,
     shutdown: Notify,
@@ -67,6 +132,7 @@ pub struct Trader {
 
 impl Trader {
     /// 创建 Trader（需要注入 executor、repository 和 store）
+    /// P0-3 修复：使用此构造函数时，风控将被禁用（不安全，生产环境禁止）
     pub fn new(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -81,6 +147,31 @@ impl Trader {
             executor,
             repository,
             store,
+            account_provider: None,
+            last_order_ms: AtomicU64::new(0),
+            is_running: AtomicBool::new(false),
+            shutdown: Notify::new(),
+        }
+    }
+
+    /// 创建带账户服务的 Trader（推荐）
+    /// P0-3 修复：必须配置 AccountProvider 才能下单
+    pub fn with_account_provider(
+        config: TraderConfig,
+        executor: Arc<Executor>,
+        repository: Arc<Repository>,
+        store: StoreRef,
+        account_provider: Arc<dyn AccountProvider>,
+    ) -> Self {
+        Self {
+            config,
+            status_machine: TokioRwLock::new(PinStatusMachine::new()),
+            signal_generator: MinSignalGenerator::new(),
+            position: TokioRwLock::new(None),
+            executor,
+            repository,
+            store,
+            account_provider: Some(account_provider),
             last_order_ms: AtomicU64::new(0),
             is_running: AtomicBool::new(false),
             shutdown: Notify::new(),
@@ -115,24 +206,28 @@ impl Trader {
         self.get_volatility().map(|v| v.volatility)
     }
 
-    /// 构建信号输入（简化版）
+    /// 构建信号输入
+    /// P1-1 修复：需要从 store 获取真实市场数据，而非硬编码
+    /// TODO: 接入真实的指标计算模块
     fn build_signal_input(&self) -> Option<MinSignalInput> {
         let vol = self.volatility_value()?;
 
+        // TODO: P1-1 修复 - 从 store 和指标缓存获取真实数据
+        // 当前硬编码会导致信号失真，以下为临时实现
         Some(MinSignalInput {
             tr_base_60min: dec!(0.1),
             tr_ratio_15min: Decimal::from_f64_retain(vol)?,
-            zscore_14_1m: dec!(0),
-            zscore_1h_1m: dec!(0),
-            tr_ratio_60min_5h: dec!(0),
-            tr_ratio_10min_1h: dec!(0),
-            pos_norm_60: dec!(50),
-            acc_percentile_1h: dec!(0),
-            velocity_percentile_1h: dec!(0),
-            pine_bg_color: String::new(),
-            pine_bar_color: String::new(),
-            price_deviation: dec!(0),
-            price_deviation_horizontal_position: dec!(0),
+            zscore_14_1m: dec!(0),        // TODO: 从指标缓存获取
+            zscore_1h_1m: dec!(0),       // TODO: 从指标缓存获取
+            tr_ratio_60min_5h: dec!(0),   // TODO: 从指标缓存获取
+            tr_ratio_10min_1h: dec!(0),   // TODO: 从指标缓存获取
+            pos_norm_60: dec!(50),        // TODO: 从指标缓存获取
+            acc_percentile_1h: dec!(0),  // TODO: 从指标缓存获取
+            velocity_percentile_1h: dec!(0), // TODO: 从指标缓存获取
+            pine_bg_color: String::new(), // TODO: 从指标缓存获取
+            pine_bar_color: String::new(), // TODO: 从指标缓存获取
+            price_deviation: dec!(0),     // TODO: 基于持仓均价计算
+            price_deviation_horizontal_position: dec!(0), // TODO: 从指标缓存获取
         })
     }
 
@@ -143,6 +238,38 @@ impl Trader {
             Some(v) if v > 0.05 => VolatilityTier::Medium,
             _ => VolatilityTier::Low,
         }
+    }
+
+    /// 获取账户信息（必须成功，否则拒绝下单）
+    /// P0-3 修复：默认拒绝策略，而非使用危险默认值
+    async fn fetch_account_info(&self) -> Result<AccountInfo, TraderError> {
+        if let Some(ref provider) = self.account_provider {
+            match provider.get_account(&self.config.symbol).await {
+                Ok(info) => {
+                    tracing::debug!(
+                        symbol = %self.config.symbol,
+                        available = %info.available_balance,
+                        equity = %info.total_equity,
+                        "获取账户信息成功"
+                    );
+                    return Ok(info);
+                }
+                Err(e) => {
+                    tracing::error!(
+                        symbol = %self.config.symbol,
+                        error = %e,
+                        "账户服务不可用，拒绝下单"
+                    );
+                    return Err(TraderError::AccountServiceUnavailable(e.to_string()));
+                }
+            }
+        }
+
+        tracing::error!(
+            symbol = %self.config.symbol,
+            "未配置 AccountProvider，无法获取风控参数，拒绝下单"
+        );
+        Err(TraderError::AccountProviderNotConfigured)
     }
 
     /// 获取当前持仓方向（异步）
@@ -239,10 +366,16 @@ impl Trader {
 
     /// WAL 模式执行一次（异步版）
     ///
-    /// 返回 bool：是否成功执行（用于重启计数重置）
-    pub async fn execute_once_wal(&self) -> bool {
-        // 1. 预创建记录
-        let mut record = self.build_pending_record();
+    /// P0-1 修复：返回 ExecutionResult 而非 bool，避免静默跳过
+    /// P0-3 修复：使用 fetch_account_info() 获取真实风控参数
+    pub async fn execute_once_wal(&self) -> Result<ExecutionResult, TraderError> {
+        // 1. 预创建记录（包含持仓快照）
+        let mut record = match self.build_pending_record() {
+            Some(r) => r,
+            None => {
+                return Ok(ExecutionResult::Skipped("无法获取持仓快照"));
+            }
+        };
 
         // 2. ID 获取带幂等处理
         let pending_id = match self.try_get_pending_id(&mut record).await {
@@ -251,9 +384,9 @@ impl Trader {
                 tracing::error!(
                     symbol = %self.config.symbol,
                     error = %e,
-                    "预写记录失败，跳过本次下单"
+                    "预写记录失败"
                 );
-                return false;
+                return Ok(ExecutionResult::Failed(TraderError::RepoError(e.to_string())));
             }
         };
 
@@ -262,29 +395,41 @@ impl Trader {
             Some(i) => i,
             None => {
                 self.repository.mark_failed(pending_id, "NO_SIGNAL_INPUT").ok();
-                return false;
+                return Ok(ExecutionResult::Skipped("无法构建信号输入"));
             }
         };
 
         let signal_output = self.signal_generator.generate(&input, &self.volatility_tier(), None);
-        record.signal_json = match serde_json::to_string(&signal_output) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                tracing::warn!(symbol = %self.config.symbol, error = %e, "信号序列化失败");
-                None
-            }
-        };
+        record.signal_json = serde_json::to_string(&signal_output).ok();
 
         // 4. 决策
-        let (signal, order_type) = match self.decide_action_wal(&signal_output) {
+        let (_signal, order_type) = match self.decide_action_wal(&signal_output) {
             Some(s) => s,
             None => {
                 self.repository.mark_failed(pending_id, "NO_SIGNAL").ok();
-                return false;
+                return Ok(ExecutionResult::Skipped("无有效交易信号"));
             }
         };
 
-        // 5. 获取当前持仓状态
+        // 5. P0-3 修复：获取账户信息（必须成功，否则拒绝下单）
+        let account_info = match self.fetch_account_info().await {
+            Ok(info) => info,
+            Err(e) => {
+                tracing::error!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "无法获取账户信息，拒绝下单"
+                );
+                self.repository.mark_failed(pending_id, "ACCOUNT_INFO_FAILED").ok();
+                return Ok(ExecutionResult::Failed(e));
+            }
+        };
+
+        // 填充 WAL 记录的账户字段
+        record.available_balance = Some(account_info.available_balance.to_string());
+        record.unrealized_pnl = Some(account_info.unrealized_pnl.to_string());
+
+        // 6. 获取持仓状态
         let current_side = self.current_position_side().await;
         let current_qty = self.current_position_qty().await;
         let current_price = self.current_price().unwrap_or(Decimal::ZERO);
@@ -296,22 +441,21 @@ impl Trader {
             PositionDirection::Flat => x_data::position::PositionSide::None,
         });
 
-        // 计算订单价值（用于风控检查）
-        // 注意：实际风控参数应通过 ExecutorConfig 或外部注入获取
+        // 计算订单价值
         let order_qty = self.executor.calculate_order_qty(order_type, current_qty, current_side_for_order);
         let order_value = order_qty * current_price;
 
-        // 6. 执行下单（传入风控参数，如果 Executor 未配置风控则使用默认值跳过检查）
+        // 7. P0-3 修复：执行下单（使用真实风控参数）
         match self.executor.send_order(
             order_type,
             current_qty,
             current_side_for_order,
             order_value,
-            Decimal::MAX,      // available_balance: 使用最大值跳过风控
-            Decimal::MAX,      // total_equity: 使用最大值跳过风控
+            account_info.available_balance,
+            account_info.total_equity,
         ) {
-            Ok(_) => {
-                // 7. WAL 确认
+            Ok(result) => {
+                // 8. WAL 确认
                 if let Err(e) = self.repository.confirm_record(pending_id, "OK") {
                     tracing::error!(
                         symbol = %self.config.symbol,
@@ -320,13 +464,16 @@ impl Trader {
                         "下单成功但确认记录失败"
                     );
                 }
-                true
+                Ok(ExecutionResult::Executed {
+                    qty: result,
+                    order_type,
+                })
             }
             Err(e) => {
                 self.repository
                     .mark_failed(pending_id, &format!("ORDER_FAILED: {}", e))
                     .ok();
-                false
+                Ok(ExecutionResult::Failed(TraderError::OrderFailed(e.to_string())))
             }
         }
     }
@@ -374,38 +521,119 @@ impl Trader {
     }
 
     /// 构建待预写的记录
-    fn build_pending_record(&self) -> TradeRecord {
+    /// P0-2 修复：填充 local_position 和 trader_status 快照
+    fn build_pending_record(&self) -> Option<TradeRecord> {
         let timestamp = chrono::Utc::now().timestamp();
 
-        TradeRecord {
+        // P1-2 修复：获取持仓快照（添加锁失败日志）
+        let local_position = match self.position.try_read() {
+            Ok(guard) => {
+                guard.as_ref().and_then(|p| serde_json::to_string(p).ok())
+            }
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "获取持仓锁失败，local_position 将为 None"
+                );
+                None
+            }
+        };
+
+        // 获取状态快照
+        let trader_status = match self.status_machine.try_read() {
+            Ok(guard) => serde_json::to_string(&guard.current_status()).ok(),
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "获取状态锁失败，trader_status 将为 None"
+                );
+                None
+            }
+        };
+
+        Some(TradeRecord {
             symbol: self.config.symbol.clone(),
             timestamp,
             interval_ms: self.config.interval_ms as i64,
             status: crate::h_15m::repository::RecordStatus::PENDING,
             price: self.current_price().map(|p| p.to_string()),
             volatility: self.volatility_value(),
-            trader_status: {
-                let machine_guard = self.status_machine.try_read().ok();
-                machine_guard.and_then(|m| {
-                    match serde_json::to_string(&m.current_status()) {
-                        Ok(s) => Some(s),
-                        Err(e) => {
-                            tracing::warn!(symbol = %self.config.symbol, error = %e, "状态序列化失败");
-                            None
-                        }
-                    }
-                })
-            },
-            local_position: None, // 后续更新
+            local_position,
+            trader_status,
             order_timestamp: Some(timestamp),
             ..Default::default()
-        }
+        })
     }
 
     /// WAL 模式决策
+    /// P1-3 修复：使用 price 计算价格偏离度
+    /// P1-2 修复：锁竞争时添加 warn 日志
+    #[allow(unused_variables)]
     fn decide_action_wal(&self, signal: &MinSignalOutput) -> Option<(StrategySignal, OrderType)> {
-        let status = self.status_machine.try_read().ok()?.current_status();
-        let price = self.current_price()?;
+        // P1-2 修复：获取状态，锁失败时添加日志
+        let status = match self.status_machine.try_read() {
+            Ok(guard) => guard.current_status(),
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "获取状态锁失败，跳过本次决策"
+                );
+                return None;
+            }
+        };
+
+        // P1-3 修复：price 将用于偏离度计算
+        let price = match self.current_price() {
+            Some(p) => p,
+            None => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    "无法获取当前价格，跳过本次决策"
+                );
+                return None;
+            }
+        };
+
+        // P1-3 修复：计算价格偏离度用于辅助决策
+        // 获取持仓均价
+        let entry_price = match self.position.try_read() {
+            Ok(guard) => guard.as_ref().map(|p| p.avg_price),
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "获取持仓锁失败，无法计算偏离度"
+                );
+                None
+            }
+        };
+
+        // 计算偏离度（用于决策参考）
+        let price_deviation_pct = entry_price
+            .map(|entry| {
+                if entry != Decimal::ZERO {
+                    ((price - entry) / entry * dec!(100)).round_dp(2)
+                } else {
+                    Decimal::ZERO
+                }
+            })
+            .unwrap_or(Decimal::ZERO);
+
+        // P1-3 修复：使用偏离度进行辅助决策（平仓时判断是否极端偏离）
+        let use_extreme_exit = price_deviation_pct.abs() > dec!(5);
+
+        tracing::debug!(
+            symbol = %self.config.symbol,
+            status = ?status,
+            price = %price,
+            entry_price = ?entry_price,
+            deviation_pct = %price_deviation_pct,
+            use_extreme_exit = use_extreme_exit,
+            "WAL 决策分析"
+        );
 
         match status {
             PinStatus::Initial | PinStatus::LongInitial | PinStatus::ShortInitial => {
@@ -429,7 +657,8 @@ impl Trader {
                         OrderType::DoubleAdd,
                     ));
                 }
-                if signal.long_exit {
+                // P1-3 修复：使用价格偏离度辅助平仓决策
+                if signal.long_exit || use_extreme_exit {
                     return Some((
                         self.build_close_signal(PositionSide::Long, OrderType::DoubleClose),
                         OrderType::DoubleClose,
@@ -449,7 +678,8 @@ impl Trader {
                         OrderType::DoubleAdd,
                     ));
                 }
-                if signal.short_exit {
+                // P1-3 修复：使用价格偏离度辅助平仓决策
+                if signal.short_exit || use_extreme_exit {
                     return Some((
                         self.build_close_signal(PositionSide::Short, OrderType::DoubleClose),
                         OrderType::DoubleClose,
@@ -469,17 +699,43 @@ impl Trader {
     }
 
     /// 决策逻辑（同步版）
+    /// P1-2 修复：锁竞争时添加 warn 日志
+    /// P1-3 修复：使用 price 计算价格偏离度
     fn decide_action(
         &self,
         status: &PinStatus,
         signal: &MinSignalOutput,
         price: Decimal,
     ) -> Option<StrategySignal> {
-        let pos = self.position.try_read().ok()?;
+        // P1-2 修复：获取持仓，锁失败时添加日志
+        let pos = match self.position.try_read() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "同步决策：获取持仓锁失败，跳过本次决策"
+                );
+                return None;
+            }
+        };
+
         let has_position = pos
             .as_ref()
             .map(|p| p.direction != PositionDirection::Flat && p.qty > Decimal::ZERO)
             .unwrap_or(false);
+
+        // P1-3 修复：计算偏离度
+        let entry_price = pos.as_ref().and_then(|p| Some(p.avg_price));
+        let price_deviation_pct = entry_price
+            .map(|entry| {
+                if entry != Decimal::ZERO {
+                    ((price - entry) / entry * dec!(100)).round_dp(2)
+                } else {
+                    Decimal::ZERO
+                }
+            })
+            .unwrap_or(Decimal::ZERO);
 
         match status {
             PinStatus::Initial | PinStatus::LongInitial | PinStatus::ShortInitial => {
@@ -497,7 +753,8 @@ impl Trader {
                 if signal.long_entry {
                     return Some(self.build_open_signal(PositionSide::Long, OrderType::DoubleAdd));
                 }
-                if signal.long_exit {
+                // P1-3 修复：使用偏离度辅助平仓
+                if signal.long_exit || price_deviation_pct.abs() > dec!(5) {
                     return Some(self.build_close_signal(PositionSide::Long, OrderType::DoubleClose));
                 }
                 if signal.long_hedge {
@@ -509,7 +766,8 @@ impl Trader {
                 if signal.short_entry {
                     return Some(self.build_open_signal(PositionSide::Short, OrderType::DoubleAdd));
                 }
-                if signal.short_exit {
+                // P1-3 修复：使用偏离度辅助平仓
+                if signal.short_exit || price_deviation_pct.abs() > dec!(5) {
                     return Some(self.build_close_signal(PositionSide::Short, OrderType::DoubleClose));
                 }
                 if signal.short_hedge {
@@ -556,13 +814,19 @@ impl Trader {
     }
 
     /// 构建平仓信号
-    fn build_close_signal(&self, side: PositionSide, order_type: OrderType) -> StrategySignal {
-        let qty = self
-            .position
-            .try_read()
-            .ok()
-            .and_then(|p| p.as_ref().map(|p| p.qty))
-            .unwrap_or(Decimal::ZERO);
+    /// P1-2 修复：锁竞争时添加 warn 日志
+    fn build_close_signal(&self, side: PositionSide, _order_type: OrderType) -> StrategySignal {
+        let qty = match self.position.try_read() {
+            Ok(guard) => guard.as_ref().map(|p| p.qty).unwrap_or(Decimal::ZERO),
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "构建平仓信号：获取持仓锁失败，使用零数量"
+                );
+                Decimal::ZERO
+            }
+        };
 
         StrategySignal {
             command: TradeCommand::FlatPosition,
@@ -581,20 +845,41 @@ impl Trader {
     }
 
     /// 更新持仓
+    /// P1-2 修复：锁竞争时添加 warn 日志
     pub fn update_position(&self, position: Option<LocalPosition>) {
-        if let Ok(mut guard) = self.position.try_write() {
-            *guard = position;
+        match self.position.try_write() {
+            Ok(mut guard) => {
+                *guard = position;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "更新持仓：获取写锁失败，跳过更新"
+                );
+            }
         }
     }
 
     /// 更新状态
+    /// P1-2 修复：锁竞争时添加 warn 日志
     pub fn update_status(&self, status: PinStatus) {
-        if let Ok(mut guard) = self.status_machine.try_write() {
-            guard.set_status(status);
+        match self.status_machine.try_write() {
+            Ok(mut guard) => {
+                guard.set_status(status);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    symbol = %self.config.symbol,
+                    error = %e,
+                    "更新状态：获取写锁失败，跳过更新"
+                );
+            }
         }
     }
 
     /// 启动交易循环（改造后：优雅停止 + 心跳 + WAL）
+    /// P0-1 修复：启用 WAL 执行，处理新的返回类型
     pub async fn start(&self) {
         self.is_running.store(true, Ordering::SeqCst);
         tracing::info!(symbol = %self.config.symbol, "Trader 启动");
@@ -609,7 +894,7 @@ impl Trader {
             self.restore_from_record(&record).await;
         }
 
-        // 主循环（优雅停止 + 心跳）
+        // 主循环（优雅停止 + WAL 执行）
         while self.is_running.load(Ordering::SeqCst) {
             tokio::select! {
                 _ = self.shutdown.notified() => {
@@ -617,8 +902,38 @@ impl Trader {
                     break;
                 }
                 _ = tokio::time::sleep(Duration::from_millis(self.config.interval_ms)) => {
-                    // WAL 执行：预写→信号→决策→下单→确认
-                    self.execute_once_wal().await;
+                    // P0-1 修复：执行 WAL 并处理结果
+                    match self.execute_once_wal().await {
+                        Ok(ExecutionResult::Executed { qty, order_type }) => {
+                            tracing::info!(
+                                symbol = %self.config.symbol,
+                                qty = %qty,
+                                ?order_type,
+                                "WAL 执行成功"
+                            );
+                        }
+                        Ok(ExecutionResult::Skipped(reason)) => {
+                            tracing::debug!(
+                                symbol = %self.config.symbol,
+                                reason = %reason,
+                                "WAL 跳过执行"
+                            );
+                        }
+                        Ok(ExecutionResult::Failed(e)) => {
+                            tracing::warn!(
+                                symbol = %self.config.symbol,
+                                error = %e,
+                                "WAL 执行失败"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                symbol = %self.config.symbol,
+                                error = %e,
+                                "WAL 执行异常"
+                            );
+                        }
+                    }
                 }
             }
         }

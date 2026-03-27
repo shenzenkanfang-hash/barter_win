@@ -137,11 +137,12 @@ impl Executor {
     }
 
     /// 计算下单数量（Decimal 精度 + 步长裁剪）
+    #[allow(unused_variables)]
     pub fn calculate_order_qty(
         &self,
         order_type: OrderType,
         current_qty: Decimal,
-        current_side: Option<PositionSide>,
+        current_side: Option<PositionSide>, // 预留：将用于仓位方向风控
     ) -> Decimal {
         let raw_qty = match order_type {
             OrderType::InitialOpen => self.config.initial_ratio,

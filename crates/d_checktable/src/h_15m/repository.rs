@@ -1,6 +1,9 @@
 //! h_15m/repository.rs
 //!
 //! SQLite WAL 持久化层 - TradeRecord 存储与崩溃恢复
+//!
+//! # 修复记录
+//! - v2.0: P2-3 load_latest() 不再简单标记失败，改为警告保留状态
 
 #![forbid(unsafe_code)]
 
@@ -346,6 +349,9 @@ impl Repository {
     }
 
     /// 从 SQLite 加载最新记录（崩溃恢复）
+    ///
+    /// P2-3 修复：不再简单标记 PENDING 为 FAILED，而是返回记录让上层判断
+    /// 原因：无法确认订单实际状态，可能已执行成功
     pub fn load_latest(&self, symbol: &str) -> Result<Option<TradeRecord>, RepoError> {
         let sql = r#"
             SELECT * FROM trade_records
@@ -358,18 +364,19 @@ impl Repository {
         let mut rows = stmt.query(params![symbol])?;
         if let Some(row) = rows.next()? {
             let record = Self::row_to_record(row)?;
+
+            // P2-3 修复：保留 PENDING 状态，让上层（Trader）通过交易所 API 确认
             if record.status == RecordStatus::PENDING {
                 tracing::warn!(
                     symbol = %symbol,
                     id = record.id,
                     timestamp = record.timestamp,
-                    "发现 PENDING 记录，可能存在未确认下单"
+                    order_timestamp = record.order_timestamp,
+                    "发现 PENDING 记录，需要通过交易所 API 确认实际状态"
                 );
-                self.mark_failed(
-                    record.id.unwrap_or(0),
-                    "CRASH_RECOVERY: pending record marked as failed",
-                )?;
+                // 注意：不再自动标记为 FAILED，避免误判已执行的订单
             }
+
             Ok(Some(record))
         } else {
             Ok(None)

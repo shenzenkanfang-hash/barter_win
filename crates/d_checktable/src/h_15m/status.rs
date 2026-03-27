@@ -3,10 +3,14 @@
 //! PinStatus状态机 - 从pin_main.py (Python) 1:1移植
 //!
 //! 职责：管理分钟级Pin策略的仓位状态转换
+//!
+//! # 修复记录
+//! - v2.0: P2-4 添加 HedgeEnter 超时退出机制
 
 #![forbid(unsafe_code)]
 
 use crate::types::MarketStatus;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Pin状态枚举（从pin_main.py移植，Rust命名规范修正）
@@ -63,14 +67,19 @@ impl PinStatus {
 /// Pin状态机
 ///
 /// 管理Pin策略的仓位状态转换，参考pin_main.py的singleAssetTrader状态管理
+///
+/// P2-4 修复：添加 hedge_enter_time 跟踪 HedgeEnter 状态持续时间
 pub struct PinStatusMachine {
     current_status: PinStatus,
+    /// P2-4 修复：记录进入 HedgeEnter 状态的时间（用于超时退出）
+    hedge_enter_time: Option<DateTime<Utc>>,
 }
 
 impl PinStatusMachine {
     pub fn new() -> Self {
         Self {
             current_status: PinStatus::Initial,
+            hedge_enter_time: None,
         }
     }
 
@@ -80,6 +89,28 @@ impl PinStatusMachine {
 
     pub fn set_status(&mut self, status: PinStatus) {
         self.current_status = status;
+        // P2-4 修复：记录进入/退出 HedgeEnter 的时间
+        match status {
+            PinStatus::HedgeEnter => {
+                self.hedge_enter_time = Some(Utc::now());
+            }
+            _ => {
+                self.hedge_enter_time = None;
+            }
+        }
+    }
+
+    /// P2-4 修复：检查是否应该从 HedgeEnter 超时退出
+    /// 默认超时时间：5分钟
+    pub fn should_exit_hedge_enter(&self, timeout_secs: i64) -> bool {
+        if self.current_status != PinStatus::HedgeEnter {
+            return false;
+        }
+        if let Some(enter_time) = self.hedge_enter_time {
+            let elapsed = Utc::now().signed_duration_since(enter_time);
+            return elapsed.num_seconds() >= timeout_secs;
+        }
+        false
     }
 
     /// 判断是否可以开多
@@ -135,6 +166,7 @@ impl PinStatusMachine {
     /// 重置到初始状态
     pub fn reset(&mut self) {
         self.current_status = PinStatus::Initial;
+        self.hedge_enter_time = None;
     }
 
     /// 重置多头侧状态
@@ -148,6 +180,10 @@ impl PinStatusMachine {
             }
             _ => {}
         }
+        // P2-4 修复：重置时清除超时跟踪
+        if self.current_status != PinStatus::HedgeEnter {
+            self.hedge_enter_time = None;
+        }
     }
 
     /// 重置空头侧状态
@@ -160,6 +196,10 @@ impl PinStatusMachine {
                 self.current_status = PinStatus::LongDayAllow;
             }
             _ => {}
+        }
+        // P2-4 修复：重置时清除超时跟踪
+        if self.current_status != PinStatus::HedgeEnter {
+            self.hedge_enter_time = None;
         }
     }
 }
