@@ -1,6 +1,6 @@
 //! Interfaces 模块 - 最小化保留
 //!
-//! 仅保留 h_sandbox 沙箱测试需要的类型。
+//! 仅保留沙盒测试需要的类型。
 
 #![forbid(unsafe_code)]
 

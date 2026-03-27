@@ -7,10 +7,12 @@ pub mod kline_1m;
 pub mod kline_1d;
 pub mod order_books;
 pub mod volatility;
+pub mod mock_ws;
 
 pub use kline_1m::{Kline1mStream, KLineSynthesizer, KlinePersistence};
 pub use kline_1d::Kline1dStream;
 pub use order_books::{OrderBook, DepthStream};
 pub use volatility::{VolatilityManager, SymbolVolatility};
+pub use mock_ws::{StreamTickGenerator, SimulatedTick};
 // Re-export from a_common
 pub use a_common::volatility::VolatilityEntry;

@@ -5,7 +5,7 @@
 //! - `TradingDecision` - 交易决策
 //! - `OrderRequest` - 订单请求
 //! - `TaskState` / `RunningStatus` - sandbox_main 任务状态
-//! - `RiskCheckResult` - h_sandbox 风控结果
+//! - `RiskCheckResult` - mock_api 风控结果
 //! - `Side`, `OrderType`, `TradingAction` - 来自 a_common 的类型重导出
 
 #![forbid(unsafe_code)]
@@ -206,7 +206,7 @@ impl TaskState {
 }
 
 // ============================================================================
-// 风控结果（h_sandbox 用）
+// 风控结果（mock_api 用）
 // ============================================================================
 
 /// 风控检查结果

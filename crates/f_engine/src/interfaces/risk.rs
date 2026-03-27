@@ -1,6 +1,6 @@
 //! 风控接口（最小化）
 //!
-//! 仅导出 h_sandbox 沙箱测试需要的 trait 和类型。
+//! 仅导出沙盒测试需要的 trait 和类型。
 
 use a_common::exchange::ExchangeAccount;
 pub use crate::types::{OrderRequest, RiskCheckResult};

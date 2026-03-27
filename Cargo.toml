@@ -7,7 +7,6 @@ members = [
     "crates/e_risk_monitor",
     "crates/f_engine",
     "crates/g_test",
-    "crates/h_sandbox",
     "crates/x_data",
 ]
 resolver = "3"
@@ -21,10 +20,6 @@ edition = "2024"
 name = "trading-system"
 path = "src/main.rs"
 
-[[bin]]
-name = "sandbox_pure"
-path = "src/sandbox_pure.rs"
-
 
 [dependencies]
 a_common = { path = "crates/a_common" }
@@ -33,7 +28,6 @@ c_data_process = { path = "crates/c_data_process" }
 d_checktable = { path = "crates/d_checktable" }
 e_risk_monitor = { path = "crates/e_risk_monitor" }
 f_engine = { path = "crates/f_engine" }
-h_sandbox = { path = "crates/h_sandbox" }
 tokio = { workspace = true }
 rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }
