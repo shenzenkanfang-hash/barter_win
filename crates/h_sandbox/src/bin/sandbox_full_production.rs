@@ -236,9 +236,9 @@ async fn fetch_from_api(
 // ==================== 数据注入 ====================
 
 /// 启动数据回放
-/// 【关键】数据同时写入：
-/// 1. DataFeeder - 用于 API 查询
-/// 2. MarketDataStore - 用于 Trader 读取（触发真实波动率计算）
+/// 【关键】边注入边处理，不是等全部注入完成
+/// - 每个 Tick 注入后短暂让出，让 Trader 有机会处理
+/// - 模拟真实市场时间流速（可配置）
 async fn start_data_replay(
     ctx: &SandboxContext,
     start_time: DateTime<Utc>,
@@ -251,7 +251,7 @@ async fn start_data_replay(
         start = %start_time,
         end = %end_time,
         kline_count = klines.len(),
-        "[Data] 启动数据回放"
+        "[Data] 启动数据回放（模拟实时流）"
     );
 
     // 克隆共享组件
@@ -259,7 +259,6 @@ async fn start_data_replay(
     let store = ctx.store.clone();
 
     // 使用已加载的 K 线数据
-    // 创建生成器
     let generator = StreamTickGenerator::new(
         symbol.clone(),
         Box::new(klines.into_iter()),
@@ -295,11 +294,15 @@ async fn start_data_replay(
             is_closed: true,
         };
 
-        // 通过 trait 方法调用
+        // 写入 Store
         store.as_ref().write_kline(&symbol, kline_data, true);
+
+        // 【关键】短暂让出，让 Trader 有机会处理刚写入的数据
+        // 模拟真实市场的时间间隔（1分钟K线 = 60秒）
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
-    info!(symbol = %symbol, "[Data] 数据回放完成，已写入 Store");
+    info!(symbol = %symbol, "[Data] 数据回放完成");
 }
 
 // ==================== 策略执行 ====================
@@ -409,7 +412,6 @@ async fn run_sandbox(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Invalid end time: {}", e))?;
 
     // 4. 加载历史数据（优先本地，没有则从 API 拉取）
-    // 【关键】优先本地缓存，减少 API 调用
     let historical_klines = load_klines(
         &args.symbol,
         start_time,
@@ -418,11 +420,30 @@ async fn run_sandbox(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
     info!(symbol = %args.symbol, count = historical_klines.len(), "[Data] 历史数据准备完成");
 
-    // 5. 启动数据回放（注入 DataFeeder）
+    // 5. 【关键修改】并行启动：数据回放 + Trader 同时运行
+    // 使用 tokio::spawn 让数据注入和 Trader 处理并行
+    let ctx_clone = Arc::new(SandboxContext {
+        symbol: ctx.symbol.clone(),
+        initial_fund: ctx.initial_fund,
+        data_feeder: ctx.data_feeder.clone(),
+        store: ctx.store.clone(),
+        gateway: ctx.gateway.clone(),
+        trader_manager: ctx.trader_manager.clone(),
+        shutdown: ctx.shutdown.clone(),
+    });
+
+    // 启动 Trader（立即开始，轮询等待数据）
+    let trader_handle = tokio::spawn(async move {
+        if let Err(e) = start_trader(&ctx_clone).await {
+            error!("[Engine] Trader 错误: {}", e);
+        }
+    });
+
+    // 启动数据回放（边注入边处理）
     start_data_replay(&ctx, start_time, end_time, historical_klines).await;
 
-    // 7. 启动 Trader（完整 WAL 模式）
-    start_trader(&ctx).await?;
+    // 等待 Trader 处理完成
+    trader_handle.await.map_err(|e| format!("Trader task join error: {}", e))?;
 
     // 8. 等待关闭信号
     ctx.shutdown.notified().await;
