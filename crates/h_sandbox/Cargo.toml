@@ -3,6 +3,10 @@ name = "h_sandbox"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "full_production_sandbox"
+path = "src/bin/sandbox_full_production.rs"
+
 [dependencies]
 a_common = { path = "../a_common" }
 b_data_source = { path = "../b_data_source" }
