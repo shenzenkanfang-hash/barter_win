@@ -87,7 +87,7 @@ impl TickRouter {
         let mut engines = HashMap::new();
         
         for symbol in symbols {
-            let (tx, rx) = mpsc::channel(256);  // 每品种独立 channel
+            let (tx, mut rx): (mpsc::Sender<ArcTick>, mpsc::Receiver<ArcTick>) = mpsc::channel(256);  // 每品种独立 channel
             
             // 启动引擎（独立事件循环）
             // 注意：engine move 到 spawn 任务里，不再需要存到 HashMap
@@ -114,20 +114,21 @@ impl TickRouter {
     
     /// 分发 Tick 到对应品种（O(1) 查找）
     async fn dispatch(&mut self, tick: ArcTick) {
-        match self.engines.get(&tick.symbol) {
+        let symbol = tick.symbol.clone();
+        match self.engines.get(&symbol) {
             Some(handle) => {
                 // Arc 克隆极快（只复制引用计数）
                 if handle.tick_tx.send(tick).await.is_err() {
                     tracing::warn!(
-                        symbol = %tick.symbol,
+                        symbol = %symbol,
                         "[Router] Engine channel closed, remove it"
                     );
-                    self.engines.remove(&tick.symbol);
+                    self.engines.remove(&symbol);
                 }
             }
             None => {
                 tracing::debug!(
-                    symbol = %tick.symbol,
+                    symbol = %symbol,
                     "[Router] Unknown symbol, skip tick"
                 );
             }

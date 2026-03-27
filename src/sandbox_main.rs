@@ -48,6 +48,9 @@ use h_sandbox::{
     ShadowBinanceGateway, ShadowRiskChecker,
     historical_replay::{StreamTickGenerator, TickToWsConverter},
 };
+
+mod multi_engine;
+use multi_engine::{TickRouter, ArcTick};
 use f_engine::types::{OrderRequest, OrderType, Side};
 use f_engine::interfaces::RiskChecker;
 
@@ -84,7 +87,7 @@ impl Default for BackpressureMode {
 
 #[derive(Debug, Clone)]
 struct SandboxConfig {
-    symbol: String,
+    symbols: Vec<String>,  // 支持多品种
     initial_fund: Decimal,
     duration_secs: u64,
     start_date: String,
@@ -96,7 +99,7 @@ struct SandboxConfig {
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
-            symbol: DEFAULT_SYMBOL.to_string(),
+            symbols: vec![DEFAULT_SYMBOL.to_string()],  // 默认单品种
             initial_fund: dec!(10000),
             duration_secs: 60,
             start_date: "2025-10-10".to_string(),
@@ -826,7 +829,7 @@ async fn main() -> Result<()> {
     tracing::info!("========================================");
     tracing::info!("  沙盒模式（事件驱动完全重构版）");
     tracing::info!("========================================");
-    tracing::info!("配置: {}", config.symbol);
+    tracing::info!("配置: {:?}", config.symbols);
     tracing::info!("========================================");
 
     // ===== 1. 创建核心组件 =====
@@ -837,7 +840,9 @@ async fn main() -> Result<()> {
 
     // ===== 2. 拉取历史数据 =====
     tracing::info!("正在拉取历史K线...");
-    let klines = fetch_klines_from_api(&config.symbol, &config.start_date, &config.end_date).await?;
+    let default_symbol = DEFAULT_SYMBOL.to_string();
+    let primary_symbol = config.symbols.first().unwrap_or(&default_symbol);
+    let klines = fetch_klines_from_api(primary_symbol, &config.start_date, &config.end_date).await?;
     tracing::info!("✅ K线数据准备完成 ({} 根)", klines.len());
 
     // ===== 3. 创建事件通道 =====
@@ -845,7 +850,7 @@ async fn main() -> Result<()> {
 
     // ===== 4. 创建引擎（单事件循环）=====
     let mut engine = TradingEngine::new(
-        config.symbol.clone(),
+        primary_symbol.clone(),
         gateway.clone(),
         risk_checker.clone(),
     );
@@ -856,9 +861,9 @@ async fn main() -> Result<()> {
     // 注意：这里仍然是 tokio::spawn，但这是沙盒的责任边界
     // 沙盒只负责生成数据，不负责计算
     let tick_tx_clone = tick_tx.clone();
-    let symbol_clone = config.symbol.clone();
+    let symbol_clone = primary_symbol.clone();
     let backpressure_mode = config.backpressure_mode;  // 获取背压模式
-    let ws_converter = TickToWsConverter::new(config.symbol.clone(), "1m".to_string());
+    let ws_converter = TickToWsConverter::new(primary_symbol.clone(), "1m".to_string());
 
     let tick_gen = StreamTickGenerator::from_loader(symbol_clone.clone(), klines.into_iter());
 
