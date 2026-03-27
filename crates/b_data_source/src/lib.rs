@@ -46,6 +46,18 @@ pub use api::DataFeeder;
 
 // Re-exports - Mock 组件
 pub use ws::mock_ws::{StreamTickGenerator, SimulatedTick};
+// 握手模式相关
+pub use ws::mock_ws::{
+    create_handshake_channel,
+    create_stream_channel,
+    TickHandshakeChannel,
+    TickSender,
+    TickReceiver,
+    HandshakeGenerator,
+    engine_loop,
+    TickSendError,
+    TickTrySendError,
+};
 pub use api::mock_api::{MockApiGateway, MockConfig, Account, Side};
 
 // Re-exports - SymbolRules (交易对规则服务)
