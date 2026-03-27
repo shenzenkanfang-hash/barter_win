@@ -217,7 +217,7 @@ Modules:
     - strategy_executor_test.rs
 
 
-2.9 h_sandbox - Sandbox Layer
+2.9 mock 组件 - Sandbox Layer
 --------------------------------------------------------------------------------
 Purpose: Experimental code, testing new features
 
@@ -317,7 +317,7 @@ crates/
   e_risk_monitor/ - Risk layer (risk control, position)
   f_engine/      - Engine layer (core execution)
   g_test/        - Test layer (integration tests)
-  h_sandbox/     - Sandbox (experimental)
+  mock 组件/     - Sandbox (experimental)
 
 f_engine/src/
   core/          - Engine core (engine_v2, state, triggers, execution)

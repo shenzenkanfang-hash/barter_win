@@ -115,7 +115,7 @@ impl TradingLoop {
 ## 阶段二：数据注入层改造
 
 ### 文件
-`crates/h_sandbox/src/historical_replay/`
+`crates/mock 组件/src/historical_replay/`
 
 ### 改动
 1. 移除所有 `tokio::time::sleep`

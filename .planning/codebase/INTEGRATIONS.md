@@ -112,11 +112,11 @@ Parquet Integration (Sandbox Only)
 
 Purpose: Historical market data replay for backtesting
 
-Location: crates/h_sandbox/Cargo.toml (parquet 56)
+Location: crates/mock 组件/Cargo.toml (parquet 56)
 
 Features: snap compression, default-features disabled
 
-Usage: crates/h_sandbox/src/backtest/loader.rs
+Usage: crates/mock 组件/src/backtest/loader.rs
   - Load historical tick/kline data from Parquet files
   - Replay market conditions for strategy testing
 

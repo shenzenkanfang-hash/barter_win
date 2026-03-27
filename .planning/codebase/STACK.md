@@ -9,7 +9,7 @@ Language
 Runtime & Concurrency
 --------------------------------------------------------------------------------
 - Tokio 1.x - Async runtime with full features
-  - Used in: a_common, b_data_source, c_data_process, d_checktable, e_risk_monitor, f_engine, g_test, h_sandbox
+  - Used in: a_common, b_data_source, c_data_process, d_checktable, e_risk_monitor, f_engine, g_test, mock 组件
 
 Numeric Computing
 --------------------------------------------------------------------------------
@@ -55,7 +55,7 @@ Database
 Data Formats
 --------------------------------------------------------------------------------
 - csv 1.1 - CSV parsing/writing
-- parquet 56 - Apache Parquet format (h_sandbox only, default-features: false, snap compression)
+- parquet 56 - Apache Parquet format (mock 组件 only, default-features: false, snap compression)
 
 CLI & Configuration
 --------------------------------------------------------------------------------
@@ -160,7 +160,7 @@ trading-system (root)
 │   ├── e_risk_monitor
 │   └── f_engine
 │
-└── h_sandbox
+└── mock 组件
     ├── a_common
     ├── b_data_source
     ├── c_data_process

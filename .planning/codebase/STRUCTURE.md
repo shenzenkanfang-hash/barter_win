@@ -27,7 +27,7 @@ D:\Rust项目\barter-rs-main\
   |     e_risk_monitor/       : Risk compliance layer
   |     f_engine/             : Engine runtime layer
   |     g_test/              : Test layer
-  |     +-- h_sandbox/        : Sandbox layer
+  |     +-- mock 组件/        : Sandbox layer
   |
   +-- .planning/              : Project planning
   |     +-- codebase/         : This directory
@@ -417,14 +417,14 @@ g_test/
   +-- Cargo.toml
 
 
-2.9 h_sandbox/ - Sandbox Layer
+2.9 mock 组件/ - Sandbox Layer
 --------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\h_sandbox\
+Path: D:\Rust项目\barter-rs-main\crates\mock 组件\
 
 Purpose: Experimental code, testing new features
 
 Structure:
-h_sandbox/
+mock 组件/
   +-- src/
   |     +-- lib.rs                 : 26 lines
   |     |
@@ -452,7 +452,7 @@ h_sandbox/
   - e_risk_monitor : Risk layer
   - f_engine      : Engine layer
   - g_test        : Test layer
-  - h_sandbox     : Sandbox layer
+  - mock 组件     : Sandbox layer
 
 3.2 Module Naming
 --------------------------------------------------------------------------------
@@ -515,7 +515,7 @@ Key Files:
   - f_engine/src/core/mod.rs     : 55 lines
   - f_engine/src/interfaces/mod.rs: 26 lines
   - g_test/src/lib.rs            : 13 lines
-  - h_sandbox/src/lib.rs         : 26 lines
+  - mock 组件/src/lib.rs         : 26 lines
 
 Total Rust files in crates/: 200+ files
 

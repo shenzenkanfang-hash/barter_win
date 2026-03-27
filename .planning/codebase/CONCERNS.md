@@ -75,10 +75,10 @@
 --------------------------------------------------------------------------------
     c_data_process/src/processor.rs:619  #[allow(unused_imports)]
 
-1.3 测试文件中的死代码 (h_sandbox 模块)
+1.3 测试文件中的死代码 (mock 组件 模块)
 --------------------------------------------------------------------------------
-    h_sandbox/src/backtest/mod.rs:7    // mod loader; TODO: parquet API 兼容性问题
-    h_sandbox/examples/full_loop_test.rs:78  // TODO: 从 parquet 加载
+    mock 组件/src/backtest/mod.rs:7    // mod loader; TODO: parquet API 兼容性问题
+    mock 组件/examples/full_loop_test.rs:78  // TODO: 从 parquet 加载
 
 ================================================================================
 二、性能关注点 (Performance Concerns)
@@ -108,14 +108,14 @@ parking_lot::RwLock 使用场景 (25处):
     f_engine/src/order/mock_binance_gateway.rs
     f_engine/src/core/monitoring.rs          - Monitoring
     d_checktable/src/check_table.rs          - CheckTable
-    h_sandbox/src/tick_generator/driver.rs
+    mock 组件/src/tick_generator/driver.rs
     e_risk_monitor/src/shared/account_pool.rs
     e_risk_monitor/src/position/position_manager.rs
-    h_sandbox/src/gateway/interceptor.rs
-    h_sandbox/src/historical_replay/memory_injector.rs
+    mock 组件/src/gateway/interceptor.rs
+    mock 组件/src/historical_replay/memory_injector.rs
     e_risk_monitor/src/risk/common/order_check.rs
-    h_sandbox/src/historical_replay/replay_controller.rs
-    h_sandbox/src/perf_test/tracker.rs
+    mock 组件/src/historical_replay/replay_controller.rs
+    mock 组件/src/perf_test/tracker.rs
 
 tokio::sync::Mutex 使用场景 (仅1处):
     b_data_source/src/recovery.rs:17,39,52 - Redis 连接管理
@@ -187,11 +187,11 @@ tokio::sync::Mutex 使用场景 (仅1处):
 
 3.2 TODO 标记
 --------------------------------------------------------------------------------
-    h_sandbox/src/backtest/mod.rs:7
+    mock 组件/src/backtest/mod.rs:7
         // mod loader; TODO: parquet API 兼容性问题待修复
     问题: parquet 数据加载功能因 API 兼容性问题被禁用
 
-    h_sandbox/examples/full_loop_test.rs:78
+    mock 组件/examples/full_loop_test.rs:78
         // TODO: 从 parquet 加载（parquet 0.17+ 支持后再实现）
     问题: parquet 数据回放功能未完成
 
@@ -255,7 +255,7 @@ tokio::sync::Mutex 使用场景 (仅1处):
 
 4.6 数据回放功能不完整
 --------------------------------------------------------------------------------
-    h_sandbox/src/backtest/
+    mock 组件/src/backtest/
     问题: parquet 回放功能被注释掉，数据回放只能依赖 JSON 格式
 
 ================================================================================
