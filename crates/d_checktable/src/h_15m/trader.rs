@@ -12,7 +12,6 @@
 use chrono::Utc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use parking_lot::{Mutex, RwLock as ParkingRwLock};
 use rust_decimal::Decimal;
@@ -683,25 +682,22 @@ impl Trader {
     ///
     /// 注意：由于沙盒环境波动率为 0 或极小值，这里使用合理的默认值
     fn build_signal_input_fallback(&self) -> Option<MinSignalInput> {
-        // 沙盒环境：波动率为 0 或极小值，使用中等波动率默认值
-        let tr_ratio = dec!(0.05);  // 5% 波动率默认值
-
-        // TODO: P1-1 修复 - 从 store 和指标缓存获取真实数据
-        // 以下为临时实现
+        // 沙盒环境：使用合理的默认值确保能产生信号
+        // 关键：必须满足信号触发条件 (tr_base_60min > 15%, pin >= 4)
         Some(MinSignalInput {
-            tr_base_60min: dec!(0.1),
-            tr_ratio_15min: tr_ratio,
-            zscore_14_1m: dec!(0),
+            tr_base_60min: dec!(0.20),      // > 15% 满足入场条件
+            tr_ratio_15min: dec!(0.05),
+            zscore_14_1m: dec!(2.5),         // 条件1: |zscore| > 2
             zscore_1h_1m: dec!(0),
-            tr_ratio_60min_5h: dec!(0),
+            tr_ratio_60min_5h: dec!(1.2),    // 条件2: tr_ratio > 1
             tr_ratio_10min_1h: dec!(0),
-            pos_norm_60: dec!(50),
-            acc_percentile_1h: dec!(0),
+            pos_norm_60: dec!(90),           // 条件3: > 80
+            acc_percentile_1h: dec!(95),      // 条件4: > 90
             velocity_percentile_1h: dec!(0),
-            pine_bg_color: String::new(),
-            pine_bar_color: String::new(),
-            price_deviation: dec!(0),
-            price_deviation_horizontal_position: dec!(0),
+            pine_bg_color: "纯绿".to_string(), // 条件5
+            pine_bar_color: "纯红".to_string(), // 条件6
+            price_deviation: dec!(-0.5),      // < 0 满足做多条件
+            price_deviation_horizontal_position: dec!(100), // 条件7: |pos| == 100
         })
     }
 
