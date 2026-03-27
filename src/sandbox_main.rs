@@ -23,6 +23,7 @@ use tokio::time::sleep;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
 use dashmap::DashMap;
 
+use a_common::volatility::{VolatilityCalc, VolatilityStats, KLineInput};
 use b_data_source::{DataFeeder, KLine, Period, Tick};
 use h_sandbox::{
     ShadowBinanceGateway, ShadowRiskChecker,
@@ -50,8 +51,8 @@ impl Default for SandboxConfig {
             symbol: DEFAULT_SYMBOL.to_string(),
             initial_fund: dec!(10000),
             duration_secs: DEFAULT_DURATION,
-            start_date: "2025-10-09".to_string(),
-            end_date: "2025-10-11".to_string(),
+            start_date: "2025-10-10".to_string(),
+            end_date: "2025-10-12".to_string(),
         }
     }
 }
@@ -259,6 +260,19 @@ struct Indicators {
     ema20: Option<Decimal>,
     volatility: Decimal,
     price_history: Vec<Decimal>,
+    /// 15m 波动率计算器
+    volatility_calc: VolatilityCalc,
+    /// 15m 波动率
+    vol_15m: Decimal,
+}
+
+impl Indicators {
+    fn with_volatility_calc() -> Self {
+        Self {
+            volatility_calc: VolatilityCalc::new(),
+            ..Default::default()
+        }
+    }
 }
 
 struct IndicatorCache {
@@ -279,7 +293,7 @@ impl IndicatorCache {
 
         // DashMap 直接操作，无需锁
         let mut indicators = self.cache.entry(symbol.clone())
-            .or_insert_with(Indicators::default);
+            .or_insert_with(Indicators::with_volatility_calc);
 
         // 添加到价格历史
         indicators.price_history.push(price);
@@ -326,6 +340,19 @@ impl IndicatorCache {
         if indicators.price_history.len() >= 20 {
             indicators.ema20 = Some(Self::calc_ema(&indicators.price_history, 20));
         }
+
+        // 15m 波动率计算（使用 Tick 中的 1m K线）
+        if let Some(ref kline) = tick.kline_1m {
+            let kline_input = KLineInput {
+                open: kline.open,
+                high: kline.high,
+                low: kline.low,
+                close: kline.close,
+                timestamp: chrono::Utc::now(),
+            };
+            let stats = indicators.volatility_calc.update(kline_input);
+            indicators.vol_15m = stats.vol_15m;
+        }
     }
     
     /// 计算 EMA
@@ -351,7 +378,7 @@ impl IndicatorCache {
 
     fn get_volatility(&self, symbol: &str) -> Decimal {
         self.cache.get(symbol)
-            .map(|r| r.volatility)
+            .map(|r| r.vol_15m)  // 使用 15m 波动率
             .unwrap_or(Decimal::ZERO)
     }
 }
@@ -453,7 +480,7 @@ impl TradingLoop {
     /// 波动率事件触发检查
     async fn check_volatility(&self, tick: &Tick) {
         let volatility = self.indicator_cache.get_volatility(&tick.symbol);
-        let threshold = dec!(0.02);
+        let threshold = dec!(0.02);  // 2% 波动率阈值
 
         if volatility > threshold && !self.engine.has_task(&tick.symbol).await {
             // 检查互斥锁
@@ -891,16 +918,6 @@ fn parse_args() -> SandboxConfig {
                     }
                 }
             }
-            "--start" => {
-                if i + 1 < args.len() {
-                    config.start_date = args[i + 1].clone();
-                }
-            }
-            "--end" => {
-                if i + 1 < args.len() {
-                    config.end_date = args[i + 1].clone();
-                }
-            }
             _ => {}
         }
     }
@@ -914,18 +931,18 @@ async fn fetch_klines_from_api(
     start_date: &str,
     end_date: &str,
 ) -> Result<Vec<KLine>, Box<dyn std::error::Error>> {
-    // 解析日期
+    // 解析日期（直接作为UTC时间）
     let start_dt = chrono::NaiveDateTime::parse_from_str(
         &format!("{} 00:00:00", start_date), "%Y-%m-%d %H:%M:%S"
     )?;
     let end_dt = chrono::NaiveDateTime::parse_from_str(
-        &format!("{} 00:00:00", end_date), "%Y-%m-%d %H:%M:%S"
+        &format!("{} 23:59:59", end_date), "%Y-%m-%d %H:%M:%S"
     )?;
 
-    let start_ms = chrono::Utc.from_utc_datetime(&start_dt).timestamp_millis();
-    let end_ms = chrono::Utc.from_utc_datetime(&end_dt).timestamp_millis();
+    let start_ms = start_dt.and_utc().timestamp_millis();
+    let end_ms = end_dt.and_utc().timestamp_millis();
 
-    tracing::info!("从API拉取 {} {} -> {}", symbol, start_date, end_date);
+    tracing::info!("从API拉取 {} {} -> {} (UTC)", symbol, start_date, end_date);
 
     // 分页拉取
     let mut all_raw_klines: Vec<Vec<serde_json::Value>> = Vec::new();

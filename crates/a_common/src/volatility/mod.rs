@@ -43,6 +43,7 @@ impl Default for VolatilityStats {
 }
 
 /// 波动率计算器
+#[derive(Debug, Clone)]
 pub struct VolatilityCalc {
     /// 15m K线窗口 (保留最近2根)
     kline_15m_window: Vec<KLineInput>,
