@@ -184,16 +184,26 @@ impl OrderCheck {
 
     /// 确认预占 (订单成交后调用) (写锁)
     ///
-    /// 将预占转为实际占用，从冻结金额中扣除。
+    /// 将预占转为 confirmed 状态，从冻结金额中扣除。
+    /// 添加状态转换记录，便于审计追溯。
     pub fn confirm_reservation(&self, order_id: &str) -> Result<Decimal, String> {
         let frozen_amount = {
             let mut reservations = self.reservations.write();
-            let reservation = reservations.remove(order_id)
+            let reservation = reservations.get_mut(order_id)
                 .ok_or_else(|| format!("订单 {} 没有预占记录", order_id))?;
 
             if reservation.status != "pending" {
-                return Err(format!("订单 {} 状态不是 pending", order_id));
+                return Err(format!("订单 {} 状态不是 pending，当前状态: {}", order_id, reservation.status));
             }
+
+            // 状态转换: pending -> confirmed
+            let prev_status = reservation.status.clone();
+            reservation.status = "confirmed".to_string();
+
+            tracing::info!(
+                "[OrderCheck] 预占确认: order_id={}, {} -> confirmed, frozen={}",
+                order_id, prev_status, reservation.frozen_amount
+            );
 
             reservation.frozen_amount
         };
@@ -204,16 +214,26 @@ impl OrderCheck {
 
     /// 取消预占 (订单失败/撤销后调用) (写锁)
     ///
-    /// 释放冻结的保证金。
+    /// 将预占转为 cancelled 状态，释放冻结的保证金。
+    /// 添加状态转换记录，便于审计追溯。
     pub fn cancel_reservation(&self, order_id: &str) -> Result<Decimal, String> {
         let frozen_amount = {
             let mut reservations = self.reservations.write();
-            let reservation = reservations.remove(order_id)
+            let reservation = reservations.get_mut(order_id)
                 .ok_or_else(|| format!("订单 {} 没有预占记录", order_id))?;
 
             if reservation.status != "pending" {
-                return Err(format!("订单 {} 状态不是 pending", order_id));
+                return Err(format!("订单 {} 状态不是 pending，当前状态: {}", order_id, reservation.status));
             }
+
+            // 状态转换: pending -> cancelled
+            let prev_status = reservation.status.clone();
+            reservation.status = "cancelled".to_string();
+
+            tracing::info!(
+                "[OrderCheck] 预占取消: order_id={}, {} -> cancelled, frozen={}",
+                order_id, prev_status, reservation.frozen_amount
+            );
 
             reservation.frozen_amount
         };

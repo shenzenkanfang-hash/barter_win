@@ -20,6 +20,9 @@ pub struct BinanceWsConnector {
             Message,
         >,
     >,
+    /// 保存已订阅的 streams，用于重连后重新订阅
+    #[allow(dead_code)]
+    subscribed_streams: Vec<String>,
 }
 
 /// Binance Trade WebSocket 消息格式 (原始消息)
@@ -126,6 +129,7 @@ impl BinanceWsConnector {
             url,
             symbol: symbol.to_string(),
             ws_stream: None,
+            subscribed_streams: Vec::new(),
         }
     }
 
@@ -137,6 +141,7 @@ impl BinanceWsConnector {
             url: url.to_string(),
             symbol: streams.join(","), // 用于标识
             ws_stream: None,
+            subscribed_streams: streams,
         }
     }
 
@@ -174,6 +179,9 @@ impl BinanceWsConnector {
             .await
             .map_err(|e| MarketError::WebSocketError(e.to_string()))?;
 
+        // 保存 streams 用于重连后重新订阅
+        self.subscribed_streams = streams.to_vec();
+
         Ok(())
     }
 
@@ -202,6 +210,7 @@ impl BinanceWsConnector {
     ///
     /// 重连策略: 5s → 10s → 20s → ... → 120s (最大)
     /// 最多重试 MAX_RECONNECT_ATTEMPTS 次，超过后返回错误
+    /// 重连成功后会自动重新订阅之前的 streams
     pub async fn reconnect_with_backoff(&mut self) -> Result<(), MarketError> {
         const MAX_RECONNECT_ATTEMPTS: u32 = 10;
         let mut backoff = Duration::from_secs(5);
@@ -215,6 +224,16 @@ impl BinanceWsConnector {
             match self.connect().await {
                 Ok(_) => {
                     tracing::info!("WebSocket 重连成功");
+
+                    // 重连后重新订阅之前的 streams
+                    // 注意: 需要先克隆，避免同时可变借用 self 和不可变借用 subscribed_streams
+                    let streams = self.subscribed_streams.clone();
+                    if !streams.is_empty() {
+                        tracing::info!("重新订阅 {} 个 streams...", streams.len());
+                        self.subscribe(&streams).await?;
+                        tracing::info!("重新订阅完成");
+                    }
+
                     return Ok(());
                 }
                 Err(e) => {

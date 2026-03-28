@@ -18,6 +18,7 @@ use a_common::backup::MemoryBackup;
 use crate::persistence::sqlite_persistence::SqliteRecordService;
 use b_data_source::api::SymbolRulesFetcher;
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -342,16 +343,161 @@ impl DisasterRecovery {
 
     /// 从 API 拉取并验证账户
     ///
-    /// 如果配置了 symbol_fetcher，从 API 拉取最新账户信息进行核对
+    /// 如果配置了 symbol_fetcher(BinanceApiGateway)，从 API 拉取最新账户信息与本地数据核对。
+    /// 核对逻辑:
+    /// 1. 从 Binance 获取账户余额和持仓数据
+    /// 2. 与 SQLite 中的本地数据进行对比
+    /// 3. 如果发现差异(余额偏差>1%, 持仓数量不一致)，设置 needs_sync
+    ///
+    /// 这样可以确保系统重启后使用的是交易所最新数据，而不是可能过时的本地数据。
     pub async fn verify_with_api(&self) -> Result<VerificationResult, EngineError> {
-        warn!("API 验证功能需要配置 symbol_fetcher，当前未配置，跳过 API 验证");
+        // 如果没有配置 API 网关，返回未验证状态
+        let Some(gateway) = &self.symbol_fetcher else {
+            warn!("API 验证功能未配置 BinanceApiGateway，跳过 API 验证");
+            return Ok(VerificationResult {
+                api_account: None,
+                api_positions: Vec::new(),
+                local_positions: Vec::new(),
+                local_orders: Vec::new(),
+                needs_sync: false,
+                sync_reason: "API fetcher not configured".to_string(),
+            });
+        };
+
+        info!("开始 API 账户核对...");
+
+        // 步骤1: 从 Binance API 获取账户数据
+        let api_account_data = gateway.fetch_futures_account().await
+            .map_err(|e| {
+                warn!("获取账户信息失败: {}", e);
+                EngineError::Other(format!("API 账户获取失败: {}", e))
+            })?;
+
+        // 步骤2: 从 Binance API 获取持仓数据
+        let api_positions_data = gateway.fetch_futures_positions().await
+            .map_err(|e| {
+                warn!("获取持仓信息失败: {}", e);
+                EngineError::Other(format!("API 持仓获取失败: {}", e))
+            })?;
+
+        // 步骤3: 从 SQLite 加载本地数据
+        let local_data = self.recover_from_sqlite()?;
+        let local_positions = local_data.positions;
+        let local_orders = local_data.orders;
+
+        // 步骤4: 构建 API 快照用于对比
+        let api_equity: Decimal = api_account_data.total_margin_balance
+            .parse()
+            .unwrap_or_default();
+        let api_available: Decimal = api_account_data.available_balance
+            .parse()
+            .unwrap_or_default();
+        let api_unrealized_pnl: Decimal = api_account_data.total_unrealized_profit
+            .parse()
+            .unwrap_or_default();
+
+        let api_account_snapshot = AccountSnapshot {
+            account_id: "futures_account".to_string(),
+            total_equity: api_equity,
+            available: api_available,
+            frozen_margin: api_equity - api_available,
+            unrealized_pnl: api_unrealized_pnl,
+            margin_ratio: if !api_equity.is_zero() {
+                api_unrealized_pnl / api_equity
+            } else {
+                Decimal::ZERO
+            },
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        // 构建 API 持仓快照
+        let api_positions_snapshot: Vec<ApiPositionSnapshot> = api_positions_data
+            .iter()
+            .filter(|p| !p.position_amt.is_empty() && p.position_amt != "0")
+            .map(|p| {
+                let qty: Decimal = p.position_amt.parse().unwrap_or_default();
+                let entry_price: Decimal = p.entry_price.parse().unwrap_or_default();
+                ApiPositionSnapshot {
+                    symbol: p.symbol.clone(),
+                    side: p.position_side.clone(),
+                    qty,
+                    avg_price: entry_price,
+                    unrealized_pnl: p.unrealized_profit.parse().unwrap_or_default(),
+                    margin_used: qty * entry_price,
+                }
+            })
+            .collect();
+
+        // 步骤5: 对比检测差异
+        let mut needs_sync = false;
+        let mut sync_reasons: Vec<String> = Vec::new();
+
+        // 5a. 检查 API 持仓数量与本地是否一致
+        let api_position_symbols: std::collections::HashSet<_> = api_positions_snapshot
+            .iter()
+            .map(|p| p.symbol.clone())
+            .collect();
+
+        let local_position_symbols: std::collections::HashSet<_> = local_positions
+            .iter()
+            .filter(|p| p.long_qty > Decimal::ZERO || p.short_qty > Decimal::ZERO)
+            .map(|p| p.symbol.clone())
+            .collect();
+
+        if api_position_symbols != local_position_symbols {
+            let missing_in_local: Vec<_> = api_position_symbols
+                .difference(&local_position_symbols)
+                .collect();
+            let extra_in_local: Vec<_> = local_position_symbols
+                .difference(&api_position_symbols)
+                .collect();
+
+            if !missing_in_local.is_empty() {
+                sync_reasons.push(format!("API有但本地无持仓: {:?}", missing_in_local));
+            }
+            if !extra_in_local.is_empty() {
+                sync_reasons.push(format!("本地有但API无持仓: {:?}", extra_in_local));
+            }
+            needs_sync = true;
+        }
+
+        // 5b. 检查各持仓数量差异
+        for api_pos in &api_positions_snapshot {
+            if let Some(local_pos) = local_positions.iter().find(|p| p.symbol == api_pos.symbol) {
+                let local_total_qty = local_pos.long_qty + local_pos.short_qty;
+                let diff = (api_pos.qty - local_total_qty).abs();
+
+                // 持仓差异超过 0.001 BTC 等值则需要同步
+                let tolerance = dec!(0.001);
+                if diff > tolerance {
+                    sync_reasons.push(format!(
+                        "持仓 {} 数量差异大: API={}, 本地={}, 差异={}",
+                        api_pos.symbol, api_pos.qty, local_total_qty, diff
+                    ));
+                    needs_sync = true;
+                }
+            }
+        }
+
+        let sync_reason = if needs_sync {
+            sync_reasons.join("; ")
+        } else {
+            "API 数据与本地数据一致".to_string()
+        };
+
+        if needs_sync {
+            warn!("[灾备] 检测到账户差异，需要同步: {}", sync_reason);
+        } else {
+            info!("[灾备] API 核对通过: {}", sync_reason);
+        }
+
         Ok(VerificationResult {
-            api_account: None,
-            api_positions: Vec::new(),
-            local_positions: Vec::new(),
-            local_orders: Vec::new(),
-            needs_sync: false,
-            sync_reason: "API fetcher not configured".to_string(),
+            api_account: Some(api_account_snapshot),
+            api_positions: api_positions_snapshot,
+            local_positions,
+            local_orders,
+            needs_sync,
+            sync_reason,
         })
     }
 

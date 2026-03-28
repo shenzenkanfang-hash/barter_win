@@ -305,12 +305,39 @@ impl Account {
     }
 
     /// 强平检测
+    ///
+    /// 正确的永续合约强平公式:
+    /// 维持保证金率 = frozen_margin / position_value
+    /// 当 margin_ratio <= maintenance_margin_rate 时触发强平
+    ///
+    /// 推导:
+    ///   position_value = qty * mark_price
+    ///   position_margin = frozen_margin (已包含杠杆)
+    ///   leverage = position_value / position_margin
+    ///   强平条件: leverage >= 1/maintenance_margin_rate
+    ///           => frozen_margin / position_value <= maintenance_margin_rate
+    ///
+    /// 与交易所实际行为一致: 亏损超过 (1 - maintenance_margin_rate*leverage) 时强平
     pub fn check_liquidation(&self) -> bool {
         if self.frozen_margin.is_zero() {
             return false;
         }
-        let margin_ratio = self.frozen_margin / self.total_equity();
-        margin_ratio >= self.config.maintenance_margin_rate
+
+        // 计算总持仓价值（所有品种的标记价值）
+        let total_position_value: Decimal = self.positions.values()
+            .map(|p| {
+                let price = self.get_price(&p.symbol);
+                (p.long_qty + p.short_qty) * price
+            })
+            .sum();
+
+        if total_position_value.is_zero() {
+            return false;
+        }
+
+        // 正确公式: frozen_margin / position_value <= maintenance_margin_rate
+        let margin_ratio = self.frozen_margin / total_position_value;
+        margin_ratio <= self.config.maintenance_margin_rate
     }
 
     /// 转换为 ExchangeAccount
