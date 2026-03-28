@@ -15,7 +15,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal_macros::dec;
 
-use b_data_source::models::types::{KLine, Period};
+use crate::models::types::KLine;
 use super::noise::GaussianNoise;
 
 /// 配置参数

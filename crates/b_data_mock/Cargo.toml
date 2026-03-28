@@ -16,12 +16,11 @@ fnv = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
+async-trait = { workspace = true }
+futures-util = "0.3"
 
-# 依赖 a_common 获取基础类型
+# 依赖 a_common 获取基础类型和错误
 a_common = { path = "../a_common" }
-
-# 依赖 b_data_source 获取 KLine/Period 等类型
-b_data_source = { path = "../b_data_source" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

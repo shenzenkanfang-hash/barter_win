@@ -301,4 +301,11 @@ impl Account {
             margin_used: p.total_margin(),
         })
     }
+
+    /// 获取所有持仓（用于数据同步）
+    pub fn get_all_positions(&self) -> Vec<(String, Position)> {
+        self.positions.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
 }

@@ -7,7 +7,7 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use a_common::exchange::{ExchangeAccount, ExchangePosition, OrderResult, RejectReason};
+use a_common::exchange::{ExchangeAccount, ExchangePosition, OrderResult};
 use a_common::EngineError;
 use a_common::models::types::Side;
 
