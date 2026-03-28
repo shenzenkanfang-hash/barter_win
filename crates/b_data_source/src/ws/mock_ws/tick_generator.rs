@@ -22,7 +22,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal_macros::dec;
 
-use crate::models::types::KLine;
+use crate::models::types::{KLine, Period};
 use super::noise::GaussianNoise;
 
 /// 配置参数
@@ -351,23 +351,25 @@ mod tests {
         vec![
             KLine {
                 symbol: "BTCUSDT".to_string(),
-                period: b_data_source::Period::Minute(1),
+                period: Period::Minute(1),
                 open: dec!(50000),
                 high: dec!(50100),
                 low: dec!(49900),
                 close: dec!(50050),
                 volume: dec!(100),
                 timestamp: Utc::now(),
+                is_closed: false,
             },
             KLine {
                 symbol: "BTCUSDT".to_string(),
-                period: b_data_source::Period::Minute(1),
+                period: Period::Minute(1),
                 open: dec!(50050),
                 high: dec!(50200),
                 low: dec!(50000),
                 close: dec!(50150),
                 volume: dec!(120),
                 timestamp: Utc::now() + Duration::minutes(1),
+                is_closed: false,
             },
         ]
     }

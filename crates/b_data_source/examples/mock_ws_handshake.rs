@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 use std::io::Write;
+use parking_lot::Mutex;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::time::Instant;
@@ -123,19 +124,30 @@ enum Signal {
 async fn process_tick(
     tick: &SimulatedTick,
     gateway: &Arc<MockApiGateway>,
-    strategy: &mut SimpleStrategy,
-    stats: &mut Stats,
+    strategy: &Arc<Mutex<SimpleStrategy>>,
+    stats: &Arc<Mutex<Stats>>,
 ) {
-    stats.tick_count += 1;
+    {
+        let mut s = stats.lock();
+        s.tick_count += 1;
+    }
 
     // 更新网关价格
     gateway.update_price(&tick.symbol, tick.price);
 
     // 策略判断
-    if let Some(signal) = strategy.update(tick.price, tick.is_last_in_kline) {
-        match signal {
+    let signal = {
+        let mut strat = strategy.lock();
+        strat.update(tick.price, tick.is_last_in_kline)
+    };
+
+    if let Some(sig) = signal {
+        match sig {
             Signal::Buy => {
-                stats.buy_signals += 1;
+                {
+                    let mut s = stats.lock();
+                    s.buy_signals += 1;
+                }
                 let _ = gateway.place_order(EngineOrderRequest {
                     symbol: tick.symbol.clone(),
                     side: Side::Buy,
@@ -144,7 +156,10 @@ async fn process_tick(
                 });
             }
             Signal::Sell => {
-                stats.sell_signals += 1;
+                {
+                    let mut s = stats.lock();
+                    s.sell_signals += 1;
+                }
                 let _ = gateway.place_order(EngineOrderRequest {
                     symbol: tick.symbol.clone(),
                     side: Side::Sell,
@@ -157,7 +172,8 @@ async fn process_tick(
 
     // K 线闭合时更新统计
     if tick.is_last_in_kline {
-        stats.kline_count += 1;
+        let mut s = stats.lock();
+        s.kline_count += 1;
     }
 }
 
@@ -175,6 +191,14 @@ struct Stats {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 使用 LocalSet 让 spawn_local 能工作
+    let result = tokio::task::LocalSet::new()
+        .run_until(async_main())
+        .await;
+    result
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // 解析命令行参数
     let args: Vec<String> = std::env::args().collect();
     let csv_path = args.get(1).cloned().unwrap_or_else(|| "data/btcusdt_1m.csv".to_string());
@@ -201,7 +225,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("初始余额: 10000 USDT");
 
     // 创建策略
-    let mut strategy = SimpleStrategy::new();
+    let strategy = Arc::new(Mutex::new(SimpleStrategy::new()));
+
+    // 创建统计（engine 更新，主循环读取）
+    let stats = Arc::new(Mutex::new(Stats::default()));
 
     // =========================================================================
     // 2. 创建握手通道
@@ -216,59 +243,84 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 创建握手生成器
     let mut handshake_gen = HandshakeGenerator::new(generator, sender);
-    let tick_receiver = receiver;
 
     // =========================================================================
     // 3. 握手回测循环
     // =========================================================================
 
-    let mut stats = Stats::default();
     let start_time = Instant::now();
-
     println!("\n开始回测（握手模式）...");
 
+    // =========================================================================
+    // 3. 回测循环（Generator 推送 + Engine 处理）
+    // =========================================================================
+    //
+    // Generator: 推送 tick 并等 done（通过 spawn_local 在单线程执行）
+    // Engine: 从 channel 收 tick 并处理
+    //
+    // 使用 tokio::task::spawn_local 确保 engine 在主线程运行，
+    // 从而保证 yield_now() 能让出给 engine
+
+    let gateway2 = gateway.clone();
+    let strategy2 = strategy.clone();
+    let stats2 = stats.clone();
+
+    // 使用 spawn_local：engine 在主线程运行，yield_now 能切换给它
+    let engine_handle = tokio::task::spawn_local(async move {
+        let mut engine_receiver = receiver;
+        while let Some(tick) = engine_receiver.recv_and_ack().await {
+            // Engine：用 tick 处理
+            process_tick(&tick, &gateway2, &strategy2, &stats2).await;
+            // 发 ack 唤醒 generator
+            engine_receiver.ack().await.ok();
+        }
+    });
+
+    // Generator 循环：推送 tick，yield 让 engine 执行
     loop {
-        // 生成器：等待上一个完成，获取下一个 Tick
-        let tick = match handshake_gen.next().await {
+        let _tick = match handshake_gen.next().await {
             Some(t) => t,
-            None => break, // 数据耗尽
+            None => break,
         };
 
-        // 引擎：处理 Tick
-        process_tick(&tick, &gateway, &mut strategy, &mut stats).await;
-
-        // 引擎：发送完成信号
-        tick_receiver.try_ack();
-
         // 进度打印（每 100 根 Tick）
-        if stats.tick_count % 100 == 0 {
+        let s = stats.lock();
+        if s.tick_count % 100 == 0 {
+            drop(s);
             let elapsed = start_time.elapsed();
+            let s = stats.lock();
             let rate = if elapsed.as_secs() > 0 {
-                stats.tick_count as f64 / elapsed.as_secs_f64()
+                s.tick_count as f64 / elapsed.as_secs_f64()
             } else {
                 0.0
             };
-
             println!(
                 "[进度] K线: {}/{} | Ticks: {} | 速度: {:.0}/s | 买单: {} | 卖单: {}",
-                stats.kline_count,
+                s.kline_count,
                 total_klines,
-                stats.tick_count,
+                s.tick_count,
                 rate,
-                stats.buy_signals,
-                stats.sell_signals,
+                s.buy_signals,
+                s.sell_signals,
             );
-            // 强制刷新输出
             print!("\r");
             std::io::stdout().flush().ok();
         }
     }
+
+    // Generator 结束，drop sender 让 engine 的 receiver 收到 None
+    drop(handshake_gen);
+
+    // 等待 engine 完成
+    engine_handle.await.ok();
 
     // =========================================================================
     // 4. 回测结果
     // =========================================================================
 
     let elapsed = start_time.elapsed();
+    let s = stats.lock();
+    let order_count = strategy.lock().get_order_count();
     let account = gateway.get_account()?;
     let positions = gateway.get_position("BTCUSDT")?;
 
@@ -276,11 +328,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("回测完成");
     println!("{}", "=".repeat(60));
     println!("总耗时: {:?}", elapsed);
-    println!("总 Ticks: {}", stats.tick_count);
-    println!("总 K 线: {}", stats.kline_count);
-    println!("买入信号: {}", stats.buy_signals);
-    println!("卖出信号: {}", stats.sell_signals);
-    println!("策略订单数: {}", strategy.get_order_count());
+    println!("总 Ticks: {}", s.tick_count);
+    println!("总 K 线: {}", s.kline_count);
+    println!("买入信号: {}", s.buy_signals);
+    println!("卖出信号: {}", s.sell_signals);
+    println!("策略订单数: {}", order_count);
     println!("{}", "-".repeat(60));
     println!("初始余额: 10000 USDT");
     println!("最终余额: {} USDT", account.available);

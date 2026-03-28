@@ -45,9 +45,9 @@ use tokio::sync::mpsc;
 #[derive(Debug)]
 pub struct TickHandshakeChannel {
     /// Tick 发送端（生成器用）
-    pub tick_tx: mpsc::Sender<SimulatedTick>,
+    pub tick_tx: mpsc::UnboundedSender<SimulatedTick>,
     /// Tick 接收端（引擎用）
-    pub tick_rx: mpsc::Receiver<SimulatedTick>,
+    pub tick_rx: mpsc::UnboundedReceiver<SimulatedTick>,
     /// 完成信号发送端（引擎用）
     pub done_tx: mpsc::Sender<()>,
     /// 完成信号接收端（生成器用）
@@ -57,14 +57,15 @@ pub struct TickHandshakeChannel {
 /// Tick 发送端（生成器侧）
 #[derive(Debug)]
 pub struct TickSender {
-    pub tick_tx: mpsc::Sender<SimulatedTick>,
+    /// unbounded sender 不会阻塞，可以 clone
+    pub tick_tx: mpsc::UnboundedSender<SimulatedTick>,
     pub done_rx: mpsc::Receiver<()>,
 }
 
 /// Tick 接收端（引擎侧）
 #[derive(Debug)]
 pub struct TickReceiver {
-    pub tick_rx: mpsc::Receiver<SimulatedTick>,
+    pub tick_rx: mpsc::UnboundedReceiver<SimulatedTick>,
     pub done_tx: mpsc::Sender<()>,
 }
 
@@ -74,16 +75,21 @@ pub use super::tick_generator::SimulatedTick;
 /// 创建握手通道
 ///
 /// # 参数
-/// - tick_buffer: Tick channel 缓冲区大小（建议 1，用于握手模式）
+/// - tick_buffer: Tick channel 缓冲区大小（握手模式填 1，忽略）
 /// - done_buffer: 完成信号 channel 缓冲区大小（建议 1）
+///
+/// Tick channel 使用 unbounded sender（可 clone，不阻塞），
+/// Done channel 使用 bounded sender（需要等待 engine 发信号）。
 ///
 /// # 返回
 /// - (Sender, Receiver)
 pub fn create_handshake_channel(
-    tick_buffer: usize,
+    _tick_buffer: usize,
     done_buffer: usize,
 ) -> (TickSender, TickReceiver) {
-    let (tick_tx, tick_rx) = mpsc::channel::<SimulatedTick>(tick_buffer);
+    // Tick channel: unbounded（不阻塞，可 clone）
+    let (tick_tx, tick_rx) = mpsc::unbounded_channel::<SimulatedTick>();
+    // Done channel: bounded（engine 发 ack，generator 收）
     let (done_tx, done_rx) = mpsc::channel::<()>(done_buffer);
 
     (
@@ -110,45 +116,14 @@ pub fn create_stream_channel<T>(buffer: usize) -> (mpsc::Sender<T>, mpsc::Receiv
 }
 
 impl TickSender {
-    /// 握手模式：等待完成信号，然后发送 Tick
-    ///
-    /// 调用这个方法会阻塞，直到收到 done 信号
-    pub async fn send_with_handshake(&mut self, tick: SimulatedTick) -> Result<(), TickSendError> {
-        // 1. 等待上一个 Tick 处理完成
-        self.done_rx.recv().await;
-
-        // 2. 发送新 Tick
-        self.tick_tx
-            .send(tick)
-            .await
-            .map_err(|_| TickSendError("channel closed".to_string()))?;
-
-        Ok(())
-    }
-
     /// 自由流模式：直接发送 Tick（不等待）
-    pub async fn send(&self, tick: SimulatedTick) -> Result<(), TickSendError> {
+    ///
+    /// UnboundedSender::send 不会阻塞
+    pub fn send(&self, tick: SimulatedTick) -> Result<(), TickSendError> {
         self.tick_tx
             .send(tick)
-            .await
             .map_err(|_| TickSendError("channel closed".to_string()))?;
         Ok(())
-    }
-
-    /// 尝试发送（非阻塞）
-    pub fn try_send(&self, tick: SimulatedTick) -> Result<(), TickTrySendError> {
-        self.tick_tx
-            .try_send(tick)
-            .map_err(|e| match e {
-                mpsc::error::TrySendError::Full(_) => TickTrySendError::Full,
-                mpsc::error::TrySendError::Closed(_) => TickTrySendError::Closed,
-            })?;
-        Ok(())
-    }
-
-    /// 检查 channel 是否还有容量
-    pub fn remaining_capacity(&self) -> usize {
-        self.tick_tx.capacity()
     }
 }
 
@@ -246,8 +221,10 @@ impl HandshakeGenerator {
     /// 流程：
     /// 1. 如果不是第一个 Tick，等待 done 信号
     /// 2. 生成下一个 Tick
-    /// 3. 发送 Tick
-    /// 4. 返回 Tick（用于后续处理）
+    /// 3. UnboundedSender::send() 不会阻塞（无界缓冲），直接推入 channel
+    /// 4. yield_now() 让出执行权给 engine task
+    /// 5. 等待 done 信号
+    /// 6. 返回 Tick
     pub async fn next(&mut self) -> Option<SimulatedTick> {
         // 1. 等待上一个处理完成（第一个 Tick 除外）
         if !self.first_tick {
@@ -258,10 +235,16 @@ impl HandshakeGenerator {
         // 2. 生成 Tick
         let tick = self.generator.next()?;
 
-        // 3. 发送 Tick
-        self.sender.tick_tx.send(tick.clone()).await.ok();
+        // 3. 发送 Tick（unbounded 不会阻塞，除非 receiver 关闭）
+        self.sender.send(tick.clone()).ok();
 
-        // 4. 返回 Tick
+        // 4. 强制让出执行权给 engine task（多线程 runtime 需要显式 yield）
+        tokio::task::yield_now().await;
+
+        // 5. 等待 engine 完成信号
+        self.sender.done_rx.recv().await;
+
+        // 6. 返回 Tick
         Some(tick)
     }
 
@@ -308,6 +291,7 @@ mod tests {
                 close: dec!(50200),
                 volume: dec!(100),
                 timestamp: Utc::now(),
+                is_closed: false,
             },
             KLine {
                 symbol: "BTCUSDT".to_string(),
@@ -318,10 +302,14 @@ mod tests {
                 close: dec!(50800),
                 volume: dec!(150),
                 timestamp: Utc::now(),
+                is_closed: false,
             },
         ]
     }
 
+    /// 测试握手通道的基本流程：
+    /// - Generator: next() 推送 tick 并等待 done
+    /// - Engine: 用 next() 返回的 tick 处理，发 ack
     #[tokio::test]
     async fn test_handshake_channel() {
         let (sender, receiver) = create_handshake_channel(1, 1);
@@ -331,26 +319,24 @@ mod tests {
         let generator = StreamTickGenerator::new("BTCUSDT".to_string(), Box::new(klines.into_iter()));
 
         let mut handshake_gen = HandshakeGenerator::new(generator, sender);
-        let mut engine_receiver = receiver;
+        let engine_receiver = receiver;
 
-        // 第一个 Tick - 不需要等待
+        // 第一个 Tick - 不需要等待 done
         let tick1 = handshake_gen.next().await.unwrap();
         assert_eq!(tick1.is_last_in_kline, false); // 第一个 K 线的第一个 tick
 
-        // 确认引擎收到
-        let received1 = engine_receiver.recv_and_ack().await.unwrap();
-        assert_eq!(received1.symbol, "BTCUSDT");
-
-        // 引擎发送完成信号
+        // 引擎：用 tick1 处理
+        assert_eq!(tick1.symbol, "BTCUSDT");
+        // 发 ack 唤醒 generator
         engine_receiver.ack().await.unwrap();
 
-        // 发送更多 tick 直到 K 线闭合
+        // 发送更多 tick 直到 K 线闭合（60 tick）
         for i in 1..60 {
             let tick = handshake_gen.next().await.unwrap();
             if i == 59 {
                 assert!(tick.is_last_in_kline, "第 60 个 tick 应该是 K 线最后一根");
             }
-            engine_receiver.recv_and_ack().await;
+            // 引擎：用 tick 处理完发 ack
             engine_receiver.ack().await.ok();
         }
 
@@ -359,28 +345,34 @@ mod tests {
         assert!(tick60.is_last_in_kline, "第二个 K 线的最后一个 tick");
     }
 
+    /// 测试握手循环：Generator 推送 + Engine 同步处理
     #[tokio::test]
     async fn test_handshake_loop() {
         let (sender, receiver) = create_handshake_channel(1, 1);
         let klines = create_test_klines();
         let generator = StreamTickGenerator::new("BTCUSDT".to_string(), Box::new(klines.into_iter()));
         let mut handshake_gen = HandshakeGenerator::new(generator, sender);
-        let mut receiver = receiver;
+        let engine_receiver = receiver;
 
         let mut tick_count = 0;
         let mut kline_closed_count = 0;
 
-        // 模拟引擎处理循环
-        while let Some(tick) = receiver.recv_and_ack().await {
+        loop {
+            // Generator: 推送 tick 并等 engine 完成
+            let tick = match handshake_gen.next().await {
+                Some(t) => t,
+                None => break, // 数据耗尽
+            };
             tick_count += 1;
             if tick.is_last_in_kline {
                 kline_closed_count += 1;
             }
-            receiver.ack().await.ok();
+            // Engine: 发 ack 唤醒 generator
+            engine_receiver.ack().await.ok();
         }
 
-        // 生成器应该已经结束
-        assert_eq!(tick_count, 120); // 2 根 K 线 * 60 tick
+        // 2 根 K 线 * 60 tick
+        assert_eq!(tick_count, 120);
         assert_eq!(kline_closed_count, 2);
     }
 }
