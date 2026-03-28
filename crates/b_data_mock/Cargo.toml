@@ -1,0 +1,27 @@
+[package]
+name = "b_data_mock"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# 与 b_data_source 相同的依赖
+rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+fnv = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+
+# 依赖 a_common 获取基础类型
+a_common = { path = "../a_common" }
+
+# 依赖 b_data_source 获取 KLine/Period 等类型
+b_data_source = { path = "../b_data_source" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

@@ -2,6 +2,7 @@
 members = [
     "crates/a_common",
     "crates/b_data_source",
+    "crates/b_data_mock",
     "crates/c_data_process",
     "crates/d_checktable",
     "crates/e_risk_monitor",
@@ -48,6 +49,7 @@ anyhow = "1.0"
 
 [workspace.dependencies]
 parking_lot = "0.12"
+rand = "0.8"
 rust_decimal = { version = "1.36", features = ["maths"] }
 rust_decimal_macros = "1.36"
 thiserror = "2.0"
