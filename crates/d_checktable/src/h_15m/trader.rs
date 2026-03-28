@@ -1346,9 +1346,10 @@ impl Trader {
         self.is_running.store(true, Ordering::SeqCst);
         tracing::info!(symbol = %self.config.symbol, "Trader 启动");
 
-        // v2.1: 启动 GC 定时任务
-        #[allow(deprecated)]
-        self.start_gc_task();
+        // v2.1: GC 任务已移除，使用外部驱动
+        // 替代方案：外部定时器定期调用 gc_pending() 方法
+        // #[allow(deprecated)]
+        // self.start_gc_task();
 
         // 崩溃恢复
         if let Ok(Some(record)) = self.repository.load_latest(&self.config.symbol) {

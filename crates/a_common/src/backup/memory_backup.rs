@@ -387,7 +387,7 @@ impl MemoryBackup {
 
     /// 刷新缓冲（内部使用）
     async fn flush_buffer(&mut self, symbol: &str) -> Result<(), EngineError> {
-        if let Some(data) = self.write_buffer.get(symbol) {
+        if let Some(data) = self.write_buffer.get_mut(symbol) {
             if !data.is_empty() {
                 let path = format!("{}/{}.json", self.tmpfs_dir, symbol);
                 let mut file = fs::OpenOptions::new()
@@ -398,7 +398,7 @@ impl MemoryBackup {
                     .map_err(|e| EngineError::MemoryBackup(format!("打开文件失败: {}", e)))?;
                 file.write_all(data).await
                     .map_err(|e| EngineError::MemoryBackup(format!("写入缓冲失败: {}", e)))?;
-                self.write_buffer.get_mut(symbol).unwrap().clear();
+                data.clear();
             }
         }
         self.last_flush.insert(symbol.to_string(), Instant::now());
