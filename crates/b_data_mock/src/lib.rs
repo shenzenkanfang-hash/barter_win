@@ -62,7 +62,7 @@ pub use api::trade_settings::{TradeSettings, PositionMode};
 pub use api::DataFeeder;
 pub use api::mock_account::{Account, Side};
 pub use api::mock_gateway::MockApiGateway;
-pub use api::mock_config::MockConfig;
+pub use api::mock_config::{MockConfig, MockExecutionConfig};
 
 // Recovery
 pub use recovery::{CheckpointData, CheckpointManager, MockRecovery};

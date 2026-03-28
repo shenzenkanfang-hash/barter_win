@@ -109,6 +109,11 @@ impl ReplaySource {
         self.data.is_empty()
     }
 
+    /// 获取首根 K 线的时间戳（不消费数据，用于初始化时钟）
+    pub fn first_timestamp(&self) -> Option<DateTime<Utc>> {
+        self.data.first().map(|k| k.timestamp)
+    }
+
     pub fn next_kline(&mut self) -> Option<KLine> {
         if self.exhausted {
             return None;

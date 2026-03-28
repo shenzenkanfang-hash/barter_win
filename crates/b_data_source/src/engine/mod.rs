@@ -13,3 +13,4 @@ pub use clock::{EngineClock, LiveClock, HistoricalClock};
 // Re-exports - Engine
 pub use processor::{Processor, TickProcessor};
 pub use auditor::{Auditor, EngineContext, AuditTick, EngineOutput};
+pub use run::SyncRunner;
