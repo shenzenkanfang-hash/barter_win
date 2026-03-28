@@ -563,7 +563,7 @@ impl SignalProcessor {
     /// 替代方案：
     /// 1. 调用者定期调用 `cleanup_expired()` 方法
     /// 2. 或使用外部定时器驱动清理
-    #[deprecated(since = "2026-03-27", note = "使用 cleanup_expired() 替代后台自循环")]
+    #[deprecated(since = "1.0.0", note = "使用 cleanup_expired() 替代后台自循环")]
     pub fn start_loop(self: &Arc<Self>) -> watch::Sender<bool> {
         let processor = Arc::clone(self);
         processor.running.store(true, Ordering::SeqCst);

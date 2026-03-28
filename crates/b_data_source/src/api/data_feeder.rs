@@ -157,60 +157,60 @@ impl DataFeeder {
     // - 背压机制由 channel send().await 自动处理
 
     /// 获取 1m K线数据（最新收盘的1根）- 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_get_1m(&self, symbol: &str) -> Option<KLine> {
         let ticks = self.latest_ticks.read();
         ticks.get(&symbol.to_uppercase()).and_then(|t| t.kline_1m.clone())
     }
 
     /// 获取 15m K线数据 - 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_get_15m(&self, symbol: &str) -> Option<KLine> {
         let ticks = self.latest_ticks.read();
         ticks.get(&symbol.to_uppercase()).and_then(|t| t.kline_15m.clone())
     }
 
     /// 获取 1d K线数据 - 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_get_1d(&self, symbol: &str) -> Option<KLine> {
         let ticks = self.latest_ticks.read();
         ticks.get(&symbol.to_uppercase()).and_then(|t| t.kline_1d.clone())
     }
 
     /// 获取订单簿深度 - 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_get_depth_book(&self, symbol: &str) -> Option<OrderBook> {
         let depth = self.depth_stream.read();
         depth.as_ref()?.get_latest_orderbook(symbol)
     }
 
     /// 获取波动率统计（单个品种）- 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_get_volatility(&self, symbol: &str) -> Option<VolatilityEntry> {
         let rank = self.volatility_manager.rank_by_1m();
         rank.into_iter().find(|e| e.symbol.eq_ignore_ascii_case(symbol))
     }
 
     /// 获取 1m 波动率排行 - 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_rank_by_1m(&self) -> Vec<VolatilityEntry> {
         self.volatility_manager.rank_by_1m()
     }
 
     /// 获取 15m 波动率排行 - 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_rank_by_15m(&self) -> Vec<VolatilityEntry> {
         self.volatility_manager.rank_by_15m()
     }
 
     /// 获取 1m 高波动品种 - 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_high_vol_1m(&self) -> Vec<VolatilityEntry> {
         self.volatility_manager.high_vol_1m()
     }
 
     /// 获取 15m 高波动品种 - 已废弃
-    #[deprecated(since = "2026-03-27", note = "使用 channel 接收 Tick 替代")]
+    #[deprecated(since = "1.0.0", note = "使用 channel 接收 Tick 替代")]
     pub fn ws_high_vol_15m(&self) -> Vec<VolatilityEntry> {
         self.volatility_manager.high_vol_15m()
     }

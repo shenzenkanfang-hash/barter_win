@@ -734,7 +734,7 @@ impl Trader {
     ///
     /// ⚠️ 已废弃：使用 tokio::spawn 启动后台任务
     /// 保留用于未来外部驱动实现
-    #[deprecated(since = "2026-03-27", note = "使用外部定时器驱动 gc_pending() 替代")]
+    #[deprecated(since = "1.0.0", note = "使用外部定时器驱动 gc_pending() 替代")]
     #[allow(dead_code)]
     fn start_gc_task(&self) {
         let repo = Arc::clone(&self.repository);

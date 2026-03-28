@@ -11,6 +11,7 @@
 //! ```
 
 use std::sync::Arc;
+use std::io::Write;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::time::Instant;
@@ -239,23 +240,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 引擎：发送完成信号
         tick_receiver.try_ack();
 
-        // 进度打印（每 10 根 K 线）
-        if stats.kline_count > 0 && stats.kline_count % 10 == 0 {
+        // 进度打印（每 100 根 Tick）
+        if stats.tick_count % 100 == 0 {
             let elapsed = start_time.elapsed();
-            let rate = stats.tick_count as f64 / elapsed.as_secs_f64();
+            let rate = if elapsed.as_secs() > 0 {
+                stats.tick_count as f64 / elapsed.as_secs_f64()
+            } else {
+                0.0
+            };
 
-            let account = gateway.get_account()?;
             println!(
-                "[进度] K线: {}/{} ({:.1}%) | Ticks: {} | 速度: {:.0}/s | 余额: {} | 买单: {} | 卖单: {}",
+                "[进度] K线: {}/{} | Ticks: {} | 速度: {:.0}/s | 买单: {} | 卖单: {}",
                 stats.kline_count,
                 total_klines,
-                stats.kline_count as f64 / total_klines as f64 * 100.0,
                 stats.tick_count,
                 rate,
-                account.available,
                 stats.buy_signals,
                 stats.sell_signals,
             );
+            // 强制刷新输出
+            print!("\r");
+            std::io::stdout().flush().ok();
         }
     }
 
