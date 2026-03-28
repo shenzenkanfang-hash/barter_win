@@ -7,7 +7,9 @@ use rust_decimal::Decimal;
 
 use a_common::exchange::{ExchangeAccount, ExchangePosition, RejectReason};
 use crate::api::mock_config::MockConfig;
-use a_common::models::types::Side;
+
+// Side 需要重新导出供外部使用
+pub use a_common::models::types::Side;
 
 /// 模拟持仓
 #[derive(Debug, Clone)]

@@ -8,21 +8,79 @@ use parking_lot::RwLock;
 use crate::ws::kline_1m::KlineData;
 use super::store_trait::VolatilityData;
 
+/// 波动率状态
+#[derive(Debug, Clone)]
+pub struct VolatilityStats {
+    pub volatility: f64,
+    pub mean_price: f64,
+    pub update_time_ms: i64,
+}
+
+impl Default for VolatilityStats {
+    fn default() -> Self {
+        Self {
+            volatility: 0.0,
+            mean_price: 0.0,
+            update_time_ms: 0,
+        }
+    }
+}
+
+/// 单品种波动率
+pub struct SymbolVolatility {
+    pub symbol: String,
+    pub current_stats: VolatilityStats,
+    pub was_high_volatility: bool,
+    prices: Vec<f64>,
+}
+
+impl SymbolVolatility {
+    pub fn new(symbol: String) -> Self {
+        Self {
+            symbol,
+            current_stats: VolatilityStats::default(),
+            was_high_volatility: false,
+            prices: Vec::with_capacity(100),
+        }
+    }
+
+    pub fn update(&mut self, price: f64, timestamp_ms: i64) {
+        self.prices.push(price);
+        if self.prices.len() > 20 {
+            self.prices.remove(0);
+        }
+        self.current_stats.volatility = Self::calc_volatility(&self.prices);
+        self.current_stats.mean_price = if self.prices.is_empty() {
+            0.0
+        } else {
+            self.prices.iter().sum::<f64>() / self.prices.len() as f64
+        };
+        self.current_stats.update_time_ms = timestamp_ms;
+    }
+
+    fn calc_volatility(prices: &[f64]) -> f64 {
+        if prices.len() < 2 {
+            return 0.0;
+        }
+        let mean = prices.iter().sum::<f64>() / prices.len() as f64;
+        let variance = prices.iter()
+            .map(|p| (p - mean).powi(2))
+            .sum::<f64>() / prices.len() as f64;
+        variance.sqrt()
+    }
+}
+
 /// 波动率计算器
 pub struct VolatilityManager {
-    /// symbol -> (prices, current_volatility)
+    /// symbol -> VolatilityState
     data: RwLock<HashMap<String, VolatilityState>>,
     /// 历史K线条数阈值
     history_size: usize,
 }
 
-/// 波动率状态
 struct VolatilityState {
-    /// 价格历史
     prices: Vec<f64>,
-    /// 当前波动率
     volatility: f64,
-    /// 更新时间戳
     update_time_ms: i64,
 }
 

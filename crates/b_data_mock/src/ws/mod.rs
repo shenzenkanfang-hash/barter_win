@@ -5,10 +5,12 @@
 pub mod kline_1m;
 pub mod kline_1d;
 pub mod order_books;
-pub mod tick_generator; // 流式 Tick 生成器
-pub mod noise;          // 高斯噪声
+pub mod tick_generator;
+pub mod noise;
+pub mod volatility;
 
 pub use kline_1m::{Kline1mStream, KLineSynthesizer, KlineData};
 pub use kline_1d::Kline1dStream;
 pub use order_books::{OrderBook, DepthStream, DepthData};
+pub use volatility::{VolatilityManager, SymbolVolatility};
 pub use a_common::volatility::VolatilityEntry;

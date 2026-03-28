@@ -17,7 +17,7 @@ pub struct KLine {
     pub low: Decimal,
     pub close: Decimal,
     pub volume: Decimal,
-    pub timestamp_ms: i64,
+    pub timestamp: DateTime<Utc>,
 }
 
 /// 历史数据请求
@@ -40,6 +40,8 @@ pub enum DataSource {
 /// 历史数据响应
 #[derive(Debug, Clone)]
 pub struct HistoryResponse {
+    pub symbol: String,
+    pub period: String,
     pub klines: Vec<KLine>,
     pub current: Option<KLine>,
     pub has_more: bool,
