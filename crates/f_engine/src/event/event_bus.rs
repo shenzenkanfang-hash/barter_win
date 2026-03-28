@@ -75,12 +75,15 @@ pub struct EventBus {
     kline_rx: Option<mpsc::Receiver<KlineClosedEvent>>,
     /// 订单事件接收端
     order_rx: Option<mpsc::Receiver<OrderEvent>>,
-    
-    /// Tick 事件发送端
+
+    /// Tick 事件发送端（保留用于未来多消费者扩展）
+    #[allow(dead_code)]
     tick_tx: mpsc::Sender<Arc<TickEvent>>,
     /// K线闭合事件发送端
+    #[allow(dead_code)]
     kline_tx: mpsc::Sender<KlineClosedEvent>,
     /// 订单事件发送端
+    #[allow(dead_code)]
     order_tx: mpsc::Sender<OrderEvent>,
 }
 

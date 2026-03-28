@@ -285,10 +285,11 @@ pub struct Trader {
     last_order_ms: AtomicU64,
     is_running: AtomicBool,
     shutdown: Notify,
-    /// v2.1: GC 配置
+    /// v2.1: GC 配置（保留用于外部驱动）
+    #[allow(dead_code)]
     gc_config: GcConfig,
-    /// v2.1: GC 任务句柄（用于优雅停止）
-    /// 使用 Arc<Mutex<Option<...>>> 解决 &self 不可变借用问题
+    /// v2.1: GC 任务句柄（用于优雅停止，保留用于外部驱动）
+    #[allow(dead_code)]
     gc_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// v2.2: P1-2 数量计算器（可选，不配置时使用 executor 默认逻辑）
     quantity_calculator: Option<MinQuantityCalculator>,
@@ -730,9 +731,11 @@ impl Trader {
     // TODO: 重构为按需清理或外部驱动
 
     /// 启动 GC 定时任务（已废弃）
-    /// 
+    ///
     /// ⚠️ 已废弃：使用 tokio::spawn 启动后台任务
+    /// 保留用于未来外部驱动实现
     #[deprecated(since = "2026-03-27", note = "使用外部定时器驱动 gc_pending() 替代")]
+    #[allow(dead_code)]
     fn start_gc_task(&self) {
         let repo = Arc::clone(&self.repository);
         let timeout_secs = self.gc_config.timeout_secs;

@@ -43,8 +43,10 @@ struct IndicatorData {
 #[derive(Debug, Clone)]
 struct PositionState {
     has_position: bool,
-    entry_price: Decimal,
-    side: Option<Side>,
+    #[allow(dead_code)]
+    entry_price: Decimal,  // 保留用于未来扩展
+    #[allow(dead_code)]
+    side: Option<Side>,    // 保留用于未来扩展
 }
 
 impl Default for PositionState {
@@ -60,8 +62,10 @@ impl Default for PositionState {
 #[derive(Debug, Default, Clone)]
 pub struct EngineStats {
     total_orders: u64,
-    total_trades: u64,
-    total_errors: u64,
+    #[allow(dead_code)]
+    total_trades: u64,  // 保留用于未来统计
+    #[allow(dead_code)]
+    total_errors: u64,  // 保留用于未来错误统计
 }
 
 /// 事件驱动交易引擎

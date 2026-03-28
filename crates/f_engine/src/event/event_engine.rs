@@ -221,7 +221,8 @@ pub struct EventEngine<S: Strategy, G: ExchangeGateway> {
     config: EngineConfig,
     /// 状态
     state: EngineState,
-    /// 风控检查器
+    /// 风控检查器（保留用于未来集成外部风控）
+    #[allow(dead_code)]
     risk_checker: Arc<dyn RiskChecker>,
     /// 策略
     strategy: S,
@@ -567,11 +568,14 @@ pub enum GatewayError {
 /// 指标计算器 - 增量 O(1) 算法
 #[derive(Debug, Clone, Default)]
 pub struct IndicatorCalculator {
-    /// EMA 快周期
+    /// EMA 快周期（保留用于未来可配置）
+    #[allow(dead_code)]
     ema_period_fast: usize,
-    /// EMA 慢周期
+    /// EMA 慢周期（保留用于未来可配置）
+    #[allow(dead_code)]
     ema_period_slow: usize,
     /// RSI 周期
+    #[allow(dead_code)]
     rsi_period: usize,
     /// 前一个价格
     prev_price: Option<Decimal>,

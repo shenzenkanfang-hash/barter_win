@@ -102,7 +102,8 @@ pub enum RepoError {
 /// Repository - SQLite WAL 持久化层
 pub struct Repository {
     pool: Arc<Pool<SqliteConnectionManager>>,
-    symbol: String,
+    #[allow(dead_code)]
+    symbol: String,  // 保留用于未来日志标识
 }
 
 impl Repository {
