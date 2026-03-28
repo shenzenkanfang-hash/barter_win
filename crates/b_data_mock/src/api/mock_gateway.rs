@@ -12,7 +12,8 @@ use a_common::EngineError;
 use a_common::models::types::Side;
 
 use crate::api::mock_account::Account;
-use crate::api::mock_config::MockConfig;
+use crate::api::mock_config::{MockConfig, MockExecutionConfig};
+use crate::api::account::state::{Balance, Position, AccountState};
 
 /// 订单请求
 #[derive(Debug, Clone)]
@@ -107,13 +108,46 @@ impl OrderEngine {
 pub struct MockApiGateway {
     engine: Arc<RwLock<OrderEngine>>,
     config: MockConfig,
+    /// 新增：执行配置（支持细粒度控制）
+    execution_config: MockExecutionConfig,
+    /// 新增：账户状态（精细化余额管理）
+    account_state: Arc<RwLock<AccountState>>,
 }
 
 impl MockApiGateway {
+    /// 使用 MockConfig 创建（向后兼容）
     pub fn new(initial_balance: Decimal, config: MockConfig) -> Self {
+        let mut account_state = AccountState::new();
+        let usdt_balance = Balance::new(initial_balance);
+        account_state.balances.insert("USDT".to_string(), usdt_balance);
+
         Self {
             engine: Arc::new(RwLock::new(OrderEngine::new(initial_balance, &config))),
-            config,
+            config: config.clone(),
+            execution_config: MockExecutionConfig::default(),
+            account_state: Arc::new(RwLock::new(account_state)),
+        }
+    }
+
+    /// 使用 MockExecutionConfig 创建（新接口）
+    pub fn with_execution_config(config: MockExecutionConfig) -> Self {
+        let mut account_state = AccountState::new();
+        let usdt_balance = Balance::new(config.initial_balance);
+        account_state.balances.insert("USDT".to_string(), usdt_balance);
+
+        // 从 execution_config 转换 fee_rate 到 MockConfig
+        let mock_config = MockConfig {
+            initial_balance: config.initial_balance,
+            fee_rate: config.taker_fee / dec!(100),  // 百分比转小数
+            slippage_rate: config.slippage,
+            ..Default::default()
+        };
+
+        Self {
+            engine: Arc::new(RwLock::new(OrderEngine::new(config.initial_balance, &mock_config))),
+            config: mock_config,
+            execution_config: config,
+            account_state: Arc::new(RwLock::new(account_state)),
         }
     }
 
@@ -123,6 +157,11 @@ impl MockApiGateway {
 
     pub fn update_price(&self, symbol: &str, price: Decimal) {
         self.engine.write().update_price(symbol, price);
+        // 同时更新账户状态中的持仓盈亏
+        let mut acc_state = self.account_state.write();
+        if let Some(pos) = acc_state.positions.get_mut(symbol) {
+            pos.update_pnl(price);
+        }
     }
 
     pub fn get_current_price(&self, symbol: &str) -> Decimal {
@@ -151,7 +190,13 @@ impl MockApiGateway {
             leverage: dec!(1),
         };
 
-        let result = self.engine.write().execute(req);
+        let result = self.engine.write().execute(req.clone());
+
+        // 更新账户状态
+        if result.status == a_common::models::types::OrderStatus::Filled {
+            self.update_balance_from_order(&result, &req);
+        }
+
         Ok(result)
     }
 
@@ -162,6 +207,61 @@ impl MockApiGateway {
     pub fn engine(&self) -> Arc<RwLock<OrderEngine>> {
         Arc::clone(&self.engine)
     }
+
+    /// 获取账户状态（精细化）
+    pub fn get_account_state(&self) -> AccountState {
+        self.account_state.read().clone()
+    }
+
+    /// 获取持仓（精细化）
+    pub fn get_position_state(&self, symbol: &str) -> Option<Position> {
+        self.account_state.read().positions.get(symbol).cloned()
+    }
+
+    /// 从订单结果更新账户状态
+    fn update_balance_from_order(&self, result: &OrderResult, req: &OrderRequest) {
+        let mut acc_state = self.account_state.write();
+
+        if let Some(balance) = acc_state.balances.get_mut("USDT") {
+            // 扣除手续费
+            balance.deduct(result.commission);
+
+            // 更新持仓
+            let position = acc_state.get_or_create_position(&req.symbol);
+            match req.side {
+                Side::Buy => {
+                    position.qty += req.qty;
+                    if position.long_avg_price.is_zero() {
+                        position.long_avg_price = req.price;
+                    } else {
+                        // 计算新的平均价
+                        position.long_avg_price = (position.long_avg_price + req.price) / dec!(2);
+                    }
+                }
+                Side::Sell => {
+                    position.qty -= req.qty;
+                    if position.short_avg_price.is_zero() {
+                        position.short_avg_price = req.price;
+                    } else {
+                        position.short_avg_price = (position.short_avg_price + req.price) / dec!(2);
+                    }
+                }
+            }
+            position.update_pnl(req.price);
+        }
+    }
+
+    /// 获取执行配置
+    pub fn get_execution_config(&self) -> MockExecutionConfig {
+        self.execution_config.clone()
+    }
+
+    /// 模拟网络延迟
+    pub async fn simulate_latency(&self) {
+        if self.execution_config.latency_ms > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(self.execution_config.latency_ms)).await;
+        }
+    }
 }
 
 impl Clone for MockApiGateway {
@@ -169,6 +269,8 @@ impl Clone for MockApiGateway {
         Self {
             engine: Arc::clone(&self.engine),
             config: self.config.clone(),
+            execution_config: self.execution_config.clone(),
+            account_state: Arc::clone(&self.account_state),
         }
     }
 }

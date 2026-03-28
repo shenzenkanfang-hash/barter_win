@@ -1,7 +1,6 @@
 //! 账户状态管理
 
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
