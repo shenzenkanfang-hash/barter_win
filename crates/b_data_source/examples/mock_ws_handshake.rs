@@ -1,7 +1,7 @@
-//! mock_ws 握手模式回测示例
+//! mock_ws 同步模式回测示例
 //!
 //! 特点：
-//! - 等引擎处理完才推送下一个 Tick
+//! - 同步 for 循环处理 Tick，无 async/await 复杂性
 //! - 每根 K 线最后一根 Tick 的 is_last_in_kline = true
 //! - 用于分钟指标计算和波动率窗口更新
 //!
@@ -10,23 +10,16 @@
 //! cargo run --example mock_ws_handshake -- --csv data/btcusdt_1m.csv
 //! ```
 
-use std::sync::Arc;
 use std::io::Write;
 use parking_lot::Mutex;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use tokio::time::Instant;
 
-// 导入 b_data_source 组件
-use b_data_source::{
-    ReplaySource,
-    ws::{StreamTickGenerator, SimulatedTick},
-    api::mock_api::MockApiGateway,
-    api::mock_api::gateway::EngineOrderRequest,
-    api::mock_api::account::Side,
-    create_handshake_channel,
-    HandshakeGenerator,
+// 从 b_data_mock 导入模拟组件
+use b_data_mock::{
+    ReplaySource, StreamTickGenerator, SimulatedTick, MockApiGateway,
 };
+use b_data_mock::api::mock_account::Side;
 
 // ============================================================================
 // 简化的策略
@@ -118,14 +111,17 @@ enum Signal {
 }
 
 // ============================================================================
-// 引擎处理函数
+// 引擎处理函数（同步版本）
 // ============================================================================
 
-async fn process_tick(
+/// 处理单个 Tick（同步版本）
+///
+/// 直接处理，无需 async
+fn process_tick(
     tick: &SimulatedTick,
-    gateway: &Arc<MockApiGateway>,
-    strategy: &Arc<Mutex<SimpleStrategy>>,
-    stats: &Arc<Mutex<Stats>>,
+    gateway: &MockApiGateway,
+    strategy: &Mutex<SimpleStrategy>,
+    stats: &Mutex<Stats>,
 ) {
     {
         let mut s = stats.lock();
@@ -148,24 +144,14 @@ async fn process_tick(
                     let mut s = stats.lock();
                     s.buy_signals += 1;
                 }
-                let _ = gateway.place_order(EngineOrderRequest {
-                    symbol: tick.symbol.clone(),
-                    side: Side::Buy,
-                    qty: dec!(0.01),
-                    price: None,
-                });
+                let _ = gateway.place_order(&tick.symbol, Side::Buy, dec!(0.01), None);
             }
             Signal::Sell => {
                 {
                     let mut s = stats.lock();
                     s.sell_signals += 1;
                 }
-                let _ = gateway.place_order(EngineOrderRequest {
-                    symbol: tick.symbol.clone(),
-                    side: Side::Sell,
-                    qty: dec!(0.01),
-                    price: None,
-                });
+                let _ = gateway.place_order(&tick.symbol, Side::Sell, dec!(0.01), None);
             }
         }
     }
@@ -189,29 +175,25 @@ struct Stats {
 // 主函数
 // ============================================================================
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 使用 LocalSet 让 spawn_local 能工作
-    let result = tokio::task::LocalSet::new()
-        .run_until(async_main())
-        .await;
-    result
-}
-
-async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 解析命令行参数
     let args: Vec<String> = std::env::args().collect();
     let csv_path = args.get(1).cloned().unwrap_or_else(|| "data/btcusdt_1m.csv".to_string());
 
-    println!("=== Mock WS 握手模式回测 ===");
+    println!("=== Mock WS 同步模式回测 ===");
     println!("数据源: {}", csv_path);
 
     // =========================================================================
-    // 1. 初始化组件
+    // 1. 初始化组件（使用单线程 runtime 同步加载数据）
     // =========================================================================
 
-    // 加载历史数据
-    let replay = ReplaySource::from_csv(&csv_path).await?;
+    // 使用单线程 runtime 同步加载数据
+    // ReplaySource::from_csv 是 async 函数，需要 runtime 来执行
+    let replay = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async { ReplaySource::from_csv(&csv_path).await })?;
+
     let total_klines = replay.len();
     println!("加载 K 线数量: {}", total_klines);
 
@@ -221,67 +203,33 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 创建模拟网关
-    let gateway = Arc::new(MockApiGateway::with_default_config(dec!(10000)));
+    let gateway = MockApiGateway::with_default_config(dec!(10000));
     println!("初始余额: 10000 USDT");
 
     // 创建策略
-    let strategy = Arc::new(Mutex::new(SimpleStrategy::new()));
+    let strategy = Mutex::new(SimpleStrategy::new());
 
-    // 创建统计（engine 更新，主循环读取）
-    let stats = Arc::new(Mutex::new(Stats::default()));
-
-    // =========================================================================
-    // 2. 创建握手通道
-    // =========================================================================
-
-    // buffer=1 确保严格握手：生成器发送 -> 引擎处理 -> 完成 -> 下一根
-    let (sender, receiver) = create_handshake_channel(1, 1);
-
-    // 创建 Tick 生成器
-    let klines = replay; // ReplaySource 现在实现了 Iterator
-    let generator = StreamTickGenerator::new("BTCUSDT".to_string(), Box::new(klines));
-
-    // 创建握手生成器
-    let mut handshake_gen = HandshakeGenerator::new(generator, sender);
+    // 创建统计
+    let stats = Mutex::new(Stats::default());
 
     // =========================================================================
-    // 3. 握手回测循环
+    // 2. 创建 Tick 生成器
     // =========================================================================
 
-    let start_time = Instant::now();
-    println!("\n开始回测（握手模式）...");
+    // StreamTickGenerator 实现了 Iterator trait，直接使用 replay 作为数据源
+    let generator = StreamTickGenerator::new("BTCUSDT".to_string(), Box::new(replay));
 
     // =========================================================================
-    // 3. 回测循环（Generator 推送 + Engine 处理）
+    // 3. 同步回测循环
     // =========================================================================
-    //
-    // Generator: 推送 tick 并等 done（通过 spawn_local 在单线程执行）
-    // Engine: 从 channel 收 tick 并处理
-    //
-    // 使用 tokio::task::spawn_local 确保 engine 在主线程运行，
-    // 从而保证 yield_now() 能让出给 engine
 
-    let gateway2 = gateway.clone();
-    let strategy2 = strategy.clone();
-    let stats2 = stats.clone();
+    let start_time = std::time::Instant::now();
+    println!("\n开始回测（同步模式）...");
 
-    // 使用 spawn_local：engine 在主线程运行，yield_now 能切换给它
-    let engine_handle = tokio::task::spawn_local(async move {
-        let mut engine_receiver = receiver;
-        while let Some(tick) = engine_receiver.recv_and_ack().await {
-            // Engine：用 tick 处理
-            process_tick(&tick, &gateway2, &strategy2, &stats2).await;
-            // 发 ack 唤醒 generator
-            engine_receiver.ack().await.ok();
-        }
-    });
-
-    // Generator 循环：推送 tick，yield 让 engine 执行
-    loop {
-        let _tick = match handshake_gen.next().await {
-            Some(t) => t,
-            None => break,
-        };
+    // 同步 for 循环：直接遍历 Tick，无 async/await 复杂性
+    for tick in generator {
+        // 处理 Tick
+        process_tick(&tick, &gateway, &strategy, &stats);
 
         // 进度打印（每 100 根 Tick）
         let s = stats.lock();
@@ -307,12 +255,6 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             std::io::stdout().flush().ok();
         }
     }
-
-    // Generator 结束，drop sender 让 engine 的 receiver 收到 None
-    drop(handshake_gen);
-
-    // 等待 engine 完成
-    engine_handle.await.ok();
 
     // =========================================================================
     // 4. 回测结果
