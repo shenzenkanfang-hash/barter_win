@@ -696,28 +696,94 @@ impl Trader {
         }
     }
 
-    /// 构建信号输入（默认值版本，降级使用）
-    /// P1-1: 临时实现，待接入真实数据
+    /// 构建信号输入（回测/沙盒版：从 Store 历史K线计算真实指标）
     ///
-    /// 注意：由于沙盒环境波动率为 0 或极小值，这里使用合理的默认值
+    /// v2.4 重构：沙盒模式 = 纯数据输入输出，无业务逻辑判断
+    ///
+    /// 策略：
+    /// 1. 优先从 Store 历史K线计算真实指标
+    /// 2. Store 无数据时才使用默认值（真正的冷启动）
+    /// 3. 沙盒/回测预喂K线后，永远使用真实值
     fn build_signal_input_fallback(&self) -> Option<MinSignalInput> {
-        // 沙盒环境：使用合理的默认值确保能产生信号
-        // 关键：必须满足信号触发条件 (tr_base_60min > 15%, pin >= 4)
-        Some(MinSignalInput {
-            tr_base_60min: dec!(0.20),      // > 15% 满足入场条件
-            tr_ratio_15min: dec!(0.05),
-            zscore_14_1m: dec!(2.5),         // 条件1: |zscore| > 2
-            zscore_1h_1m: dec!(0),
-            tr_ratio_60min_5h: dec!(1.2),    // 条件2: tr_ratio > 1
-            tr_ratio_10min_1h: dec!(0),
-            pos_norm_60: dec!(90),           // 条件3: > 80
-            acc_percentile_1h: dec!(95),      // 条件4: > 90
-            velocity_percentile_1h: dec!(0),
-            pine_bg_color: "纯绿".to_string(), // 条件5
-            pine_bar_color: "纯红".to_string(), // 条件6
-            price_deviation: dec!(-0.5),      // < 0 满足做多条件
-            price_deviation_horizontal_position: dec!(100), // 条件7: |pos| == 100
-        })
+        // 尝试从 Store 加载历史K线
+        let history = self.store.get_history_klines(&self.config.symbol);
+        let current = self.store.get_current_kline(&self.config.symbol)?;
+
+        // 有历史数据：计算真实指标
+        if history.len() >= 14 {
+            let closes: Vec<f64> = history.iter()
+                .filter_map(|k| k.close.parse::<f64>().ok())
+                .collect();
+
+            let current_price = current.close.parse::<f64>().ok()?;
+            let n = closes.len();
+            let mean = closes.iter().sum::<f64>() / n as f64;
+
+            // Z-score (14周期)
+            let variance = closes.iter()
+                .map(|p| (p - mean).powi(2))
+                .sum::<f64>() / n as f64;
+            let stddev = variance.sqrt();
+            let zscore_14_1m = if stddev > 0.0 {
+                ((current_price - mean) / stddev) as f64
+            } else {
+                0.0
+            };
+
+            // TR基准（最近60根的TR均值，归一化为百分比）
+            let tr_values: Vec<f64> = history.iter().rev().take(60).map(|k| {
+                let open = k.open.parse::<f64>().unwrap_or(0.0);
+                let high = k.high.parse::<f64>().unwrap_or(0.0);
+                let low = k.low.parse::<f64>().unwrap_or(0.0);
+                let close = k.close.parse::<f64>().unwrap_or(0.0);
+                let tr = high - low;
+                if mean > 0.0 { (tr / mean) * 100.0 } else { 0.0 }
+            }).collect();
+            let tr_base_60min = tr_values.first().copied().unwrap_or(0.0);
+
+            // TR比率（60min/5h）
+            let tr_recent = tr_values.first().copied().unwrap_or(0.0);
+            let tr_old = tr_values.get(60.min(tr_values.len() - 1)).copied().unwrap_or(0.0);
+            let tr_ratio_60min_5h = if tr_old > 0.0 { tr_recent / tr_old } else { 1.0 };
+
+            // 持仓标准化（价格在最近60根中的位置）
+            let recent_prices: Vec<f64> = history.iter().rev().take(60)
+                .filter_map(|k| k.close.parse::<f64>().ok())
+                .collect();
+            let pos_norm_60 = if let Some((min_p, max_p)) = recent_prices.iter().cloned().fold(None, |acc, p| {
+                match acc {
+                    None => Some((p, p)),
+                    Some((min_v, max_v)) => Some((min_v.min(p), max_v.max(p))),
+                }
+            }) {
+                let range = max_p - min_p;
+                if range > 0.0 { ((current_price - min_p) / range * 100.0).clamp(0.0, 100.0) } else { 50.0 }
+            } else { 50.0 };
+
+            return Some(MinSignalInput {
+                tr_base_60min: rust_decimal::Decimal::try_from(tr_base_60min).ok()?,
+                tr_ratio_15min: rust_decimal::Decimal::try_from(0.05).ok()?,
+                zscore_14_1m: rust_decimal::Decimal::try_from(zscore_14_1m).ok()?,
+                zscore_1h_1m: rust_decimal::Decimal::try_from(0.0).ok()?,
+                tr_ratio_60min_5h: rust_decimal::Decimal::try_from(tr_ratio_60min_5h).ok()?,
+                tr_ratio_10min_1h: rust_decimal::Decimal::try_from(1.0).ok()?,
+                pos_norm_60: rust_decimal::Decimal::try_from(pos_norm_60).ok()?,
+                acc_percentile_1h: rust_decimal::Decimal::try_from(50.0).ok()?,
+                velocity_percentile_1h: rust_decimal::Decimal::try_from(50.0).ok()?,
+                pine_bg_color: String::new(),
+                pine_bar_color: String::new(),
+                price_deviation: rust_decimal::Decimal::try_from(0.0).ok()?,
+                price_deviation_horizontal_position: rust_decimal::Decimal::try_from(50.0).ok()?,
+            });
+        }
+
+        // Store 无历史数据：真正的冷启动，返回 None 让调用方跳过
+        tracing::warn!(
+            symbol = %self.config.symbol,
+            history_len = history.len(),
+            "沙盒环境无历史数据，无法构建信号输入"
+        );
+        None
     }
 
     // ==================== v2.1: P2-1 GC 定时任务（已废弃） ====================
@@ -830,14 +896,18 @@ impl Trader {
         // 1. 获取数据
         let _kline = self.get_current_kline()?;
 
-        // 沙盒环境（无 account_provider）：强制使用高速通道确保能产生信号
-        let vol_tier = if self.account_provider.is_none() {
-            VolatilityTier::High
+        // v2.4 回测修复：如果 Store 有真实波动率数据，使用真实通道
+        // 架构原则：沙盒 = 纯数据平替，业务逻辑 0 修改
+        let has_real_volatility = self.volatility_value().map(|v| v > 0.0).unwrap_or(false);
+        let vol_tier = if !has_real_volatility {
+            // 真正的冷启动（无历史数据）：使用 Low 通道保守开仓
+            tracing::debug!(symbol = %self.config.symbol, "无历史数据，使用 Low 通道保守模式");
+            VolatilityTier::Low
         } else {
             self.volatility_tier()
         };
 
-        // 2. v2.3: 构建信号输入（使用默认值，同步版本无法使用异步指标计算器）
+        // 2. v2.3: 构建信号输入（回测版：从 Store 计算真实指标）
         let input = self.build_signal_input_fallback()?;
 
         // 3. 生成信号
@@ -887,10 +957,12 @@ impl Trader {
             }
         };
 
-        let vol_tier = if self.account_provider.is_none() {
-            // 沙盒环境（无 account_provider）：强制使用高速通道，确保能产生信号
-            tracing::warn!(symbol = %self.config.symbol, "沙盒环境强制使用高速通道");
-            VolatilityTier::High
+        // v2.4 回测修复：如果 Store 有真实波动率数据，使用真实通道
+        // 架构原则：沙盒 = 纯数据平替，业务逻辑 0 修改
+        let has_real_volatility = self.volatility_value().map(|v| v > 0.0).unwrap_or(false);
+        let vol_tier = if !has_real_volatility {
+            tracing::debug!(symbol = %self.config.symbol, "无历史数据，使用 Low 通道保守模式");
+            VolatilityTier::Low
         } else {
             self.volatility_tier()
         };
