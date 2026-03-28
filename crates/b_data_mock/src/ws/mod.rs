@@ -5,7 +5,7 @@
 pub mod kline_1m;
 pub mod kline_1d;
 pub mod order_books;
-pub mod tick_generator;
+pub mod kline_generator;
 pub mod noise;
 pub mod volatility;
 

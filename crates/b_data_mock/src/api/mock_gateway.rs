@@ -61,8 +61,8 @@ impl OrderEngine {
     }
 
     pub fn execute(&mut self, req: OrderRequest) -> OrderResult {
-        // 前置检查
-        if let Err(reason) = self.account.pre_check(&req.symbol, req.qty, req.price, req.leverage) {
+        // 前置检查（开仓用持仓限额校验，平仓只验证持仓存在+手续费）
+        if let Err(reason) = self.account.pre_check(&req.symbol, req.qty, req.price, req.leverage, req.side.clone()) {
             return OrderResult {
                 order_id: self.account.next_order_id(),
                 status: a_common::models::types::OrderStatus::Rejected,

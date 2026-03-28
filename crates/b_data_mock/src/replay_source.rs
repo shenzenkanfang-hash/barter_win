@@ -119,25 +119,39 @@ impl ReplaySource {
             return None;
         }
 
-        while self.current_idx < self.data.len() {
-            let kline = self.data[self.current_idx].clone();
-            self.current_idx += 1;
+        // 从当前位置向后找一根符合过滤条件的 K 线
+        let found_idx = loop {
+            if self.current_idx >= self.data.len() {
+                self.exhausted = true;
+                return None;
+            }
+
+            let kline = &self.data[self.current_idx];
 
             if !self.symbols_filter.is_empty() && !self.symbols_filter.contains(&kline.symbol) {
+                self.current_idx += 1;
                 continue;
             }
 
             if let Some(ref period) = self.period_filter {
                 if kline.period != *period {
+                    self.current_idx += 1;
                     continue;
                 }
             }
 
-            return Some(kline);
+            break self.current_idx;
+        };
+
+        let kline = self.data[found_idx].clone();
+        self.current_idx += 1;
+
+        // 如果这是最后一根（下次越界），立即标记 exhausted
+        if self.current_idx >= self.data.len() {
+            self.exhausted = true;
         }
 
-        self.exhausted = true;
-        None
+        Some(kline)
     }
 
     pub fn is_exhausted(&self) -> bool {

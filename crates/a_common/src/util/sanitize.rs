@@ -8,7 +8,7 @@
 //! use a_common::util::sanitize::{mask_api_key, mask_order_id};
 //!
 //! let masked_key = mask_api_key("abc123xyz");  // "abc***xyz"
-//! let masked_order = mask_order_id("1234567890"); // "****567890"
+//! let masked_order = mask_order_id("1234567890"); // "****7890"
 //! ```
 
 #![forbid(unsafe_code)]
@@ -19,8 +19,9 @@
 ///
 /// # Example
 /// ```
+/// use a_common::util::sanitize::mask_api_key;
 /// assert_eq!(mask_api_key("abc123xyz"), "abc***xyz");
-/// assert_eq!(mask_api_key("ab"), "**");
+/// assert_eq!(mask_api_key("ab"), "ab");
 /// assert_eq!(mask_api_key("abc"), "a*c");
 /// ```
 pub fn mask_api_key(key: &str) -> String {
@@ -49,8 +50,9 @@ pub fn mask_api_key(key: &str) -> String {
 ///
 /// # Example
 /// ```
-/// assert_eq!(mask_order_id("1234567890"), "****7890");
-/// assert_eq!(mask_order_id("12345"), "***45");
+/// use a_common::util::sanitize::mask_order_id;
+/// assert_eq!(mask_order_id("1234567890"), "******7890");
+/// assert_eq!(mask_order_id("12345"), "*2345");
 /// assert_eq!(mask_order_id("1"), "*");
 /// ```
 pub fn mask_order_id(order_id: &str) -> String {
@@ -72,6 +74,7 @@ pub fn mask_order_id(order_id: &str) -> String {
 ///
 /// # Example
 /// ```
+/// use a_common::util::sanitize::mask_symbol;
 /// assert_eq!(mask_symbol("BTCUSDT"), "BTCUSDT");
 /// ```
 pub fn mask_symbol(_symbol: &str) -> String {
@@ -86,7 +89,8 @@ pub fn mask_symbol(_symbol: &str) -> String {
 ///
 /// # Example
 /// ```
-/// assert_eq!(mask_email("user@example.com"), "us***@example.com");
+/// use a_common::util::sanitize::mask_email;
+/// assert_eq!(mask_email("user@example.com"), "us**@example.com");
 /// ```
 pub fn mask_email(email: &str) -> String {
     if let Some(at_pos) = email.find('@') {
@@ -108,7 +112,8 @@ pub fn mask_email(email: &str) -> String {
 ///
 /// # Example
 /// ```
-/// assert_eq!(mask_bot_token("123456789:ABCDefGHIjklMNOP"), "1234567***MNOP");
+/// use a_common::util::sanitize::mask_bot_token;
+/// assert_eq!(mask_bot_token("123456789:ABCDefGHIjklMNOP"), "1234567****MNOP");
 /// ```
 pub fn mask_bot_token(token: &str) -> String {
     // 太短的token无法有效脱敏

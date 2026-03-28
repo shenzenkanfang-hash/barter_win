@@ -18,18 +18,20 @@ use rust_decimal_macros::dec;
 use chrono::Utc;
 
 // 从 b_data_source 导入引擎组件（barter-rs 启发）
+// 注意：EngineClock trait 与 HistoricalClock 结构体同名，不能同时从同一路径导入
+use b_data_source::engine::clock::EngineClock; // trait 用于调用 .time()
 use b_data_source::engine::{
-    EngineClock,        // 时钟 trait（LiveClock / HistoricalClock 实现）
     HistoricalClock,    // 回测时钟：基于事件时间 + 真实流逝
     SyncRunner,         // 同步运行器：实现 Auditor<EngineOutput>
     Auditor,             // 审计器 trait：生成 AuditTick<EngineOutput>
     AuditTick,           // 审计标记：事件 + 上下文，用于完整回放
     EngineOutput,        // 引擎输出：sequence + time
 };
+use b_data_mock::SimulatedKline; // KlineStreamGenerator 产生的类型，与 SimulatedTick 字段相同
 
 // 从 b_data_mock 导入模拟组件
 use b_data_mock::{
-    ReplaySource, StreamTickGenerator, SimulatedTick,
+    ReplaySource, KlineStreamGenerator,
     MockApiGateway, MockExecutionConfig,
 };
 use b_data_mock::api::mock_account::Side;
@@ -199,7 +201,7 @@ impl BacktestEngine {
     /// 5. SyncRunner.audit() 生成 AuditTick<EngineOutput>
     ///
     /// 返回: AuditTick<EngineOutput>（用于完整事件回放）
-    fn process_tick(&mut self, tick: &SimulatedTick) -> AuditTick<EngineOutput> {
+    fn process_tick(&mut self, tick: &SimulatedKline) -> AuditTick<EngineOutput> {
         // 1. 推进 HistoricalClock（基于事件时间戳）
         self.clock.update(tick.timestamp);
 
@@ -348,7 +350,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. 创建 Tick 生成器
     // =========================================================================
 
-    let generator = StreamTickGenerator::new("BTCUSDT".to_string(), Box::new(replay));
+    let generator = KlineStreamGenerator::new("BTCUSDT".to_string(), Box::new(replay));
 
     // =========================================================================
     // 4. 同步回测循环（核心演示）

@@ -54,7 +54,7 @@ pub use store::{MarketDataStore, MarketDataStoreImpl, OrderBookData, VolatilityD
 pub use ws::kline_1m::{Kline1mStream, KLineSynthesizer, KlineData};
 pub use ws::kline_1d::Kline1dStream;
 pub use ws::order_books::{OrderBook, DepthStream, DepthData};
-pub use ws::tick_generator::{StreamTickGenerator, SimulatedTick};
+pub use ws::kline_generator::{KlineStreamGenerator, SimulatedKline};
 
 // API
 pub use api::symbol_registry::SymbolRegistry;

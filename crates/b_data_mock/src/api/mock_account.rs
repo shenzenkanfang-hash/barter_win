@@ -150,21 +150,46 @@ impl Account {
         self.initial_balance
     }
 
-    pub fn pre_check(&self, symbol: &str, qty: Decimal, price: Decimal, leverage: Decimal) -> Result<(), RejectReason> {
-        let required_margin = price * qty / leverage;
-        if self.available < required_margin {
-            return Err(RejectReason::InsufficientBalance);
+    pub fn pre_check(&self, symbol: &str, qty: Decimal, price: Decimal, leverage: Decimal, side: Side) -> Result<(), RejectReason> {
+        // 开仓：验证保证金充足
+        // 平仓：验证账户余额不会因手续费变负（保证金由 apply_close 释放）
+        match side {
+            Side::Buy => {
+                let required_margin = price * qty / leverage;
+                if self.available < required_margin {
+                    return Err(RejectReason::InsufficientBalance);
+                }
+
+                // 开仓时，验证持仓价值不超限
+                // 注意：这里用 current_position_value + price*qty，close 时由 caller 传 0
+                let current_position_value = self.current_position_value(symbol);
+                let total_equity = self.total_equity();
+                let max_position_value = total_equity * self.config.max_position_ratio;
+
+                if current_position_value + (price * qty) > max_position_value {
+                    return Err(RejectReason::PositionLimitExceeded);
+                }
+
+                Ok(())
+            }
+            Side::Sell => {
+                // 平仓时，不需要验证保证金，只需要验证有足够的余额支付手续费
+                // 保证金和已实现盈亏由 apply_close 释放回 available
+                // 但 pre_check 调用在 execute 之前，apply_close 还没执行
+                // 所以这里只检查：持仓是否存在 + 余额不为负（极端情况）
+                let position_value = self.positions.get(symbol)
+                    .map(|p| (p.long_qty + p.short_qty) * price)
+                    .unwrap_or(Decimal::ZERO);
+                if position_value.is_zero() {
+                    return Err(RejectReason::PositionLimitExceeded);
+                }
+                // 余额检查：当前余额应能覆盖手续费（apply_close 会释放保证金）
+                if self.available < price * qty * self.config.fee_rate {
+                    return Err(RejectReason::InsufficientBalance);
+                }
+                Ok(())
+            }
         }
-
-        let current_position_value = self.current_position_value(symbol);
-        let total_equity = self.total_equity();
-        let max_position_value = total_equity * self.config.max_position_ratio;
-
-        if current_position_value + (price * qty) > max_position_value {
-            return Err(RejectReason::PositionLimitExceeded);
-        }
-
-        Ok(())
     }
 
     fn current_position_value(&self, symbol: &str) -> Decimal {

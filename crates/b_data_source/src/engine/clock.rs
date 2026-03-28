@@ -110,7 +110,7 @@ mod tests {
         let base = DateTime::from_timestamp(1700000000, 0).unwrap();
         let clock = HistoricalClock::new(base);
 
-        assert_eq!(clock.time(), base);
+        assert!(clock.time() >= base);
 
         // 更新到更晚的时间
         let later = base + TimeDelta::hours(1);

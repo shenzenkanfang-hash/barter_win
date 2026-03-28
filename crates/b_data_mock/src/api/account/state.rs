@@ -103,9 +103,23 @@ impl Position {
     }
 
     /// 更新未实现盈亏
+    ///
+    /// 公式：仅对实际存在的持仓方向计算 PnL
+    /// - qty > 0（多仓）：qty * (current_price - long_avg_price)
+    /// - qty < 0（空仓）：-qty * (short_avg_price - current_price)
+    /// - 如果对向均价为 0（无该方向持仓），则不计算对向贡献
     pub fn update_pnl(&mut self, current_price: Decimal) {
-        self.unrealized_pnl = self.qty * (current_price - self.long_avg_price)
-            + (-self.qty) * (self.short_avg_price - current_price);
+        let has_long = self.qty > Decimal::ZERO && !self.long_avg_price.is_zero();
+        let has_short = self.qty < Decimal::ZERO && !self.short_avg_price.is_zero();
+
+        self.unrealized_pnl = Decimal::ZERO;
+
+        if has_long {
+            self.unrealized_pnl += self.qty * (current_price - self.long_avg_price);
+        }
+        if has_short {
+            self.unrealized_pnl += (-self.qty) * (self.short_avg_price - current_price);
+        }
     }
 
     /// 是否有持仓
@@ -171,7 +185,8 @@ mod tests {
         pos.long_avg_price = dec!(50000);
 
         pos.update_pnl(dec!(51000));
-        // 0.5 * (51000 - 50000) = 500
+        // qty > 0（多仓），short_avg_price = 0（无空仓）
+        // PnL = 0.5 * (51000 - 50000) = 500
         assert_eq!(pos.unrealized_pnl, dec!(500));
     }
 }
