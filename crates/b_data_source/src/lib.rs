@@ -18,6 +18,7 @@ pub mod recovery;
 pub mod models;
 pub mod trader_pool;     // 品种池
 pub mod replay_source;    // 历史数据回放
+pub mod engine;           // 引擎时钟系统
 
 // 统一数据接口层
 pub mod ws;      // WebSocket 数据接口
