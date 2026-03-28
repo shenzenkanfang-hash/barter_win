@@ -1,332 +1,321 @@
-================================================================================
-ARCHITECTURE.md - System Architecture Documentation
-================================================================================
+================================================================
+ARCHITECTURE.md - 交易系统架构文档
+================================================================
 
-Author: Software Architect
-Created: 2026-03-26
-GSD-Phase: documentation
-Status: complete
-================================================================================
+Author: Claude Code
+Created: 2026-03-28
+Status: 初始版本
+================================================================
 
-1. Overview
-================================================================================
+一、架构模式
+============
 
-The barter-rs trading system is a high-performance quantitative trading platform
-built in Rust, implementing a 6-layer architecture that processes market data
-through indicators and risk checks to execution.
+1.1 分层架构（6层 + 1测试）
 
-Architecture Layers (Bottom to Top):
---------------------------------------------------------------------------------
-a_common (Infrastructure) --> b_data_source (Data) --> c_data_process (Signal)
-        --> d_checktable (Check) --> e_risk_monitor (Risk) --> f_engine (Engine)
+    a_common (基础设施层)
+         |
+    x_data (数据状态层)
+         |
+    b_data_source (业务数据层)
+         |
+    c_data_process (数据处理层)
+         |
+    d_checktable (检查层)
+         |
+    e_risk_monitor (风控层)
+         |
+    f_engine (引擎层)
+         |
+    g_test (测试工具)
 
-================================================================================
-2. Layer-by-Layer Architecture
-================================================================================
+1.2 依赖方向
 
-2.1 a_common - Infrastructure Layer
---------------------------------------------------------------------------------
-Purpose: Pure infrastructure components with no business logic dependencies
+    a_common --> x_data --> b_data_source --> c_data_process --> d_checktable --> e_risk_monitor --> f_engine
+         ^                                                                  |
+         +------------------------------------------------------------------+
+                                        (可选回退)
 
-Modules:
-  - api/          : Binance REST API gateway, rate limiter, symbol rules fetcher
-  - ws/           : WebSocket connector, trade stream, combined stream
-  - config/       : Platform detection (Windows/Linux), path management
-  - logs/         : Checkpoint logging (CompositeCheckpointLogger)
-  - models/       : DTO types, market data types, order types
-  - exchange/     : Exchange gateway types (ExchangeAccount, ExchangePosition)
-  - volatility/   : Volatility calculation (VolatilityCalc, VolatilityStats)
-  - backup/       : Memory backup system for high-speed data persistence
-  - claint/       : Error types (MarketError, EngineError, AppError)
+1.3 核心设计原则
 
-Key Design:
-  - No business types (Position, Fund, OrderRequest) - only infrastructure
-  - All re-exports go through x_data for business types
-  - Binance gateway pattern: pure message passing, no business logic
+    - 高频路径无锁：Tick接收、指标更新、策略判断全部无锁
+    - 锁仅用于下单和资金更新
+    - 增量计算O(1)：EMA、SMA、MACD等指标必须增量计算
+    - 混合持仓模式：资金池RwLock保护（低频），策略持仓独立计算（无锁）
 
 
-2.2 x_data - Business Data Abstraction Layer
---------------------------------------------------------------------------------
-Purpose: Unified business data types, eliminating cross-module duplicate definitions
+二、各层职责
+============
 
-Modules:
-  - position/     : PositionSide, LocalPosition, PositionSnapshot
-  - account/      : FundPool, FundPoolManager, AccountSnapshot
-  - market/       : Tick, KLine, OrderBook, SymbolVolatility
-  - trading/      : SymbolRulesData, OrderResult, OrderRecord
-  - state/        : StateViewer, StateManager, UnifiedStateView traits
+2.1 a_common - 基础设施层
 
-Architecture Position:
-  - a_common (pure infrastructure) <- x_data (business data) <- business layer
+    职责：
+    - API/WS网关抽象
+    - 通用错误类型定义
+    - 配置管理
+    - 日志基础设施
+    - 备份数据类型定义
+    - 波动率计算基础
 
-Key Design:
-  - All business types defined once in x_data
-  - State management traits for uniform state access
-  - Eliminates circular dependencies between business crates
+    关键模块：
+    - api/: Binance API网关、限流器、交易对规则
+    - ws/: WebSocket连接器、市场数据流
+    - config/: 平台配置、路径配置
+    - logs/: 检查点日志、阶段追踪
+    - models/: 通用数据模型
+    - volatility/: 波动率统计基础类型
 
+2.2 x_data - 数据状态层
 
-2.3 b_data_source - Data Layer
---------------------------------------------------------------------------------
-Purpose: Market data processing - data subscription, K-line synthesis, order books
+    职责：
+    - 统一状态管理
+    - 系统快照
+    - 状态查询接口
 
-Modules:
-  - ws/           : WebSocket data interface
-    - kline_1m/   : 1-minute K-line synthesis and persistence
-    - kline_1d/   : 1-day K-line stream
-    - order_books/: Order book depth streaming
-    - volatility/ : Volatility manager per symbol
-  - api/          : REST API data interface
-    - account/     : Futures account data
-    - position/    : Futures position data
-    - data_feeder/ : DataFeeder (unified data interface)
-    - data_sync/  : Futures data synchronization
-    - symbol_registry/: SymbolRegistry
-    - trade_settings/: TradeSettings, PositionMode
-  - models/       : MarketStream, MockMarketStream, KLine, Period, Tick
-  - recovery/     : CheckpointManager, RedisRecovery
-  - trader_pool/  : SymbolMeta, TradingStatus, TraderPool
-  - replay_source/ : KLineSource, ReplaySource for historical replay
+    关键模块：
+    - state/: StateViewer, StateManager, UnifiedStateView, SystemSnapshot
 
-Key Design:
-  - Data subscription abstraction via MarketStream trait
-  - K-line synthesis with configurable periods
-  - Volatility tracking per symbol
+2.3 b_data_source - 业务数据层
 
+    职责：
+    - 市场数据摄取
+    - K线合成与存储
+    - 订单簿数据
+    - 波动率检测
+    - 历史数据回放
+    - Mock数据生成
 
-2.4 c_data_process - Signal Generation Layer
---------------------------------------------------------------------------------
-Purpose: Indicator calculation, signal generation, strategy state management
+    关键模块：
+    - ws/: WebSocket数据接口、波动率管理器
+    - api/: REST API接口、交易设置
+    - store/: MarketDataStore（统一存储接口）
+    - mock_ws/: StreamTickGenerator（回放/模拟）
+    - mock_api/: MockApiGateway（模拟交易所）
+    - recovery/: 检查点管理、Redis恢复
+    - trader_pool/: 品种池管理
+    - history/: 历史数据管理
 
-Modules:
-  - pine_indicator_full/ : Pine v5 indicators (EMA, RSI, PineColor)
-  - min/         : Minute-level strategy processing
-  - day/         : Day-level strategy processing
-  - processor/   : SignalProcessor
-  - strategy_state/: StrategyStateManager, StrategyStateDb
+    全局单例：
+    - default_store(): 全局MarketDataStore实例
 
-Key Types:
-  - PineColorDetector (V5) : Trend detection using MACD + EMA10/20 + RSI
-  - EMA, RSI : Standard technical indicators (incremental calculation)
-  - SignalProcessor : Converts indicators to trading signals
+2.4 c_data_process - 数据处理层
 
-Architecture:
-  - Indicator System: TR (True Range) -> Pine Color -> Price Position
-  - Incremental O(1) calculation for all indicators
-  - K-line incremental update for current bar
+    职责：
+    - K线处理（分钟级、日级）
+    - Pine指标计算
+    - 策略状态管理
+    - 信号生成
 
+    关键模块：
+    - processor/: SignalProcessor（信号处理器）
+    - pine_indicator_full/: Pine颜色检测器、EMA、RSI
+    - min/: 分钟K线处理
+    - day/: 日K线处理
+    - strategy_state/: 策略状态持久化
 
-2.5 d_checktable - Check Layer
---------------------------------------------------------------------------------
-Purpose: Periodic strategy checks organized by frequency (async concurrent)
+    导出类型：
+    - PineColorDetector (V5版本)
+    - SignalProcessor
+    - StrategyStateManager
 
-Modules:
-  - h_15m/       : High-frequency 15-minute strategy checks
-  - l_1d/        : Low-frequency 1-day strategy checks
-  - check_table/ : CheckTable, CheckEntry
-  - types/       : CheckChainContext, CheckSignal, CheckChainResult
+2.5 d_checktable - 检查层
 
-Key Design:
-  - CheckTable aggregates checks per period
-  - Async concurrent execution
-  - Scheduled by engine layer (f_engine)
+    职责：
+    - 按周期组织的策略检查
+    - 高频15分钟Trader
+    - 低频1天策略检查
 
+    关键模块：
+    - h_15m/: 高频15分钟策略检查
+    - l_1d/: 低频1天策略检查
+    - check_table/: CheckTable、CheckEntry
 
-2.6 e_risk_monitor - Risk Compliance Layer
---------------------------------------------------------------------------------
-Purpose: Exchange hard rules, risk control, position management
+    类型：
+    - CheckChainContext, CheckSignal, CheckChainResult
 
-Modules:
-  - risk/         : Risk management
-    - common/     : RiskPreChecker, RiskReChecker, OrderCheck, Thresholds
-    - pin/        : PinRiskLeverageGuard, PinVolatilityLevel
-    - trend/      : TrendRiskLimitGuard, TrendSymbolLimit, TrendGlobalLimit
-    - minute_risk/: calculate_hour_open_notional, calculate_minute_open_notional
-  - position/     : LocalPositionManager, PositionExclusionChecker
-  - persistence/  : PersistenceService, SqliteEventRecorder, DisasterRecovery
-  - shared/       : AccountPool, MarginConfig, PnlManager, RoundGuard
+2.6 e_risk_monitor - 风控层
 
-Key Design:
-  - Hybrid position mode:
-    - Fund pool protected by RwLock (low frequency)
-    - Strategy positions calculated independently (lock-free)
-  - Two-level risk checking:
-    - Pre-check (outside lock)
-    - Fine-tuning (inside lock)
+    职责：
+    - 风险预检/复检
+    - 持仓管理
+    - 持久化服务
+    - 共享状态管理（账户池、保证金配置）
 
+    关键模块：
+    - risk/common/: RiskPreChecker、VolatilityMode、RiskReChecker
+    - risk/pin/: PinRiskLeverageGuard（杠杆守护）
+    - risk/trend/: TrendRiskLimitGuard（趋势风险限制）
+    - risk/minute_risk/: 分钟级风控计算
+    - position/: LocalPositionManager（持仓管理）
+    - persistence/: 事件记录、灾难恢复
+    - shared/: AccountPool、MarginConfig、MarketStatus
 
-2.7 f_engine - Engine Runtime Layer
---------------------------------------------------------------------------------
-Purpose: Core execution engine, coordinating all layers
+2.7 f_engine - 引擎层
 
-Submodules (f_engine/src/):
-  - core/         : Core engine components
-    - engine_v2/   : TradingEngineV2 (main engine, V1.4 implementation)
-    - engine_state/: EngineState, EngineStatus, CircuitBreaker
-    - strategy_pool/: StrategyPool, StrategyAllocation
-    - state/       : SymbolState, SymbolMetrics, TradeLock
-    - execution/   : TradingPipeline, OrderExecutor trait
-    - triggers/    : TriggerManager (parallel triggers)
-    - fund_pool/   : FundPoolManager
-    - risk_manager/: RiskManager, RiskConfig
-    - monitoring/  : TimeoutMonitor
-    - rollback/    : RollbackManager
-  - interfaces/   : Cross-module interaction interfaces (traits only)
-    - market_data/ : MarketDataProvider, MarketKLine, MarketTick
-    - strategy/    : StrategyExecutor, StrategyInstance, TradingSignal
-    - risk/        : RiskChecker, RiskLevel, PositionInfo
-    - execution/   : ExchangeGateway
-    - check_table/ : CheckTableProvider
-  - order/        : Order execution
-    - gateway.rs   : ExchangeGateway trait
-    - order.rs     : OrderExecutor
-    - mock_binance_gateway.rs : Mock implementation
-  - channel/      : Channel mode switching
-    - mode_switcher.rs : ChannelType, mode transitions
-  - types.rs      : Shared types (OrderRequest, StrategyId, Side, OrderType)
+    职责：
+    - 交易引擎核心
+    - 事件驱动架构
+    - 策略调度
+    - 订单执行
 
-Execution Flow (V1.4):
---------------------------------------------------------------------------------
-1. Parallel triggers (minute-level / day-level)
-2. StrategyQuery + Strategy execution (2s timeout)
-3. Risk pre-check (outside lock)
-4. Symbol-level lock acquisition (1s timeout)
-5. Risk fine-tuning (inside lock)
-6. Freeze funds + Place order
-7. Trade confirmation + State alignment
-8. Confirm funds / Rollback
+    关键模块：
+    - event/: EventEngine（推荐使用）
+    - core/: 基础引擎、协程管理
+    - strategy/: TraderManager（多品种管理）
+    - types/: 核心类型定义
 
-Key Design:
-  - High frequency path lock-free (tick, indicators, strategy)
-  - Lock only for order placement and fund updates
-  - All risk checks pre-validated outside lock
+    推荐用法：
+    - EventEngine + EventBus 事件驱动模式
+
+    类型：
+    - StrategyId, TradingDecision, OrderRequest, Side, OrderType, TradingAction
 
 
-2.8 g_test - Test Layer
---------------------------------------------------------------------------------
-Purpose: Centralized functional tests for all crates
+三、数据流
+==========
 
-Modules:
-  - b_data_source/ : b_data_source related tests
-    - api/         : API tests
-    - ws/          : WebSocket tests
-    - models/      : Model tests
-    - recovery/    : Recovery tests
-    - trader_pool_test.rs
-  - strategy/      : Strategy layer black-box tests
-    - mock_gateway.rs
-    - strategy_executor_test.rs
+3.1 实时交易数据流
+
+    WebSocket K线/Tick
+         |
+         v
+    b_data_source (ws module)
+         |
+         v
+    MarketDataStore (全局存储)
+         |
+         v
+    c_data_process (processor)
+         |
+         v
+    d_checktable (按周期检查)
+         |
+         v
+    e_risk_monitor (风控检查)
+         |
+         v
+    f_engine (订单执行)
+         |
+         v
+    MockApiGateway / Binance API
+
+3.2 回放/沙盒数据流
+
+    StreamTickGenerator (历史数据回放)
+         |
+         v
+    MarketDataStore (独立实例)
+         |
+         v
+    MockApiGateway (模拟交易所)
+         |
+         v
+    本地账户/持仓/PnL更新
+
+3.3 风控检查点
+
+    OrderRequest
+         |
+         +--> RiskPreChecker (开仓前预检)
+         |
+         +--> PinRiskLeverageGuard (杠杆守护)
+         |
+         +--> TrendRiskLimitGuard (趋势限制)
+         |
+         +--> RiskReChecker (下单前复检)
+         |
+         v
+    OrderResult / RejectReason
 
 
-2.9 mock 组件 - Sandbox Layer
---------------------------------------------------------------------------------
-Purpose: Experimental code, testing new features
+四、抽象接口
+============
 
-Modules:
-  - config/       : ShadowConfig
-  - simulator/    : Account, OrderEngine, Position, ShadowRiskChecker
-  - gateway/      : ShadowBinanceGateway
-  - tick_generator/: TickGenerator, SimulatedTick, KLineInput
-  - perf_test/   : Performance testing
-  - backtest/    : BacktestStrategy, MaCrossStrategy
-  - historical_replay/: StreamTickGenerator, MemoryInjector, ReplayController
+4.1 数据存储接口
 
-================================================================================
-3. Data Flow
-================================================================================
+    MarketDataStore trait:
+    - write_kline(symbol, kline, closed)
+    - get_current_kline(symbol)
+    - get_volatility(symbol)
+    - write_depth(symbol, depth)
+    - get_orderbook(symbol)
 
-Market Data Ingestion:
---------------------------------------------------------------------------------
-Binance WS/API --> a_common (raw messages) --> b_data_source (business models)
-    --> c_data_process (indicators) --> Trading Signals
+4.2 数据源接口
 
-Order Execution:
---------------------------------------------------------------------------------
-TradingEngineV2 (f_engine)
-    --> d_checktable (check) --> e_risk_monitor (risk) --> Exchange Gateway
-    --> b_data_source (state update) --> e_risk_monitor (position update)
+    DataFeeder trait:
+    - 统一数据注入接口
 
-State Management:
---------------------------------------------------------------------------------
-x_data::StateViewer + StateManager traits
-    --> UnifiedStateView for system snapshot
-    --> e_risk_monitor (position persistence)
+    MarketConnector trait:
+    - connect(), disconnect(), subscribe()
 
-================================================================================
-4. Key Design Patterns
-================================================================================
+    HistoryDataProvider trait:
+    - fetch_history(request) -> HistoryResponse
 
-4.1 Trait-Based Interfaces (f_engine/src/interfaces/)
---------------------------------------------------------------------------------
-All cross-module communication through trait interfaces:
-  - MarketDataProvider: Market data access
-  - StrategyExecutor: Strategy execution
-  - RiskChecker: Risk validation
-  - ExchangeGateway: Order placement
-  - CheckTableProvider: Check table access
+4.3 风控接口
 
-4.2 Incremental Calculation (O(1))
---------------------------------------------------------------------------------
-- EMA, SMA, MACD, RSI all use incremental algorithms
-- K-line updates only modify current bar
-- No full recalculation on new data
+    RiskChecker trait:
+    - pre_check(order) -> OrderCheckResult
+    - re_check(order) -> OrderCheckResult
 
-4.3 Hybrid Position Mode
---------------------------------------------------------------------------------
-- Fund pool: RwLock protected (low frequency)
-- Strategy positions: Independent calculation (lock-free)
-- Prevents lock contention in high-frequency path
+4.4 交易接口
 
-4.4 Two-Level Risk Checking
---------------------------------------------------------------------------------
-- Level 1: Pre-check outside lock (fast rejection)
-- Level 2: Fine-tuning inside lock (precise validation)
+    ExchangeGateway trait:
+    - place_order(request) -> OrderResult
+    - cancel_order(symbol, order_id)
+    - get_position(symbol)
 
-4.5 Checkpoint Logging
---------------------------------------------------------------------------------
-- CompositeCheckpointLogger: Multiple loggers combined
-- ConsoleCheckpointLogger: Development debugging
-- TracingCheckpointLogger: Production tracing
-- Stage-based progress tracking
 
-================================================================================
-5. Technical Stack
-================================================================================
+五、入口点
+==========
 
-| Component      | Technology          | Purpose                    |
-|----------------|---------------------|----------------------------|
-| Runtime        | Tokio               | Async IO, multi-thread     |
-| State          | FnvHashMap          | O(1) lookup                |
-| Sync           | parking_lot         | Efficient RwLock           |
-| Decimal        | rust_decimal        | Financial precision        |
-| Time           | chrono              | DateTime<Utc>              |
-| Error          | thiserror           | Error type hierarchy       |
-| Logging        | tracing             | Structured logging         |
-| Serialization  | serde               | Serialize/Deserialize      |
-| Database       | rusqlite 0.32       | Event persistence          |
+5.1 主程序入口
 
-================================================================================
-6. Directory Structure Summary
-================================================================================
+    src/main.rs
+    src/multi_engine.rs
 
-crates/
-  a_common/      - Infrastructure layer (API/WS, no business types)
-  x_data/        - Business data abstraction (position, account, market, trading)
-  b_data_source/ - Data layer (DataFeeder, K-line, order book)
-  c_data_process/ - Signal layer (indicators, signals)
-  d_checktable/  - Check layer (periodic checks)
-  e_risk_monitor/ - Risk layer (risk control, position)
-  f_engine/      - Engine layer (core execution)
-  g_test/        - Test layer (integration tests)
-  mock 组件/     - Sandbox (experimental)
+    初始化流程：
+    1. tracing初始化
+    2. 配置加载
+    3. 创建EventEngine
+    4. 启动WebSocket连接
+    5. 进入事件循环
 
-f_engine/src/
-  core/          - Engine core (engine_v2, state, triggers, execution)
-  interfaces/    - Trait definitions for cross-module communication
-  order/         - Order execution (gateway, order executor)
-  channel/       - Channel mode switching
-  types.rs       - Shared types
-  lib.rs         - Library entry point
+5.2 bin入口
 
-================================================================================
-End of ARCHITECTURE.md
-================================================================================
+    trading-system (src/main.rs)
+
+
+六、技术栈
+==========
+
+    Runtime: Tokio (异步IO、多线程任务调度)
+    状态管理: FnvHashMap (O(1)查找)
+    同步原语: parking_lot (比std RwLock更高效)
+    数值计算: rust_decimal (金融计算避免浮点精度问题)
+    时间处理: chrono (DateTime<Utc>)
+    错误处理: thiserror (清晰的错误类型层次)
+    日志: tracing (结构化日志)
+    序列化: serde (Serialize/Deserialize)
+
+
+七、关键设计决策
+================
+
+7.1 沙盒与生产共代码
+
+    沙盒和生产用同一套代码，只是数据来源不同：
+    - 生产：WS实盘数据 -> Store，API发真实Binance
+    - 沙盒：WS历史回放数据 -> Store，API发MockApiGateway
+
+7.2 mock_api组件
+
+    MockApiGateway: 模拟API网关
+    OrderEngine: 订单执行引擎
+    Account: 账户状态机
+    MockRiskChecker: 风控检查（Strict/Audit/Bypass模式）
+
+7.3 mock_ws组件
+
+    StreamTickGenerator: K线生成Tick流（Iterator模式）
+    GaussianNoise: 高斯噪声生成
+
+================================================================

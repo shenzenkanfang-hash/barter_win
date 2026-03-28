@@ -376,8 +376,79 @@ impl<S: Strategy, G: ExchangeGateway> EventEngine<S, G> {
     }
 
     /// 风控检查
-    async fn check_risk(&self, _decision: &TradingDecision) -> bool {
-        // TODO: 实现风控检查
+    ///
+    /// 实现完整的风控检查逻辑:
+    /// 1. 最大持仓检查
+    /// 2. 最小下单量检查
+    /// 3. 价格合理性检查
+    async fn check_risk(&self, decision: &TradingDecision) -> bool {
+        // 1. 最大持仓检查
+        if self.state.has_position && decision.action != TradingAction::Flat {
+            // 如果已有持仓且不是平仓，只允许反向开仓或平仓
+            match (self.state.position_side, decision.action) {
+                (Some(Side::Buy), TradingAction::Short) => {} // 允许反向开空
+                (Some(Side::Sell), TradingAction::Long) => {} // 允许反向开多
+                (Some(_), TradingAction::Add) => {
+                    tracing::warn!(
+                        "[Engine] {} 禁止加仓，已有持仓中",
+                        self.config.symbol
+                    );
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        // 2. 最小下单量检查
+        if decision.qty < self.config.lot_size {
+            tracing::warn!(
+                "[Engine] {} 下单量 {} 小于最小交易量 {}",
+                self.config.symbol,
+                decision.qty,
+                self.config.lot_size
+            );
+            return false;
+        }
+
+        // 3. 价格合理性检查
+        if let Some(current_price) = self.state.current_price {
+            let price_diff = if decision.price > Decimal::ZERO {
+                ((decision.price - current_price) / current_price).abs()
+            } else {
+                Decimal::ZERO
+            };
+
+            // 价格偏离超过10%则拒绝
+            if price_diff > dec!(0.1) {
+                tracing::warn!(
+                    "[Engine] {} 价格偏离过大: {} vs 当前 {} (偏离 {:.2}%)",
+                    self.config.symbol,
+                    decision.price,
+                    current_price,
+                    price_diff * dec!(100)
+                );
+                return false;
+            }
+        }
+
+        // 4. 总下单数检查（防止异常高频）
+        if self.state.total_orders >= 1000 && self.state.tick_count < 10000 {
+            tracing::warn!(
+                "[Engine] {} 下单过于频繁: {} 订单 / {} Tick",
+                self.config.symbol,
+                self.state.total_orders,
+                self.state.tick_count
+            );
+            return false;
+        }
+
+        tracing::debug!(
+            "[Engine] {} 风控检查通过: {:?} qty={} price={}",
+            self.config.symbol,
+            decision.action,
+            decision.qty,
+            decision.price
+        );
         true
     }
 

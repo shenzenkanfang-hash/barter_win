@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 #![allow(deprecated)]
+#![allow(mixed_script_confusables)]
 
 use parking_lot::RwLock;
 use std::collections::HashMap;

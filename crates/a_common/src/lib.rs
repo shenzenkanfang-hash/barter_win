@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
-#![allow(dead_code)]
+//! a_common - 基础设施层
+//!
+//! 提供 API/WS 网关、配置、通用错误、数据模型等基础设施组件。
 
 //! a_common - 基础设施层
 //!

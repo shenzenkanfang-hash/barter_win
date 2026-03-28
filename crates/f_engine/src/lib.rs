@@ -1,13 +1,9 @@
 #![forbid(unsafe_code)]
-#![allow(dead_code)]
-
 //! f_engine - 交易引擎核心
 //!
 //! # 架构
 //! - `event/`: 事件驱动引擎（推荐使用）
 //! - `core/engine`: 基础引擎
-//! - `core/strategy_loop`: 协程管理（已废弃）
-//! - `strategy/trader_manager`: 多品种管理（已废弃）
 //! - `types.rs`: 核心类型
 //!
 //! # 推荐使用（事件驱动）
@@ -20,9 +16,10 @@
 //! ```
 
 pub mod core;
-pub mod event;          // 新增：事件驱动模块
+pub mod event;          // 事件驱动模块
 pub mod interfaces;
-pub mod strategy;
+#[allow(deprecated)]
+pub mod strategy;       // 包含废弃代码，保留用于兼容性
 pub mod types;
 
 // Re-exports - 事件驱动引擎（推荐）
@@ -32,8 +29,8 @@ pub use event::event_bus::DEFAULT_CHANNEL_BUFFER;
 // Re-exports - 核心引擎
 pub use core::EventDrivenEngine;
 
-// Re-exports - 策略协程管理（已废弃）
-pub use core::strategy_loop::{StrategyLoop, StrategyLoopConfig, MAX_RESTART_COUNT, HEARTBEAT_TIMEOUT_MS};
+// Re-exports - 策略管理
+#[allow(deprecated)]
 pub use strategy::{TraderManager, StrategyType, TraderError};
 
 // Re-exports - 核心类型

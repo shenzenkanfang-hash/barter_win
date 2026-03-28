@@ -1,6 +1,4 @@
 #![forbid(unsafe_code)]
-#![allow(dead_code)]
-
 //! b_data_source - 业务数据层
 //!
 //! 提供市场数据处理功能：数据订阅、K线合成、订单簿、波动率检测等。

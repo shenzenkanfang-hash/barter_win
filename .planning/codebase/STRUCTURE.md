@@ -1,540 +1,313 @@
-================================================================================
-STRUCTURE.md - Directory Structure and File Locations
-================================================================================
-
-Author: Software Architect
-Created: 2026-03-26
-GSD-Phase: documentation
-Status: complete
-================================================================================
-
-1. Root Level Structure
-================================================================================
-
-D:\Rust项目\barter-rs-main\
-  |
-  +-- Cargo.toml              : Workspace manifest
-  +-- Cargo.lock              : Dependency lock file
-  +-- CLAUDE.md               : Project instructions
-  +-- .git/                   : Git repository
-  |
-  +-- crates/                 : All crate modules
-  |     a_common/             : Infrastructure layer
-  |     x_data/               : Business data abstraction
-  |     b_data_source/        : Data layer
-  |     c_data_process/       : Signal generation layer
-  |     d_checktable/        : Check layer
-  |     e_risk_monitor/       : Risk compliance layer
-  |     f_engine/             : Engine runtime layer
-  |     g_test/              : Test layer
-  |     +-- mock 组件/        : Sandbox layer
-  |
-  +-- .planning/              : Project planning
-  |     +-- codebase/         : This directory
-  |           +-- ARCHITECTURE.md
-  |           +-- STRUCTURE.md
-  |
-  +-- Bak_非必要指定不读取老版本/ : Old version backup (do not read)
-
-================================================================================
-2. Crates Directory Structure
-================================================================================
-
-2.1 a_common/ - Infrastructure Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\a_common\
-
-Purpose: Pure infrastructure (API/WS gateways, config, no business types)
-
-Structure:
-a_common/
-  +-- src/
-  |     +-- lib.rs                 : Crate entry (re-exports all modules)
-  |     |
-  |     +-- api/                   : REST API gateway
-  |     |     +-- mod.rs
-  |     |     +-- binance_api.rs   : BinanceApiGateway, RateLimiter
-  |     |     +-- symbol_rules.rs   : SymbolRulesFetcher
-  |     |     +-- kline_fetcher.rs  : ApiKlineFetcher
-  |     |     +-- rate_limiter.rs   : RateLimiter, RateLimit
-  |     |
-  |     +-- ws/                    : WebSocket gateway
-  |     |     +-- mod.rs
-  |     |     +-- websocket.rs      : BinanceWsConnector
-  |     |     +-- trade_stream.rs   : BinanceTradeStream
-  |     |     +-- combined_stream.rs: BinanceCombinedStream
-  |     |
-  |     +-- config/                : Configuration
-  |     |     +-- mod.rs
-  |     |     +-- platform.rs       : Platform detection, Paths
-  |     |
-  |     +-- models/                 : Data models
-  |     |     +-- mod.rs
-  |     |     +-- types.rs          : OrderStatus, etc.
-  |     |     +-- dto.rs            : DTO types
-  |     |     +-- market_data.rs    : Market data types
-  |     |
-  |     +-- logs/                   : Checkpoint logging
-  |     |     +-- mod.rs
-  |     |     +-- checkpoint.rs     : CheckpointLogger, Stage, StageResult
-  |     |
-  |     +-- backup/                 : Memory backup
-  |     |     +-- mod.rs            : MemoryBackup, paths, constants
-  |     |
-  |     +-- exchange/               : Exchange types
-  |     |     +-- mod.rs            : ExchangeAccount, PositionDirection
-  |     |
-  |     +-- volatility/             : Volatility calculation
-  |     |     +-- mod.rs            : VolatilityCalc, VolatilityStats
-  |     |
-  |     +-- claint/                 : Error types
-  |     |     +-- mod.rs            : MarketError, EngineError, AppError
-  |     |
-  |     +-- util/                   : Utilities
-  |     |     +-- mod.rs
-  |     |     +-- telegram_notifier.rs
-  |     |
-  |     +-- a_int_test/            : Internal tests (private)
-  |
-  +-- Cargo.toml
-
-Key Files:
-  - src/lib.rs : 69 lines, re-exports all infrastructure types
-
-
-2.2 x_data/ - Business Data Abstraction Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\x_data\
-
-Purpose: Unified business data types (eliminates cross-module duplicates)
-
-Structure:
-x_data/
-  +-- src/
-  |     +-- lib.rs                 : Crate entry
-  |     |
-  |     +-- position/              : Position types
-  |     |     +-- mod.rs           : LocalPosition, PositionSide, PositionSnapshot
-  |     |
-  |     +-- account/               : Account types
-  |     |     +-- mod.rs           : FundPool, FundPoolManager, AccountSnapshot
-  |     |
-  |     +-- market/                : Market types
-  |     |     +-- mod.rs           : Tick, KLine, OrderBook, SymbolVolatility
-  |     |
-  |     +-- trading/               : Trading types
-  |     |     +-- mod.rs
-  |     |     +-- signal.rs        : StrategySignal, TradeCommand, StrategyId
-  |     |
-  |     +-- state/                 : State management traits
-  |     |     +-- mod.rs           : StateViewer, StateManager, UnifiedStateView
-  |     |
-  |     +-- error.rs               : Error types
-  |
-  +-- Cargo.toml
-
-Key Files:
-  - src/lib.rs : 31 lines, defines business type re-exports
-  - src/trading/signal.rs : StrategySignal, TradeCommand traits
-
-
-2.3 b_data_source/ - Data Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\b_data_source\
-
-Purpose: Market data processing, K-line synthesis, order books
-
-Structure:
-b_data_source/
-  +-- src/
-  |     +-- lib.rs                 : Crate entry
-  |     |
-  |     +-- ws/                    : WebSocket data interface
-  |     |     +-- mod.rs           : VolatilityManager, SymbolVolatility
-  |     |     +-- kline_1m/        : 1-minute K-line
-  |     |     |     +-- mod.rs
-  |     |     |     +-- kline_persistence.rs
-  |     |     |     +-- kline_synthesizer.rs
-  |     |     +-- kline_1d/        : 1-day K-line
-  |     |     |     +-- mod.rs
-  |     |     |     +-- ws.rs
-  |     |     +-- order_books/     : Order book depth
-  |     |     |     +-- mod.rs
-  |     |     |     +-- orderbook.rs
-  |     |     |     +-- ws.rs
-  |     |
-  |     +-- api/                   : REST API data interface
-  |     |     +-- mod.rs
-  |     |     +-- account.rs       : FuturesAccount, FuturesAccountData
-  |     |     +-- position.rs      : FuturesPosition, FuturesPositionData
-  |     |     +-- data_feeder.rs   : DataFeeder (unified interface)
-  |     |     +-- data_sync.rs     : FuturesDataSyncer
-  |     |     +-- symbol_registry.rs: SymbolRegistry
-  |     |     +-- trade_settings.rs: TradeSettings, PositionMode
-  |     |
-  |     +-- models/                : Business models
-  |     |     +-- mod.rs
-  |     |     +-- types.rs         : MarketStream, MockMarketStream
-  |     |     +-- ws.rs           : KLine, Period, Tick
-  |     |
-  |     +-- recovery/              : Checkpoint recovery
-  |     |     +-- mod.rs
-  |     |     +-- checkpoint_manager.rs
-  |     |
-  |     +-- trader_pool.rs         : TraderPool, SymbolMeta, TradingStatus
-  |     +-- replay_source.rs       : ReplaySource, KLineSource
-  |     +-- symbol_rules.rs        : SymbolRuleService, ParsedSymbolRules
-  |
-  +-- examples/
-  |     +-- test_trade_settings.rs
-  |
-  +-- Cargo.toml
-
-Key Files:
-  - src/lib.rs : 54 lines
-  - src/ws/kline_1m/kline_synthesizer.rs : K-line synthesis logic
-
-
-2.4 c_data_process/ - Signal Generation Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\c_data_process\
-
-Purpose: Indicator calculation, signal generation, strategy state
-
-Structure:
-c_data_process/
-  +-- src/
-  |     +-- lib.rs
-  |     |
-  |     +-- pine_indicator_full.rs : Pine v5 indicators (EMA, RSI, PineColor)
-  |     |
-  |     +-- min/                   : Minute-level strategy
-  |     |     +-- mod.rs
-  |     |     +-- trend.rs
-  |     |
-  |     +-- day/                   : Day-level strategy
-  |     |     +-- mod.rs
-  |     |     +-- trend.rs
-  |     |
-  |     +-- processor.rs           : SignalProcessor
-  |     |
-  |     +-- strategy_state/         : Strategy state management
-  |           +-- mod.rs
-  |           +-- state.rs          : StrategyStateManager
-  |           +-- db.rs            : StrategyStateDb
-  |           +-- error.rs
-  |
-  +-- Cargo.toml
-
-Key Files:
-  - src/lib.rs : 24 lines
-  - src/pine_indicator_full.rs : Full Pine v5 indicator implementation
-
-
-2.5 d_checktable/ - Check Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\d_checktable\
-
-Purpose: Periodic strategy checks (async concurrent)
-
-Structure:
-d_checktable/
-  +-- src/
-  |     +-- lib.rs
-  |     |
-  |     +-- check_table.rs         : CheckTable, CheckEntry
-  |     +-- types.rs               : CheckChainContext, CheckSignal
-  |     |
-  |     +-- h_15m/                 : High-frequency 15-minute checks
-  |     |     +-- mod.rs
-  |     |     +-- min_quantity_calculator.rs
-  |     |
-  |     +-- l_1d/                  : Low-frequency 1-day checks
-  |           +-- mod.rs
-  |           +-- day_quantity_calculator.rs
-  |
-  +-- Cargo.toml
-
-Key Files:
-  - src/lib.rs : 18 lines
-
-
-2.6 e_risk_monitor/ - Risk Compliance Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\e_risk_monitor\
-
-Purpose: Risk control, position management, persistence
-
-Structure:
-e_risk_monitor/
-  +-- src/
-  |     +-- lib.rs
-  |     |
-  |     +-- risk/                   : Risk management
-  |     |     +-- mod.rs
-  |     |     +-- common/           : Common risk
-  |     |     |     +-- mod.rs
-  |     |     |     +-- risk.rs     : RiskPreChecker
-  |     |     |     +-- risk_rechecker.rs
-  |     |     |     +-- order_check.rs
-  |     |     |     +-- thresholds.rs
-  |     |     +-- pin/              : Pin risk
-  |     |     |     +-- mod.rs
-  |     |     |     +-- pin_risk_limit.rs
-  |     |     +-- trend/            : Trend risk
-  |     |     |     +-- mod.rs
-  |     |     |     +-- trend_risk_limit.rs
-  |     |     +-- minute_risk.rs    : Minute-level risk calculation
-  |     |
-  |     +-- position/               : Position management
-  |     |     +-- mod.rs
-  |     |     +-- position_manager.rs : LocalPosition, LocalPositionManager
-  |     |     +-- position_exclusion.rs : PositionExclusionChecker
-  |     |
-  |     +-- persistence/            : Data persistence
-  |     |     +-- mod.rs
-  |     |     +-- persistence.rs     : PersistenceService
-  |     |     +-- sqlite_persistence.rs : SqliteEventRecorder
-  |     |     +-- disaster_recovery.rs : DisasterRecovery
-  |     |     +-- startup_recovery.rs : StartupRecoveryManager
-  |     |
-  |     +-- shared/                 : Shared components
-  |           +-- mod.rs
-  |           +-- account_pool.rs   : AccountPool, CircuitBreakerState
-  |           +-- margin_config.rs  : MarginPoolConfig
-  |           +-- pnl_manager.rs    : PnlManager
-  |           +-- round_guard.rs    : RoundGuard
-  |           +-- market_status.rs  : MarketStatus, MarketStatusDetector
-  |
-  +-- Cargo.toml
-
-Key Files:
-  - src/lib.rs : 23 lines
-
-
-2.7 f_engine/ - Engine Runtime Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\f_engine\
-
-Purpose: Core trading engine, execution coordination
-
-Structure:
-f_engine/
-  +-- src/
-  |     +-- lib.rs                 : Crate entry (59 lines)
-  |     |
-  |     +-- core/                  : Core engine components
-  |     |     +-- mod.rs           : 55 lines, core exports
-  |     |     +-- engine_v2.rs     : TradingEngineV2 (main engine)
-  |     |     +-- engine_state.rs  : EngineState, EngineStatus
-  |     |     +-- state.rs         : SymbolState, TradeLock
-  |     |     +-- strategy_pool.rs : StrategyPool
-  |     |     +-- execution.rs     : TradingPipeline
-  |     |     +-- triggers.rs     : TriggerManager
-  |     |     +-- fund_pool.rs     : FundPoolManager
-  |     |     +-- risk_manager.rs  : RiskManager
-  |     |     +-- monitoring.rs     : TimeoutMonitor
-  |     |     +-- rollback.rs      : RollbackManager
-  |     |     +-- business_types.rs : PositionSide, VolatilityTier, etc.
-  |     |     +-- tests.rs         : Unit tests
-  |     |
-  |     +-- interfaces/             : Trait definitions (ONLY traits, no impl)
-  |     |     +-- mod.rs           : 26 lines
-  |     |     +-- market_data.rs   : MarketDataProvider, MarketKLine
-  |     |     +-- strategy.rs      : StrategyExecutor, TradingSignal
-  |     |     +-- risk.rs          : RiskChecker, RiskLevel
-  |     |     +-- execution.rs     : ExchangeGateway trait
-  |     |     +-- check_table.rs   : CheckTableProvider
-  |     |     +-- adapters.rs      : Adapter implementations
-  |     |
-  |     +-- order/                  : Order execution
-  |     |     +-- mod.rs
-  |     |     +-- gateway.rs        : ExchangeGateway trait
-  |     |     +-- order.rs          : OrderExecutor
-  |     |     +-- mock_binance_gateway.rs : Mock implementation
-  |     |
-  |     +-- channel/               : Channel mode switching
-  |     |     +-- mod.rs
-  |     |     +-- mode_switcher.rs  : ChannelType, mode transitions
-  |     |
-  |     +-- strategy/              : Strategy components
-  |     |     +-- mod.rs
-  |     |     +-- executor.rs      : StrategyExecutor
-  |     |
-  |     +-- types.rs               : Shared types (OrderRequest, Side)
-  |
-  +-- Cargo.toml
-
-Key Files:
-  - src/lib.rs : 59 lines
-  - src/core/mod.rs : 55 lines, lists all core submodules
-  - src/core/engine_v2.rs : Main TradingEngineV2 implementation
-  - src/interfaces/mod.rs : 26 lines, all trait exports
-
-f_engine/src Subdirectory Constraint (MANDATORY):
---------------------------------------------------------------------------------
-NEW files MUST be placed in appropriate subdirectories:
-  - core/       : Engine core logic (engine, state, execution)
-  - order/      : Order execution (gateway, order executor)
-  - channel/    : Channel/mode switching
-  - strategy/   : Strategy components
-  - interfaces/ : Cross-module trait definitions ONLY
-  - types.rs    : Shared types across submodules
-
-
-2.8 g_test/ - Test Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\g_test\
-
-Purpose: Centralized functional tests
-
-Structure:
-g_test/
-  +-- src/
-  |     +-- lib.rs                 : 13 lines
-  |     |
-  |     +-- b_data_source/         : b_data_source tests
-  |     |     +-- mod.rs
-  |     |     +-- api/
-  |     |     |     +-- mod.rs
-  |     |     |     +-- account.rs
-  |     |     |     +-- symbol_registry.rs
-  |     |     +-- ws/
-  |     |     |     +-- mod.rs
-  |     |     |     +-- kline.rs
-  |     |     |     +-- orderbook.rs
-  |     |     +-- models/
-  |     |     |     +-- mod.rs
-  |     |     |     +-- models.rs
-  |     |     +-- recovery.rs
-  |     |     +-- trader_pool_test.rs
-  |     |
-  |     +-- strategy/              : Strategy tests
-  |           +-- mod.rs
-  |           +-- mock_gateway.rs
-  |           +-- strategy_executor_test.rs
-  |
-  +-- Cargo.toml
-
-
-2.9 mock 组件/ - Sandbox Layer
---------------------------------------------------------------------------------
-Path: D:\Rust项目\barter-rs-main\crates\mock 组件\
-
-Purpose: Experimental code, testing new features
-
-Structure:
-mock 组件/
-  +-- src/
-  |     +-- lib.rs                 : 26 lines
-  |     |
-  |     +-- config.rs              : ShadowConfig
-  |     +-- simulator.rs           : Account, OrderEngine, Position
-  |     +-- gateway.rs             : ShadowBinanceGateway
-  |     +-- tick_generator.rs      : TickGenerator, KLineInput
-  |     +-- perf_test.rs           : Performance testing
-  |     +-- backtest.rs            : BacktestStrategy, MaCrossStrategy
-  |     +-- historical_replay.rs    : ReplayController, MemoryInjector
-  |
-  +-- Cargo.toml
-
-================================================================================
-3. Naming Conventions
-================================================================================
-
-3.1 Crate Naming
---------------------------------------------------------------------------------
-  - a_common     : Infrastructure layer (a_ prefix for lowest layer)
-  - x_data       : Business abstraction (x_ for cross-cutting)
-  - b_data_source : Data layer
-  - c_data_process : Signal generation
-  - d_checktable  : Check layer
-  - e_risk_monitor : Risk layer
-  - f_engine      : Engine layer
-  - g_test        : Test layer
-  - mock 组件     : Sandbox layer
-
-3.2 Module Naming
---------------------------------------------------------------------------------
-  - snake_case for modules and files
-  - Example: position_manager.rs, risk_rechecker.rs
-
-3.3 Trait Naming
---------------------------------------------------------------------------------
-  - PascalCase traits with _Provider, _Executor, _Checker suffix
-  - Examples: MarketDataProvider, StrategyExecutor, RiskChecker
-
-3.4 Type Naming
---------------------------------------------------------------------------------
-  - PascalCase for types, enums, structs
-  - snake_case for fields and functions
-  - Example: struct LocalPositionManager, field position_side
-
-================================================================================
-4. Key File Locations
-================================================================================
-
-Error Types:
-  - a_common/src/claint/mod.rs         : MarketError, EngineError, AppError
-  - x_data/src/error.rs                : x_data errors
-  - c_data_process/src/strategy_state/error.rs
-
-State Management:
-  - x_data/src/state/mod.rs            : StateViewer, StateManager traits
-  - f_engine/src/core/engine_state.rs  : EngineState implementation
-
-Trading Engine:
-  - f_engine/src/core/engine_v2.rs     : TradingEngineV2 (main entry)
-  - f_engine/src/interfaces/mod.rs    : All trait definitions
-
-Persistence:
-  - e_risk_monitor/src/persistence/persistence.rs
-  - e_risk_monitor/src/persistence/sqlite_persistence.rs
-  - e_risk_monitor/src/persistence/disaster_recovery.rs
-
-Data Models:
-  - a_common/src/models/types.rs       : OrderStatus, basic types
-  - a_common/src/models/market_data.rs : Market data types
-  - x_data/src/trading/signal.rs      : StrategySignal, TradeCommand
-
-Indicators:
-  - c_data_process/src/pine_indicator_full.rs : Pine v5 indicators
-
-================================================================================
-5. Line Counts Summary
-================================================================================
-
-Key Files:
-  - a_common/src/lib.rs           : 69 lines
-  - x_data/src/lib.rs             : 31 lines
-  - b_data_source/src/lib.rs      : 54 lines
-  - c_data_process/src/lib.rs    : 24 lines
-  - d_checktable/src/lib.rs      : 18 lines
-  - e_risk_monitor/src/lib.rs    : 23 lines
-  - f_engine/src/lib.rs          : 59 lines
-  - f_engine/src/core/mod.rs     : 55 lines
-  - f_engine/src/interfaces/mod.rs: 26 lines
-  - g_test/src/lib.rs            : 13 lines
-  - mock 组件/src/lib.rs         : 26 lines
-
-Total Rust files in crates/: 200+ files
-
-================================================================================
-6. Import Path Patterns
-================================================================================
-
-Pattern: crate::<module>::<submodule>
-
-Examples:
-  - use crate::core::engine_v2::TradingEngineV2;
-  - use crate::interfaces::{StrategyExecutor, RiskChecker};
-  - use crate::order::OrderExecutor;
-  - use a_common::MarketError;
-  - use x_data::position::LocalPosition;
-
-Note: f_engine internal imports use crate:: submodules
-      External crate imports use full crate path
-
-================================================================================
-End of STRUCTURE.md
-================================================================================
+================================================================
+STRUCTURE.md - 目录结构文档
+================================================================
+
+Author: Claude Code
+Created: 2026-03-28
+Status: 初始版本
+================================================================
+
+一、项目根目录结构
+=================
+
+    D:\Rust项目\barter-rs-main\
+    |
+    +-- Cargo.toml           # Workspace配置
+    +-- Cargo.lock
+    +-- rustfmt.toml
+    +-- src/                 # 主程序入口
+    |   +-- main.rs
+    |   +-- multi_engine.rs
+    |
+    +-- crates/              # 所有crate源码
+    |   +-- a_common/       # 基础设施层
+    |   +-- x_data/         # 数据状态层
+    |   +-- b_data_source/  # 业务数据层
+    |   +-- c_data_process/  # 数据处理层
+    |   +-- d_checktable/   # 检查层
+    |   +-- e_risk_monitor/ # 风控层
+    |   +-- f_engine/       # 引擎层
+    |   +-- g_test/          # 测试工具
+    |
+    +-- .planning/          # 项目规划文档
+    +-- data/                # 运行时数据
+    +-- deploy/              # 部署配置
+    +-- sandbox/             # 沙盒相关
+    +-- venv/                # Python虚拟环境
+
+
+二、crates目录布局
+==================
+
+2.1 a_common/ - 基础设施层
+
+    crates/a_common/
+    |
+    +-- src/
+    |   +-- lib.rs
+    |   +-- error.rs
+    |   +-- api/             # Binance API网关
+    |   +-- ws/              # WebSocket连接
+    |   +-- config/          # 配置管理
+    |   +-- logs/            # 日志基础设施
+    |   +-- models/          # 通用数据模型
+    |   +-- claint/          # 错误类型
+    |   +-- util/            # 工具函数
+    |   +-- backup/          # 备份类型定义
+    |   +-- exchange/        # 交易所抽象
+    |   +-- volatility/      # 波动率基础类型
+    |
+    +-- Cargo.toml
+
+2.2 x_data/ - 数据状态层
+
+    crates/x_data/
+    |
+    +-- src/
+    |   +-- lib.rs
+    |   +-- state/           # 状态管理
+    |   +-- ...
+    |
+    +-- Cargo.toml
+
+2.3 b_data_source/ - 业务数据层
+
+    crates/b_data_source/
+    |
+    +-- src/
+    |   +-- lib.rs           # 主入口
+    |   +-- api/             # REST API接口
+    |   |   +-- mock_api/    # Mock API网关
+    |   |   +-- symbol_registry/
+    |   |   +-- trade_settings/
+    |   |   +-- DataFeeder.rs
+    |   |
+    |   +-- ws/              # WebSocket接口
+    |   |   +-- mock_ws/     # Mock WS (StreamTickGenerator)
+    |   |   +-- VolatilityManager.rs
+    |   |
+    |   +-- store/          # MarketDataStore实现
+    |   +-- recovery/       # 检查点恢复
+    |   +-- trader_pool/    # 品种池
+    |   +-- replay_source/  # 历史回放
+    |   +-- history/        # 历史数据管理
+    |   +-- symbol_rules/   # 交易对规则
+    |   +-- models/         # 业务数据类型
+    |   +-- trader_pool.rs
+    |   +-- replay_source.rs
+    |
+    +-- Cargo.toml
+
+2.4 c_data_process/ - 数据处理层
+
+    crates/c_data_process/
+    |
+    +-- src/
+    |   +-- lib.rs
+    |   +-- processor.rs     # SignalProcessor核心
+    |   +-- types.rs         # 类型定义
+    |   +-- pine_indicator_full.rs  # Pine指标
+    |   +-- min/             # 分钟K线处理
+    |   +-- day/             # 日K线处理
+    |   +-- strategy_state/ # 策略状态
+    |
+    +-- Cargo.toml
+
+2.5 d_checktable/ - 检查层
+
+    crates/d_checktable/
+    |
+    +-- src/
+    |   +-- lib.rs
+    |   +-- check_table.rs
+    |   +-- types.rs
+    |   +-- recovery.rs
+    |   +-- h_15m/           # 高频15分钟策略
+    |   +-- l_1d/            # 低频1天策略
+    |
+    +-- Cargo.toml
+
+2.6 e_risk_monitor/ - 风控层
+
+    crates/e_risk_monitor/
+    |
+    +-- src/
+    |   +-- lib.rs
+    |   +-- risk/            # 风控模块
+    |   |   +-- common/      # 通用风控
+    |   |   +-- pin/         # PIN风险
+    |   |   +-- trend/       # 趋势风险
+    |   |   +-- minute_risk/ # 分钟风控
+    |   |
+    |   +-- position/       # 持仓管理
+    |   +-- persistence/     # 持久化
+    |   +-- shared/          # 共享状态
+    |
+    +-- Cargo.toml
+
+2.7 f_engine/ - 引擎层
+
+    crates/f_engine/
+    |
+    +-- src/
+    |   +-- lib.rs
+    |   +-- types.rs         # 核心类型
+    |   +-- core/            # 基础引擎
+    |   +-- event/           # 事件驱动引擎 (推荐)
+    |   +-- interfaces/      # 接口定义
+    |   +-- strategy/        # 策略管理
+    |
+    +-- Cargo.toml
+
+2.8 g_test/ - 测试工具
+
+    crates/g_test/
+    +-- Cargo.toml
+
+
+三、命名约定
+============
+
+3.1 Crate命名
+
+    a_common      - 基础设施公共模块
+    b_data_source - 业务数据源
+    c_data_process - 数据处理
+    d_checktable  - 检查表/调度
+    e_risk_monitor - 风险监控
+    f_engine      - 交易引擎
+    g_test        - 测试工具
+    x_data        - 数据状态
+
+3.2 模块命名
+
+    - 小写下划线：api, ws, risk, position
+    - 描述性名称：trader_pool, symbol_rules, volatility
+    - 特定用途：mock_api, mock_ws, replay_source
+
+3.3 类型命名
+
+    结构体：UpperCamelCase
+    - MarketDataStore, SignalProcessor, EventEngine
+
+    枚举：UpperCamelCase
+    - OrderStatus, Side, OrderType
+
+    trait：UpperCamelCase
+    - RiskChecker, DataFeeder, MarketConnector
+
+    函数/方法：小写下划线
+    - write_kline, get_volatility, place_order
+
+3.4 文件命名
+
+    - lib.rs：crate主入口
+    - 模块文件：snake_case.rs
+    - 子模块目录：snake_case/
+
+3.5 宏命名
+
+    - store_write_kline!：存储写入宏
+    - store_get_kline!：存储读取宏
+    - store_get_volatility!：波动率读取宏
+
+
+四、关键文件位置
+================
+
+4.1 入口点
+
+    src/main.rs              - 主程序入口
+    src/multi_engine.rs      - 多引擎示例
+
+4.2 核心trait定义
+
+    b_data_source/src/store/           - MarketDataStore trait
+    b_data_source/src/api/             - DataFeeder trait
+    b_data_source/src/ws/             - MarketConnector trait
+    e_risk_monitor/src/risk/common/   - RiskChecker trait
+
+4.3 核心实现
+
+    b_data_source/src/store/market_data_store.rs  - 存储实现
+    c_data_process/src/processor.rs                - 信号处理
+    f_engine/src/event/                           - 事件引擎
+
+4.4 全局单例
+
+    b_data_source/src/lib.rs:
+    - DEFAULT_STORE (OnceCell<Arc<MarketDataStoreImpl>>)
+    - default_store() 函数
+    - store_write_kline! / store_get_kline! / store_get_volatility! 宏
+
+4.5 Mock组件
+
+    b_data_source/src/ws/mock_ws/:
+    - StreamTickGenerator
+    - SimulatedTick
+    - TickHandshakeChannel
+
+    b_data_source/src/api/mock_api/:
+    - MockApiGateway
+    - OrderEngine
+    - Account
+    - MockRiskChecker
+
+4.6 指标计算
+
+    c_data_process/src/pine_indicator_full.rs:
+    - PineColorDetector (V5)
+    - EMA, RSI计算
+
+4.7 风控模块
+
+    e_risk_monitor/src/risk/:
+    - common/: RiskPreChecker, RiskReChecker
+    - pin/: PinRiskLeverageGuard
+    - trend/: TrendRiskLimitGuard
+    - minute_risk/: 分钟级风控计算
+
+
+五、编译配置
+============
+
+5.1 Workspace配置 (Cargo.toml根目录)
+
+    members:
+    - a_common, b_data_source, c_data_process
+    - d_checktable, e_risk_monitor, f_engine
+    - g_test, x_data
+
+5.2 共享依赖 (workspace.dependencies)
+
+    parking_lot = "0.12"
+    rust_decimal = { version = "1.36", features = ["maths"] }
+    thiserror = "2.0"
+    tracing = "0.1"
+    chrono = { version = "0.4", features = ["serde"] }
+    tokio = { version = "1", features = ["full"] }
+    serde = { version = "1.0", features = ["derive"] }
+
+
+六、配置目录
+============
+
+6.1 .planning/
+
+    .planning/
+    +-- PROJECT.md           - 项目总览
+    +-- ROADMAP.md           - 路线图
+    +-- milestones/          - 里程碑目录
+    +-- codebase/            - 代码库文档
+        +-- ARCHITECTURE.md  - 本文档
+        +-- STRUCTURE.md     - 本文档
+
+6.2 data/ - 运行时数据
+
+    data/                   - K线、指标、持仓等CSV文件
+
+6.3 deploy/ - 部署配置
+
+    deploy/                 - 部署脚本和配置
+
+================================================================
