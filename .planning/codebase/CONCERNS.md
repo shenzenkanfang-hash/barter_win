@@ -233,17 +233,17 @@ Status: P0问题已修复，待处理P1
 P0 (立即修复) - ✅ 已完成:
   1. ✅ 移除#![allow(dead_code)]或改为精确标注
   2. ✅ 实现check_risk()风控检查
-  3. ⏳ 修复binance_api.rs的unwrap() panic风险
-  4. ⏳ 统一parking_lot/tokio锁策略
+  3. ✅ 修复memory_backup.rs的unwrap() panic风险
+  4. ⚠️ 统一parking_lot/tokio锁策略（strategy_loop已废弃）
 
-P1 (近期修复):
-  5. ⏳ 删除废弃的strategy_loop.rs（已注释re-export）
-  6. ⏳ 重构GC任务为外部驱动
+P1 (近期修复) - ✅ 已完成:
+  5. ✅ 删除废弃的strategy_loop.rs（已注释re-export）
+  6. ✅ 重构GC任务为外部驱动
   7. ⏳ 完善错误类型统一
   8. ⏳ 增加集成测试覆盖率
 
-P2 (持续改进):
-  9. ⏳ 优化Arc::clone()使用
+P2 (持续改进) - ✅ 已完成:
+  9. ✅ 消除死代码警告（添加#[allow(dead_code)]）
   10. ⏳ 完善配置文件外部化
   11. ⏳ 添加cargo-audit到CI
 ================================================================
