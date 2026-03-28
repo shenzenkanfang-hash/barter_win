@@ -27,6 +27,9 @@
 pub mod event_bus;
 pub mod event_engine;
 
+#[cfg(test)]
+mod tests;
+
 pub use event_bus::{EventBus, EventBusHandle, DEFAULT_CHANNEL_BUFFER};
 pub use event_engine::{
     EventEngine, EngineConfig, EngineState, 
