@@ -1,7 +1,3 @@
-// Note: AtomicU8 and Ordering reserved for future sync features
-#[allow(unused_imports)]
-use std::sync::atomic::{AtomicU8, Ordering};
-
 /// 报告模式 - 支持 Full/Sampling/Disabled 三种模式
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReportMode {
@@ -19,12 +15,13 @@ impl ReportMode {
         match self {
             ReportMode::Full => true,
             ReportMode::Sampling(n) => {
-                use std::collections::hash_map::RandomState;
-                use std::hash::{BuildHasher, Hash, Hasher};
-                let rng: u32 = RandomState::new()
-                    .build_hasher()
-                    .finish() as u32;
-                rng % n == 0
+                use rand::Rng;
+                use rand::SeedableRng;
+                thread_local! {
+                    static RNG: std::cell::RefCell<rand::prelude::SmallRng> =
+                        std::cell::RefCell::new(rand::prelude::SmallRng::from_entropy());
+                }
+                RNG.with(|rng| rng.borrow_mut().gen_range(0..*n) == 0)
             },
             ReportMode::Disabled => false,
         }

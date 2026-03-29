@@ -54,8 +54,12 @@ impl ReportEntry {
 
     /// 检查是否失联
     pub fn check_stale(&mut self, current_seq: u64, threshold: u64) -> bool {
-        if current_seq - self.last_heartbeat_seq > threshold {
+        // Use checked subtraction to avoid panic
+        let diff = current_seq.saturating_sub(self.last_heartbeat_seq);
+        if diff > threshold {
             self.is_stale = true;
+        } else {
+            self.is_stale = false; // Clear stale when active
         }
         self.is_stale
     }

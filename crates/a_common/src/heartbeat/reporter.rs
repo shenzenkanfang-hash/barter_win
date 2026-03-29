@@ -26,6 +26,12 @@ impl HeartbeatReporter {
     /// 生成新的心跳标记
     pub async fn generate_token(&self) -> Token {
         let seq = self.clock.next_sequence();
+        // Update stale status for all entries
+        let mut entries = self.entries.write().await;
+        for entry in entries.values_mut() {
+            entry.check_stale(seq, self.config.stale_threshold);
+        }
+        drop(entries);
         let started_at = std::time::Instant::now();
         Token::new(seq, started_at)
     }
