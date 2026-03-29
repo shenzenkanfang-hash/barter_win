@@ -231,8 +231,16 @@ async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Err
     let replay_source = ReplaySource::from_csv(DATA_FILE).await?;
     tracing::info!("[b] Loaded {} K-lines", replay_source.len());
 
+    // 共享 Store：Kline1mStream 写入，Trader 读取
+    let shared_store: StoreRef =
+        Arc::new(b_data_source::store::MarketDataStoreImpl::new());
+
     let kline_stream = Arc::new(tokio::sync::Mutex::new(
-        Kline1mStream::from_klines(SYMBOL.to_string(), Box::new(replay_source))
+        Kline1mStream::from_klines_with_store(
+            SYMBOL.to_string(),
+            Box::new(replay_source),
+            shared_store.clone() as Arc<dyn b_data_source::store::MarketDataStore>,
+        )
     ));
 
     // [f] 执行层（独立创建，但由 d 决策后调用）
@@ -245,7 +253,7 @@ async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Err
     tracing::info!("[c] SignalProcessor created");
 
     // [d] 策略层（业务核心）
-    let trader = create_trader()?;
+    let trader = create_trader(shared_store)?;
     tracing::info!("[d] Trader created");
 
     // [e] 风控层
@@ -266,7 +274,7 @@ async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Err
     })
 }
 
-fn create_trader() -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
+fn create_trader(store: StoreRef) -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
     let config = TraderConfig {
         symbol:           SYMBOL.to_string(),
         interval_ms:      100,
@@ -288,7 +296,6 @@ fn create_trader() -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
     let executor = Arc::new(Executor::new(executor_config));
 
     let repository = Arc::new(Repository::new(SYMBOL, DB_PATH)?);
-    let store: StoreRef = b_data_source::default_store().clone();
 
     Ok(Arc::new(Trader::new(config, executor, repository, store)))
 }
@@ -553,31 +560,81 @@ fn stage_e_risk(components: &SystemComponents, ctx: &mut TickContext, loop_id: u
 // ============================================================================
 
 fn parse_raw_kline(data: &str) -> Result<RawKline, Box<dyn std::error::Error>> {
+    // 尝试两种格式：
+    // 1. 完整字段名 {open, close, high, low, volume, is_closed}
+    // 2. Binance 风格 {o, c, h, l, v, x}
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "kebab-case")]
-    struct Raw {
+    struct RawFull {
         #[serde(rename = "open")]
-        open_str: String,
+        open_str:  String,
         #[serde(rename = "close")]
         close_str: String,
         #[serde(rename = "high")]
-        high_str: String,
+        high_str:  String,
         #[serde(rename = "low")]
-        low_str: String,
+        low_str:   String,
         #[serde(rename = "volume")]
         volume_str: String,
         is_closed: bool,
     }
 
-    let raw: Raw = serde_json::from_str(data).or_else(|_| serde_json::from_str(data))?;
+    #[derive(serde::Deserialize)]
+    #[allow(dead_code)]
+    struct RawBinance {
+        #[serde(rename = "o")]
+        o_str:  String,
+        #[serde(rename = "c")]
+        c_str:  String,
+        #[serde(rename = "h")]
+        h_str:  String,
+        #[serde(rename = "l")]
+        l_str:  String,
+        #[serde(rename = "v")]
+        v_str:  String,
+        #[serde(rename = "x")]
+        x:      bool,
+    }
 
+    #[derive(serde::Deserialize)]
+    struct RawWrap {
+        data: RawBinance,
+    }
+
+    // 先尝试完整字段名格式
+    if let Ok(raw) = serde_json::from_str::<RawFull>(data) {
+        return Ok(RawKline {
+            open:     raw.open_str.parse()?,
+            close:    raw.close_str.parse()?,
+            high:     raw.high_str.parse()?,
+            low:      raw.low_str.parse()?,
+            volume:   raw.volume_str.parse()?,
+            is_closed: raw.is_closed,
+        });
+    }
+
+    // 再尝试 Binance 风格 {o, c, h, l, v, x}
+    if let Ok(raw) = serde_json::from_str::<RawBinance>(data) {
+        return Ok(RawKline {
+            open:     raw.o_str.parse()?,
+            close:    raw.c_str.parse()?,
+            high:     raw.h_str.parse()?,
+            low:      raw.l_str.parse()?,
+            volume:   raw.v_str.parse()?,
+            is_closed: raw.x,
+        });
+    }
+
+    // 最后尝试外层包裹 {data: {o, c, h, l, v, x}}
+    let wrapped: RawWrap = serde_json::from_str(data)?;
+    let raw = wrapped.data;
     Ok(RawKline {
-        open:     raw.open_str.parse()?,
-        close:    raw.close_str.parse()?,
-        high:     raw.high_str.parse()?,
-        low:      raw.low_str.parse()?,
-        volume:   raw.volume_str.parse()?,
-        is_closed: raw.is_closed,
+        open:     raw.o_str.parse()?,
+        close:    raw.c_str.parse()?,
+        high:     raw.h_str.parse()?,
+        low:      raw.l_str.parse()?,
+        volume:   raw.v_str.parse()?,
+        is_closed: raw.x,
     })
 }
 

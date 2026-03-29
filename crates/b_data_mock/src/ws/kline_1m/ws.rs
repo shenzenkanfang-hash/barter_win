@@ -77,6 +77,30 @@ impl Kline1mStream {
         &self.store
     }
 
+    /// 创建模拟 1m K线流（使用外部提供的 store）
+    ///
+    /// 用于 main.rs 中让 Trader 和 Kline1mStream 共享同一个 store 实例，
+    /// 这样 Trader 读取 K线时能获取到 Kline1mStream 写入的数据。
+    ///
+    /// `store` 必须实现 `MarketDataStore` trait（由 `b_data_source::store::MarketDataStoreImpl` 提供）。
+    pub fn from_klines_with_store(
+        symbol: String,
+        kline_iter: Box<dyn Iterator<Item = crate::models::KLine> + Send>,
+        store: Arc<dyn b_data_source::store::MarketDataStore>,
+    ) -> Self {
+        // 安全向下转型：store 必须是 MarketDataStoreImpl
+        let store = store
+            .downcast::<b_data_source::store::MarketDataStoreImpl>()
+            .expect("Kline1mStream requires MarketDataStoreImpl");
+        Self {
+            store,
+            synthesizers: HashMap::new(),
+            current_sub: None,
+            kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
+            heartbeat_token: Arc::new(RwLock::new(None)),
+        }
+    }
+
     /// v3.0: 设置心跳 Token
     pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
         let mut guard = self.heartbeat_token.write();
