@@ -110,8 +110,15 @@ impl HeartbeatReporter {
     /// 生成完整报告
     pub async fn generate_report(&self) -> HeartbeatReport {
         let entries = self.entries.read().await;
-        let current_seq = self.clock.current_sequence();
-        let started_seq = self.clock.started_sequence();
+        // 使用所有 entry 中的最大序号，而非时钟序号（时钟未主动递增）
+        let current_seq = entries.values()
+            .map(|e| e.last_heartbeat_seq)
+            .max()
+            .unwrap_or(0);
+        let started_seq = entries.values()
+            .map(|e| e.last_heartbeat_seq)
+            .min()
+            .unwrap_or(0);
 
         let _total = entries.len();
         let active = entries.values().filter(|e| !e.is_stale).count();
