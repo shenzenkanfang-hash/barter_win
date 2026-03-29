@@ -51,7 +51,7 @@ pub use models::{KLine, Period, Tick};
 pub use store::{MarketDataStore, MarketDataStoreImpl, OrderBookData, VolatilityData};
 
 // WS
-pub use ws::kline_1m::{Kline1mStream, KLineSynthesizer, KlineData};
+pub use ws::kline_1m::{Kline1mStream, KLineSynthesizer, KlineData, StoreRef};
 pub use ws::kline_1d::Kline1dStream;
 pub use ws::order_books::{OrderBook, DepthStream, DepthData};
 pub use ws::kline_generator::{KlineStreamGenerator, SimulatedKline};

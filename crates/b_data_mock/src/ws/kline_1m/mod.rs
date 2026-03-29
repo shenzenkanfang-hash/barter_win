@@ -8,4 +8,4 @@ pub mod kline;
 pub mod ws;
 
 pub use kline::KLineSynthesizer;
-pub use ws::{Kline1mStream, KlineData};
+pub use ws::{Kline1mStream, KlineData, StoreRef};

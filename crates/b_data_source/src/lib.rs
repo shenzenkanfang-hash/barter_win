@@ -58,7 +58,10 @@ pub use history::{DataIssue, DataSource, HistoryError, HistoryRequest, HistoryRe
 
 // Re-exports - MarketDataStore (统一存储接口)
 pub mod store;
-pub use store::{MarketDataStore, MarketDataStoreImpl, OrderBookData, VolatilityData};
+pub use store::{MarketDataStore, MarketDataStoreImpl, OrderBookData, VolatilityData,
+    PipelineStage, PipelineEvent, PipelineState, PipelineStateSnapshot,
+    VersionTracker, VersionSnapshot, PipelineStore,
+};
 
 // ============================================================================
 // 默认存储实例（全局单例，供真实 WS 使用）

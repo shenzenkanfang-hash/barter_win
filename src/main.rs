@@ -228,18 +228,31 @@ struct SystemComponents {
 async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Error>> {
     // [b] 数据引擎
     tracing::info!("Loading: {}", DATA_FILE);
-    let replay_source = ReplaySource::from_csv(DATA_FILE).await?;
+    let mut replay_source = ReplaySource::from_csv(DATA_FILE).await?;
     tracing::info!("[b] Loaded {} K-lines", replay_source.len());
 
     // 共享 Store：Kline1mStream 写入，Trader 读取
-    let shared_store: StoreRef =
-        Arc::new(b_data_source::store::MarketDataStoreImpl::new());
+    // 统一使用 b_data_source::store::MarketDataStore trait
+    let store = Arc::new(b_data_source::store::MarketDataStoreImpl::new());
+
+    // 预加载历史数据到 Store（解决沙盒 history_len=0 问题）
+    // Trader 在第一根 tick 前即可读取历史 K线，无需等待逐根闭合
+    if !replay_source.is_empty() {
+        let store_klines = replay_source.to_store_klines();
+        store.preload_klines(SYMBOL, store_klines.clone());
+        tracing::info!(
+            "[b] Preloaded {} klines into store history",
+            store_klines.len()
+        );
+    }
+
+    let shared_store: StoreRef = store;
 
     let kline_stream = Arc::new(tokio::sync::Mutex::new(
         Kline1mStream::from_klines_with_store(
             SYMBOL.to_string(),
             Box::new(replay_source),
-            shared_store.clone() as Arc<dyn b_data_source::store::MarketDataStore>,
+            shared_store.clone(),
         )
     ));
 

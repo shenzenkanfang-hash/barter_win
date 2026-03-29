@@ -2,7 +2,7 @@
 //!
 //! 使用 KlineStreamGenerator + KLineSynthesizer 替代真实 Binance WS
 //!
-//! v3.0: 心跳报到集成 (BS-001)
+//! v4.0: 自循环架构 - store 统一使用 b_data_source::store::MarketDataStore
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -10,11 +10,14 @@ use std::collections::HashMap;
 use parking_lot::RwLock;
 
 use a_common::heartbeat::Token as HeartbeatToken;
-use crate::store::{MarketDataStore, MarketDataStoreImpl};
+use crate::store::MarketDataStoreImpl;
 use crate::ws::kline_1m::kline::KLineSynthesizer;
 
 /// 心跳报到测试点 ID
 const HEARTBEAT_POINT_KLINE_STREAM: &str = "BS-001";
+
+/// Store 类型别名：统一使用 b_data_source 的 trait，支持跨 crate 注入
+pub type StoreRef = Arc<dyn b_data_source::store::MarketDataStore + Send + Sync>;
 
 /// Kline 数据结构（与 b_data_source 完全对齐）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,8 +48,8 @@ pub struct KlineData {
 ///
 /// 使用 KlineStreamGenerator 生成的子K线流，内部维护 KLineSynthesizer
 pub struct Kline1mStream {
-    /// 共享存储
-    store: Arc<MarketDataStoreImpl>,
+    /// 共享存储（统一使用 b_data_source::store::MarketDataStore trait）
+    store: StoreRef,
     /// 品种 -> K线合成器
     synthesizers: HashMap<String, KLineSynthesizer>,
     /// 当前处理的子K线
@@ -59,12 +62,17 @@ pub struct Kline1mStream {
 
 impl Kline1mStream {
     /// 创建模拟 1m K线流（从历史 K线数据）
+    ///
+    /// 使用内部默认 store（仅用于测试，main.rs 应使用 from_klines_with_store）
     pub fn from_klines(
         symbol: String,
         kline_iter: Box<dyn Iterator<Item = crate::models::KLine> + Send>,
     ) -> Self {
+        // 将内部 MarketDataStoreImpl 包装为 dyn trait
+        let inner: Arc<MarketDataStoreImpl> = Arc::new(MarketDataStoreImpl::new());
+        let store: StoreRef = inner as StoreRef;
         Self {
-            store: Arc::new(MarketDataStoreImpl::new()),
+            store,
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
@@ -73,8 +81,8 @@ impl Kline1mStream {
     }
 
     /// 获取共享存储
-    pub fn store(&self) -> &Arc<MarketDataStoreImpl> {
-        &self.store
+    pub fn store(&self) -> StoreRef {
+        self.store.clone()
     }
 
     /// 创建模拟 1m K线流（使用外部提供的 store）
@@ -82,16 +90,14 @@ impl Kline1mStream {
     /// 用于 main.rs 中让 Trader 和 Kline1mStream 共享同一个 store 实例，
     /// 这样 Trader 读取 K线时能获取到 Kline1mStream 写入的数据。
     ///
-    /// `store` 必须实现 `MarketDataStore` trait（由 `b_data_source::store::MarketDataStoreImpl` 提供）。
+    /// `store` 必须实现 `b_data_source::store::MarketDataStore` trait。
+    /// 由于 b_data_mock::MarketDataStoreImpl 现在也 impl了该 trait，
+    /// 因此可以用 b_data_mock 的 store 或 b_data_source 的 store。
     pub fn from_klines_with_store(
         symbol: String,
         kline_iter: Box<dyn Iterator<Item = crate::models::KLine> + Send>,
-        store: Arc<dyn b_data_source::store::MarketDataStore>,
+        store: StoreRef,
     ) -> Self {
-        // 安全向下转型：store 必须是 MarketDataStoreImpl
-        let store = store
-            .downcast::<b_data_source::store::MarketDataStoreImpl>()
-            .expect("Kline1mStream requires MarketDataStoreImpl");
         Self {
             store,
             synthesizers: HashMap::new(),
@@ -156,8 +162,20 @@ impl Kline1mStream {
             is_closed: sub.is_last_in_kline,
         };
 
-        // 写入存储
-        self.store.write_kline(&sub.symbol, kline_data.clone(), sub.is_last_in_kline);
+        // 写入共享存储：将 b_data_mock 的 KlineData 转换为 b_data_source 的 KlineData
+        let store_kline = b_data_source::ws::kline_1m::ws::KlineData {
+            kline_start_time: kline_data.kline_start_time,
+            kline_close_time: kline_data.kline_close_time,
+            symbol: kline_data.symbol.clone(),
+            interval: kline_data.interval.clone(),
+            open: kline_data.open.clone(),
+            close: kline_data.close.clone(),
+            high: kline_data.high.clone(),
+            low: kline_data.low.clone(),
+            volume: kline_data.volume.clone(),
+            is_closed: kline_data.is_closed,
+        };
+        self.store.write_kline(&sub.symbol, store_kline, sub.is_last_in_kline);
 
         // 如果有完成的 K线，序列化返回
         if sub.is_last_in_kline {
@@ -221,8 +239,10 @@ impl Kline1mStream {
 
 impl Default for Kline1mStream {
     fn default() -> Self {
+        let inner: Arc<MarketDataStoreImpl> = Arc::new(MarketDataStoreImpl::new());
+        let store: StoreRef = inner as StoreRef;
         Self {
-            store: Arc::new(MarketDataStoreImpl::new()),
+            store,
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: None,

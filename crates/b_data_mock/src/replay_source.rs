@@ -154,8 +154,33 @@ impl ReplaySource {
         Some(kline)
     }
 
+    /// 检查数据是否已耗尽
     pub fn is_exhausted(&self) -> bool {
         self.exhausted
+    }
+
+    /// 转换为 b_data_source store 所需的 KlineData 格式（用于预加载历史数据）
+    ///
+    /// 用于沙盒启动时将 CSV 历史数据预填充到共享 Store，
+    /// 让 Trader 在第一根 tick 到来前就能读取历史 K线。
+    pub fn to_store_klines(&self) -> Vec<b_data_source::ws::kline_1m::ws::KlineData> {
+        use b_data_source::ws::kline_1m::ws::KlineData as StoreKline;
+
+        self.data
+            .iter()
+            .map(|k| StoreKline {
+                kline_start_time: k.timestamp.timestamp_millis(),
+                kline_close_time: k.timestamp.timestamp_millis() + 60_000,
+                symbol: k.symbol.clone(),
+                interval: "1m".to_string(),
+                open: k.open.to_string(),
+                close: k.close.to_string(),
+                high: k.high.to_string(),
+                low: k.low.to_string(),
+                volume: k.volume.to_string(),
+                is_closed: k.is_closed,
+            })
+            .collect()
     }
 }
 
@@ -171,7 +196,7 @@ fn parse_csv_line(line: &str, line_num: usize) -> Result<KLine, ReplayError> {
     let parts: Vec<&str> = line.split(',').collect();
 
     let (symbol, period_str, timestamp_idx, field_start) = if parts.len() == 6 {
-        ("BTCUSDT".to_string(), "1m", 0, 0)
+        ("HOTUSDT".to_string(), "1m", 0, 1)
     } else if parts.len() >= 8 {
         (parts[0].to_string(), parts[1], 7, 2)
     } else {

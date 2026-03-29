@@ -42,6 +42,14 @@ pub trait MarketDataStore: Send + Sync {
     /// 写入订单簿
     fn write_orderbook(&self, symbol: &str, orderbook: OrderBookData);
 
+    /// 批量预加载 K线数据（用于沙盒/回测启动时填充历史数据）
+    ///
+    /// 将 klines 全部写入历史分区，并将最后一条作为当前K线。
+    /// Trader 启动时即可读取历史，无需等待逐根 K线闭合。
+    fn preload_klines(&self, symbol: &str, klines: Vec<KlineData>) {
+        let _ = (symbol, klines);
+    }
+
     // ========== 查询 ==========
 
     /// 获取当前K线（实时分区）

@@ -46,12 +46,41 @@ impl MarketDataStoreImpl {
     pub fn new_test() -> Self {
         let temp_dir = std::env::temp_dir().join("market_store_test");
         std::fs::create_dir_all(&temp_dir).ok();
-        
+
         let memory = Arc::new(MemoryStore::new());
         let history = Arc::new(HistoryStore::new(temp_dir));
         let volatility = Arc::new(VolatilityManager::new());
-        
+
         Self { memory, history, volatility }
+    }
+
+    /// 预加载 K线数据到存储（用于沙盒/回测启动时批量填充）
+    ///
+    /// 将所有 klines 写入历史分区，并将最后一条写入实时分区（作为当前K线）。
+    /// Trader 在启动时即可读取历史数据，无需等待逐根 K线闭合。
+    pub fn preload_klines(&self, symbol: &str, klines: Vec<KlineData>) {
+        if klines.is_empty() {
+            return;
+        }
+
+        // 1. 全部写入历史分区
+        for kline in &klines {
+            self.history.append_kline(symbol, kline.clone());
+        }
+
+        // 2. 最后一条作为当前 K线（供实时计算使用）
+        if let Some(last) = klines.last() {
+            self.memory.write_kline(symbol, last.clone());
+            self.volatility.update(symbol, last);
+        }
+    }
+
+    /// 预加载 K线数据（接受任意 Iterator，用于 from_csv 等场景）
+    pub fn preload_klines_iter<I>(&self, symbol: &str, klines_iter: I)
+    where
+        I: IntoIterator<Item = KlineData>,
+    {
+        self.preload_klines(symbol, klines_iter.into_iter().collect());
     }
 }
 
