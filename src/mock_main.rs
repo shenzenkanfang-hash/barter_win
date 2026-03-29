@@ -17,7 +17,7 @@ use b_data_mock::{
     OrderInterceptor, OrderInterceptorConfig,
     TickInterceptor, MockApiGateway,
     KlineStreamGenerator, KLine,
-    Period,
+    Period, ReplaySource,
 };
 use a_common::heartbeat as hb;
 use futures_util::{stream, StreamExt};
@@ -27,15 +27,15 @@ use futures_util::{stream, StreamExt};
 // ============================================================================
 
 const INITIAL_BALANCE: Decimal = dec!(10000);
-const TEST_SYMBOLS: &[&str] = &["BTCUSDT", "ETHUSDT", "BNBUSDT"];
 const PROCESS_DELAY_MS: u64 = 5; // 模拟处理延迟
+const SYMBOL: &str = "HOTUSDT";   // 测试品种
+const CSV_PATH: &str = "D:/RusProject/barter-rs-main/data/HOTUSDT_1m_20251009_20251011.csv"; // 真实历史数据
 
 // ============================================================================
 // 测试点ID
 // ============================================================================
 
 const BS_001: &str = "BS-001"; // Kline1mStream
-const BS_003: &str = "BS-003"; // Kline1dStream
 const CP_001: &str = "CP-001"; // SignalProcessor
 const DT_001: &str = "DT-001"; // CheckTable
 const ER_001: &str = "ER-001"; // RiskPreChecker
@@ -120,16 +120,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("========================================");
     println!();
 
-    // 4. 生成模拟 K 线数据
-    let klines = generate_mock_klines();
+    // 4. 从 CSV 加载真实 K 线数据 (HOTUSDT 2025-10-09 ~ 2025-10-11 UTC)
+    let klines = load_klines_from_csv(CSV_PATH, SYMBOL)
+        .expect("Failed to load K-line data from CSV");
 
-    // 5. 创建 K 线流生成器
+    // 5. 创建 K 线流生成器 (每根 1m KLine → 60 个子 K线，模拟 WS 流)
     let mut kline_stream = KlineStreamGenerator::new(
-        "BTCUSDT".to_string(),
+        SYMBOL.to_string(),
         Box::new(klines.into_iter()),
     );
 
-    println!("[2] Mock KLine Stream Created");
+    println!("[2] Mock KLine Stream Created (HOTUSDT 2025-10-09 ~ 2025-10-11)");
     println!();
 
     // 6. 主循环 - 处理模拟数据流
@@ -344,42 +345,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // ============================================================================
-// 辅助函数：生成模拟 K 线数据
+// 辅助函数：从 CSV 文件加载真实 K 线数据
 // ============================================================================
 
-fn generate_mock_klines() -> Vec<KLine> {
-    let base_time = Utc::now();
-    let mut klines = Vec::new();
-    let mut price = dec!(50000);
+fn load_klines_from_csv(path: &str, symbol: &str) -> Result<Vec<KLine>, Box<dyn std::error::Error>> {
+    use std::io::BufRead;
+    use rust_decimal::Decimal;
+    use chrono::DateTime;
 
-    for i in 0..1000 {
-        let open = price;
-        let change = if i % 2 == 0 {
-            dec!(100)
-        } else {
-            dec!(-100)
-        };
-        let high = open + change.abs() + dec!(50);
-        let low = open - change.abs() - dec!(50);
-        let close = open + change;
-        let volume = dec!(100) + Decimal::from((i % 50) as i64);
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut lines = reader.lines();
+
+    let mut klines = Vec::new();
+
+    // 跳过表头
+    if let Some(header) = lines.next() {
+        tracing::info!("CSV header: {}", header?);
+    }
+
+    for line in lines {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() < 6 {
+            continue;
+        }
+
+        // 解析时间戳 (毫秒)
+        let ts_ms: i64 = parts[0].trim().parse()?;
+        let timestamp = DateTime::from_timestamp(ts_ms / 1000, ((ts_ms % 1000) as u32) * 1_000_000)
+            .ok_or_else(|| format!("Invalid timestamp: {}", ts_ms))?;
+
+        // 解析 OHLCV
+        let open: Decimal = parts[1].trim().parse()?;
+        let high: Decimal = parts[2].trim().parse()?;
+        let low: Decimal = parts[3].trim().parse()?;
+        let close: Decimal = parts[4].trim().parse()?;
+        let volume: Decimal = parts[5].trim().parse()?;
 
         klines.push(KLine {
-            symbol: "BTCUSDT".to_string(),
+            symbol: symbol.to_string(),
             period: Period::Minute(1),
             open,
             high,
             low,
             close,
             volume,
-            // 使用过去时间戳模拟真实延迟场景：
-            // 每条数据产生后，模拟 50-200ms 的传输延迟
-            timestamp: base_time - chrono::Duration::milliseconds(200 - (i % 150) as i64),
+            timestamp,
             is_closed: true,
         });
-
-        price = close;
     }
 
-    klines
+    tracing::info!("Loaded {} K-lines from {}", klines.len(), path);
+    Ok(klines)
 }
