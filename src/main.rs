@@ -1,29 +1,33 @@
-//! Trading System Rust Version - Main Entry (v5.1)
+//! Trading System Rust Version - Main Entry (v5.2)
 //!
 //! 【架构】
 //! - 唯一程序入口：main.rs
-//! - 数据源：b_data_mock（模拟/回测）→ Store → Trader
-//! - 策略层：d_checktable/h_15m（Pin策略 + Trader）
+//! - 数据源：b_data_mock/Kline1mStream（模拟 K 线流）
+//! - 信号处理：c_data_process/SignalProcessor
+//! - 策略层：d_checktable/h_15m/Trader
+//! - 风控层：e_risk_monitor
 //! - 心跳监控：a_common/heartbeat（真实心跳系统）
 //!
-//! 【完整数据流】
-//! Mock K线生成 → Store写入 → Trader.execute_once_wal() → 心跳报到
+//! 【心跳报到流程】
+//! 主循环每秒生成一个 Token，Token 在同一心跳周期内被所有组件复用：
 //!
-//! v5.1: 完整数据流驱动测试，DT-002 报到
+//!  Token 生成 → Kline1mStream(BS-001) → SignalProcessor(CP-001)
+//!            → Trader(DT-002) → RiskPreChecker(ER-001) → OrderCheck(ER-003)
+//!
+//! v5.2: 完整心跳报到链路，所有已集成组件均报到
 
 use std::sync::Arc;
 
 use a_common::heartbeat::{self as hb, Config as HbConfig, Token as HeartbeatToken};
-use b_data_source::{
-    default_store,
-    store::{MarketDataStore, MarketDataStoreImpl},
-    ws::kline_1m::ws::KlineData,
-};
+use b_data_mock::models::{KLine, Period};
+use b_data_mock::ws::kline_1m::ws::Kline1mStream;
 use chrono::{Duration as ChronoDuration, Utc};
+use c_data_process::processor::SignalProcessor;
 use d_checktable::h_15m::{
     Executor, ExecutorConfig, Repository, ThresholdConfig, Trader, TraderConfig,
 };
 use d_checktable::h_15m::trader::StoreRef;
+use e_risk_monitor::risk::common::{OrderCheck, RiskPreChecker};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::time::{interval, Duration};
@@ -38,8 +42,7 @@ const INITIAL_BALANCE: Decimal = dec!(10000);
 const SYMBOL: &str = "HOTUSDT";
 const DB_PATH: &str = "D:/RusProject/barter-rs-main/data/trade_records.db";
 const HEARTBEAT_INTERVAL_MS: u64 = 1000;
-const HISTORY_KLINES_COUNT: usize = 60; // 需要至少14根历史K线用于Z-score计算
-const LOOP_ITERATIONS: usize = 100;
+const LOOP_ITERATIONS: usize = 200;
 
 // ============================================================================
 // 主程序
@@ -53,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     tracing::info!("==============================================");
-    tracing::info!("Trading System v5.1 - Full Data Flow Test");
+    tracing::info!("Trading System v5.2 - Full Heartbeat Chain");
     tracing::info!("Symbol: {}", SYMBOL);
     tracing::info!("==============================================");
 
@@ -61,35 +64,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_heartbeat().await;
     tracing::info!("Heartbeat system initialized");
 
-    // 3. 创建并填充 Store（使用全局默认 Store）
-    let store = default_store();
-    fill_store_with_mock_data(store, SYMBOL, HISTORY_KLINES_COUNT)?;
-    tracing::info!("Store filled with {} mock history klines", HISTORY_KLINES_COUNT);
+    // 3. 创建所有组件并注入心跳系统
+    let components = create_components().await?;
 
-    // 4. 初始化 Trader（使用同一个 Store）
-    let trader = create_trader(store).await?;
+    tracing::info!("All components created with heartbeat integration");
 
-    tracing::info!("Trader initialized");
-    tracing::info!("Initial store kline: {:?}", store.get_current_kline(SYMBOL).map(|k| k.close.clone()));
+    // 4. 主循环
+    run_heartbeat_loop(components).await?;
 
-    // 5. 生成初始心跳 Token 并设置到各个组件
-    let initial_token = generate_heartbeat_token().await;
-    tracing::info!("Initial heartbeat token: {}", initial_token);
-
-    // 设置到 Trader (DT-002)
-    trader.set_heartbeat_token(initial_token.clone());
-
-    // 6. 主循环（完整数据流驱动）
-    run_full_data_flow_loop(trader, store).await?;
-
-    // 7. 打印心跳报告
+    // 5. 打印心跳报告
     print_heartbeat_report().await;
 
     Ok(())
 }
 
 // ============================================================================
-// 心跳模块（使用 a_common/heartbeat 真实系统）
+// 心跳模块
 // ============================================================================
 
 async fn init_heartbeat() {
@@ -104,89 +94,110 @@ async fn init_heartbeat() {
     tracing::info!("Heartbeat reporter initialized, stale_threshold={}", stale_threshold);
 }
 
-async fn generate_heartbeat_token() -> HeartbeatToken {
+async fn generate_token() -> HeartbeatToken {
     let reporter = hb::global();
     reporter.generate_token().await
 }
 
 // ============================================================================
-// Store 数据填充（Mock K线）
+// 组件创建
 // ============================================================================
 
-fn fill_store_with_mock_data(
-    store: &Arc<MarketDataStoreImpl>,
-    symbol: &str,
-    count: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let now = Utc::now();
-    let one_minute_ms: i64 = 60 * 1000;
-
-    // 生成历史 K 线（闭合的）
-    let base_price = 0.0001f64;
-    for i in 0..count {
-        let start_time = now - ChronoDuration::minutes(((count - i) as i64) + 1);
-        let close_time = start_time + ChronoDuration::minutes(1);
-
-        let variation = (i as f64) * 0.000001;
-        let open = base_price + variation;
-        let close = base_price + variation + 0.0000005;
-        let high = open.max(close) + 0.0000002;
-        let low = open.min(close) - 0.0000002;
-
-        let kline = KlineData {
-            kline_start_time: start_time.timestamp_millis(),
-            kline_close_time: close_time.timestamp_millis(),
-            symbol: symbol.to_string(),
-            interval: "1m".to_string(),
-            open: format!("{:.8}", open),
-            close: format!("{:.8}", close),
-            high: format!("{:.8}", high),
-            low: format!("{:.8}", low),
-            volume: format!("{:.2}", 1000.0 + (i as f64) * 10.0),
-            is_closed: true,
-        };
-
-        // 写入 Store（闭合的K线会同时写入历史分区）
-        store.write_kline(symbol, kline, true);
-    }
-
-    // 生成当前 K 线（未闭合的）
-    let current_start = now - ChronoDuration::seconds(30);
-    let current_close = now + ChronoDuration::seconds(30);
-
-    let current_kline = KlineData {
-        kline_start_time: current_start.timestamp_millis(),
-        kline_close_time: current_close.timestamp_millis(),
-        symbol: symbol.to_string(),
-        interval: "1m".to_string(),
-        open: format!("{:.8}", base_price + (count as f64) * 0.000001),
-        close: format!("{:.8}", base_price + (count as f64) * 0.000001 + 0.0000003),
-        high: format!("{:.8}", base_price + (count as f64) * 0.000001 + 0.0000005),
-        low: format!("{:.8}", base_price + (count as f64) * 0.000001 - 0.0000001),
-        volume: format!("{:.2}", 500.0),
-        is_closed: false,
-    };
-
-    let current_close = current_kline.close.clone();
-    store.write_kline(symbol, current_kline, false);
-
-    tracing::debug!(
-        "Store filled: {} history klines, current kline: {:?}",
-        store.get_history_klines(symbol).len(),
-        current_close
-    );
-
-    Ok(())
+struct SystemComponents {
+    kline_stream: Arc<tokio::sync::Mutex<Kline1mStream>>,
+    signal_processor: Arc<SignalProcessor>,
+    trader: Arc<Trader>,
+    risk_checker: Arc<RiskPreChecker>,
+    order_checker: Arc<OrderCheck>,
 }
 
-// ============================================================================
-// Trader创建
-// ============================================================================
+async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Error>> {
+    // 生成初始心跳 Token 并设置到所有组件
+    let initial_token = generate_token().await;
 
-async fn create_trader(
-    store: &Arc<MarketDataStoreImpl>,
-) -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
-    // 1. Trader配置
+    // ========== Kline1mStream (BS-001) ==========
+    let kline_stream = create_kline_stream().await;
+    kline_stream.lock().await.set_heartbeat_token(initial_token.clone());
+    tracing::info!("[BS-001] Kline1mStream created and token set");
+
+    // ========== SignalProcessor (CP-001) ==========
+    let signal_processor = Arc::new(SignalProcessor::new());
+    signal_processor.set_heartbeat_token(initial_token.clone());
+    signal_processor.register_symbol(SYMBOL);
+    tracing::info!("[CP-001] SignalProcessor created and token set");
+
+    // ========== Trader (DT-002) ==========
+    let trader = create_trader().await?;
+    trader.set_heartbeat_token(initial_token.clone());
+    tracing::info!("[DT-002] Trader created and token set");
+
+    // ========== RiskPreChecker (ER-001) ==========
+    let mut risk_checker = RiskPreChecker::new(dec!(0.15), dec!(100.0));
+    risk_checker.register_symbol(SYMBOL.to_string());
+    let risk_checker = Arc::new(risk_checker);
+    risk_checker.set_heartbeat_token(initial_token.clone());
+    tracing::info!("[ER-001] RiskPreChecker created and token set");
+
+    // ========== OrderCheck (ER-003) ==========
+    let order_checker = Arc::new(OrderCheck::new());
+    order_checker.set_heartbeat_token(initial_token.clone());
+    tracing::info!("[ER-003] OrderCheck created and token set");
+
+    Ok(SystemComponents {
+        kline_stream,
+        signal_processor,
+        trader,
+        risk_checker,
+        order_checker,
+    })
+}
+
+/// 创建 Kline1mStream（从模拟历史数据）
+async fn create_kline_stream() -> Arc<tokio::sync::Mutex<Kline1mStream>> {
+    // 生成模拟 K 线历史数据
+    let klines = generate_mock_klines(SYMBOL, 60);
+
+    // 创建流
+    let stream = Kline1mStream::from_klines(
+        SYMBOL.to_string(),
+        Box::new(klines.into_iter()),
+    );
+
+    Arc::new(tokio::sync::Mutex::new(stream))
+}
+
+/// 生成模拟 K 线数据
+fn generate_mock_klines(symbol: &str, count: usize) -> Vec<KLine> {
+    let now = Utc::now();
+    let base_price = dec!(0.0001);
+
+    (0..count)
+        .map(|i| {
+            let variation = Decimal::from((i as i64) * 100); // 每次增加 0.000001
+            let open = base_price + variation;
+            let close = base_price + variation + dec!(500);
+            let high = close + dec!(200);
+            let low = open - dec!(200);
+            let volume = dec!(1000) + Decimal::from((i as i64) * 100);
+
+            KLine {
+                symbol: symbol.to_string(),
+                period: Period::Minute(1),
+                open,
+                high,
+                low,
+                close,
+                volume,
+                timestamp: now - ChronoDuration::minutes((count - i) as i64),
+                is_closed: true,
+            }
+        })
+        .collect()
+}
+
+/// 创建 Trader
+async fn create_trader() -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
+    // Trader配置
     let trader_config = TraderConfig {
         symbol: SYMBOL.to_string(),
         interval_ms: 100,
@@ -198,9 +209,7 @@ async fn create_trader(
         thresholds: ThresholdConfig::default(),
     };
 
-    tracing::info!("Trader config thresholds: {:?}", trader_config.thresholds);
-
-    // 2. Executor配置
+    // Executor配置
     let executor_config = ExecutorConfig {
         symbol: SYMBOL.to_string(),
         order_interval_ms: trader_config.order_interval_ms,
@@ -210,125 +219,129 @@ async fn create_trader(
     };
     let executor = Arc::new(Executor::new(executor_config));
 
-    // 3. Repository
+    // Repository
     let repository = Arc::new(Repository::new(SYMBOL, DB_PATH)?);
 
-    // 4. 创建 Trader（使用传入的 store）
-    let store_ref: StoreRef = store.clone();
-    let trader = Arc::new(Trader::new(
-        trader_config,
-        executor,
-        repository,
-        store_ref,
-    ));
-
-    tracing::info!("Trader created successfully with injected store");
+    // 使用默认 Store
+    let store: StoreRef = b_data_source::default_store().clone();
+    let trader = Arc::new(Trader::new(trader_config, executor, repository, store));
 
     Ok(trader)
 }
 
 // ============================================================================
-// 主循环（完整数据流驱动）
+// 主循环（心跳驱动）
 // ============================================================================
 
-async fn run_full_data_flow_loop(
-    trader: Arc<Trader>,
-    store: &Arc<MarketDataStoreImpl>,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_heartbeat_loop(components: SystemComponents) -> Result<(), Box<dyn std::error::Error>> {
     let mut loop_count = 0u64;
     let mut heartbeat_tick = interval(Duration::from_millis(HEARTBEAT_INTERVAL_MS));
+    let mut kline_messages = 0usize;
     let mut trader_executions = 0usize;
-    let mut current_price = dec!(0.00012); // 初始价格
 
-    tracing::info!("Full data flow loop started");
+    tracing::info!("Heartbeat loop started");
 
     loop {
         tokio::select! {
-            // 心跳定时器：每秒更新 Token
+            // 心跳定时器：每秒生成新 Token，设置到所有组件
             _ = heartbeat_tick.tick() => {
-                let token = generate_heartbeat_token().await;
+                let token = generate_token().await;
 
-                // 设置到 Trader (DT-002)
-                trader.set_heartbeat_token(token.clone());
+                // 设置 Token 到所有组件
+                components.kline_stream.lock().await.set_heartbeat_token(token.clone());
+                components.signal_processor.set_heartbeat_token(token.clone());
+                components.trader.set_heartbeat_token(token.clone());
+                components.risk_checker.set_heartbeat_token(token.clone());
+                components.order_checker.set_heartbeat_token(token.clone());
 
-                tracing::trace!("Heartbeat tick: {}", token);
+                tracing::trace!("[HB] Token {} distributed to all components", token.sequence);
             }
 
-            // 数据流处理：模拟实时 K 线更新
+            // 数据流处理
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
                 loop_count += 1;
 
-                // 模拟价格波动
-                let price_change = if loop_count % 3 == 0 {
-                    dec!(0.0000005)
-                } else if loop_count % 5 == 0 {
-                    -dec!(0.0000003)
-                } else {
-                    dec!(0.0000001)
+                // ========== 步骤1: Kline1mStream 获取数据 (BS-001) ==========
+                let kline_data = {
+                    let mut stream = components.kline_stream.lock().await;
+                    stream.next_message_with_heartbeat().await
                 };
-                current_price = (current_price + price_change).max(dec!(0.0001));
 
-                // 更新 Store 中的当前 K 线
-                let now = Utc::now();
-                let kline = KlineData {
-                    kline_start_time: (now - ChronoDuration::seconds(30)).timestamp_millis(),
-                    kline_close_time: (now + ChronoDuration::seconds(30)).timestamp_millis(),
-                    symbol: SYMBOL.to_string(),
-                    interval: "1m".to_string(),
-                    open: format!("{:.8}", current_price - dec!(0.0000002)),
-                    close: format!("{:.8}", current_price),
-                    high: format!("{:.8}", current_price + dec!(0.0000003)),
-                    low: format!("{:.8}", current_price - dec!(0.0000005)),
-                    volume: format!("{:.2}", 100.0 + (loop_count % 100) as f64),
-                    is_closed: false,
-                };
-                store.write_kline(SYMBOL, kline, false);
+                if let Some(data) = kline_data {
+                    kline_messages += 1;
 
-                // 驱动 Trader 执行一次 WAL
-                match trader.execute_once_wal().await {
-                    Ok(result) => {
-                        trader_executions += 1;
-                        match result {
-                            d_checktable::h_15m::ExecutionResult::Executed { qty, order_type } => {
-                                tracing::info!(
-                                    "[Loop {}] Trader executed: {:?} qty={}",
-                                    loop_count,
-                                    order_type,
-                                    qty
-                                );
+                    // 解析 K 线数据
+                    if let Ok(kline) = parse_kline_data(&data) {
+                        // ========== 步骤2: SignalProcessor 更新 (CP-001) ==========
+                        let _ = components.signal_processor
+                            .min_update_with_heartbeat(
+                                SYMBOL,
+                                kline.high,
+                                kline.low,
+                                kline.close,
+                                kline.volume,
+                            )
+                            .await;
+
+                        // ========== 步骤3: Trader 执行 (DT-002) ==========
+                        match components.trader.execute_once_wal().await {
+                            Ok(result) => {
+                                trader_executions += 1;
+                                match &result {
+                                    d_checktable::h_15m::ExecutionResult::Executed { qty, .. } => {
+                                        tracing::debug!(
+                                            "[Loop {}] Trader executed qty={}",
+                                            loop_count, qty
+                                        );
+                                    }
+                                    d_checktable::h_15m::ExecutionResult::Skipped(reason) => {
+                                        tracing::trace!("[Loop {}] Trader skipped: {}", loop_count, reason);
+                                    }
+                                    d_checktable::h_15m::ExecutionResult::Failed(e) => {
+                                        tracing::warn!("[Loop {}] Trader failed: {}", loop_count, e);
+                                    }
+                                }
+
+                                // ========== 步骤4: 如果有订单，调用风控 ==========
+                                if matches!(result, d_checktable::h_15m::ExecutionResult::Executed { .. }) {
+                                    // ER-001: RiskPreChecker
+                                    let _ = components.risk_checker
+                                        .pre_check_with_heartbeat(
+                                            SYMBOL,
+                                            INITIAL_BALANCE,
+                                            dec!(100),
+                                            INITIAL_BALANCE,
+                                        )
+                                        .await;
+
+                                    // ER-003: OrderCheck
+                                    let _ = components.order_checker
+                                        .pre_check_with_heartbeat(
+                                            "mock_order_1",
+                                            SYMBOL,
+                                            "strategy_1",
+                                            dec!(100),
+                                            INITIAL_BALANCE,
+                                            dec!(0),
+                                        )
+                                        .await;
+                                }
                             }
-                            d_checktable::h_15m::ExecutionResult::Skipped(reason) => {
-                                tracing::debug!(
-                                    "[Loop {}] Trader skipped: {}",
-                                    loop_count,
-                                    reason
-                                );
-                            }
-                            d_checktable::h_15m::ExecutionResult::Failed(e) => {
-                                tracing::warn!(
-                                    "[Loop {}] Trader failed: {}",
-                                    loop_count,
-                                    e
-                                );
+                            Err(e) => {
+                                tracing::error!("[Loop {}] Trader error: {}", loop_count, e);
                             }
                         }
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[Loop {}] Trader error: {}",
-                            loop_count,
-                            e
-                        );
                     }
                 }
 
                 // 每50次迭代打印状态
                 if loop_count % 50 == 0 {
-                    let status = trader.current_status();
                     let summary = hb::global().summary().await;
+                    let status = components.trader.current_status();
                     tracing::info!(
-                        "[Loop {}] Executions: {} | Trader: {:?} | Heartbeat: {}/{} active",
+                        "[Loop {}] Klines: {}, Trades: {}, Status: {:?}, Heartbeat: {}/{} active",
                         loop_count,
+                        kline_messages,
                         trader_executions,
                         status,
                         summary.active_count,
@@ -339,8 +352,9 @@ async fn run_full_data_flow_loop(
                 // 安全退出
                 if loop_count >= LOOP_ITERATIONS as u64 {
                     tracing::info!(
-                        "Loop limit reached ({}), exiting after {} trader executions",
+                        "Loop limit reached ({}), exiting: {} klines, {} trader executions",
                         loop_count,
+                        kline_messages,
                         trader_executions
                     );
                     break;
@@ -349,9 +363,45 @@ async fn run_full_data_flow_loop(
         }
     }
 
-    tracing::info!("Full data flow loop exited");
-
+    tracing::info!("Heartbeat loop exited");
     Ok(())
+}
+
+/// 解析 K 线数据
+fn parse_kline_data(data: &str) -> Result<MockKlineData, Box<dyn std::error::Error>> {
+    #[derive(serde::Deserialize)]
+    struct RawKline {
+        kline_start_time: i64,
+        kline_close_time: i64,
+        symbol: String,
+        interval: String,
+        open: String,
+        close: String,
+        high: String,
+        low: String,
+        volume: String,
+        is_closed: bool,
+    }
+
+    let raw: RawKline = serde_json::from_str(data)?;
+
+    Ok(MockKlineData {
+        open: raw.open.parse()?,
+        close: raw.close.parse()?,
+        high: raw.high.parse()?,
+        low: raw.low.parse()?,
+        volume: raw.volume.parse()?,
+        is_closed: raw.is_closed,
+    })
+}
+
+struct MockKlineData {
+    open: Decimal,
+    close: Decimal,
+    high: Decimal,
+    low: Decimal,
+    volume: Decimal,
+    is_closed: bool,
 }
 
 // ============================================================================
@@ -383,12 +433,14 @@ async fn print_heartbeat_report() {
     // 获取详细报告
     let report = reporter.generate_report().await;
     if !report.points_detail.is_empty() {
-        tracing::info!("Active heartbeat points:");
-        for point in report.points_detail.iter().take(10) {
+        tracing::info!("Heartbeat points:");
+        for point in &report.points_detail {
+            let status = if point.is_stale { "STALE" } else { "OK" };
             tracing::info!(
-                "  - {} ({}): {} reports, last at {}",
+                "  {} ({}) [{}]: {} reports, last at {}",
                 point.point_id,
                 point.point_name,
+                status,
                 point.reports_count,
                 point.last_report_at
             );
