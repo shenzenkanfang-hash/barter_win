@@ -1291,10 +1291,11 @@ impl Trader {
             // ===== 多头持仓状态：LongFirstOpen / LongDoubleAdd =====
             PinStatus::LongFirstOpen | PinStatus::LongDoubleAdd => {
                 // v3.0: Python 风格加仓逻辑
+                // 必须有信号 AND 价格在某个区间内
                 // 条件1: signal.long_entry AND price > entry * 1.02 (上涨2%)
-                // 条件2: price > entry * 1.08 (硬阈值，上涨8%)
-                let can_add = signal.long_entry && long_add_cond1.unwrap_or(false)
-                    || long_add_hard.unwrap_or(false);
+                // 条件2: signal.long_entry AND price > entry * 1.08 (硬阈值，上涨8%)
+                let can_add = (signal.long_entry && long_add_cond1.unwrap_or(false))
+                    || (signal.long_entry && long_add_hard.unwrap_or(false));
                 if can_add {
                     return Some((
                         self.build_open_signal(PositionSide::Long, OrderType::DoubleAdd),
@@ -1321,10 +1322,11 @@ impl Trader {
                 }
 
                 // v3.0: Python 风格对冲逻辑
+                // 必须有信号 AND 价格在某个区间内
                 // 条件1: signal.long_hedge AND price < entry * 0.98 (下跌2%)
-                // 条件2: price < entry * 0.90 (硬阈值，下跌10%)
+                // 条件2: signal.long_hedge AND price < entry * 0.90 (硬阈值，下跌10%)
                 let can_hedge = (signal.long_hedge && long_hedge_cond1.unwrap_or(false))
-                    || long_hedge_hard.unwrap_or(false);
+                    || (signal.long_hedge && long_hedge_hard.unwrap_or(false));
                 if can_hedge {
                     return Some((
                         self.build_open_signal(PositionSide::Short, OrderType::HedgeOpen),
@@ -1336,10 +1338,11 @@ impl Trader {
             // ===== 空头持仓状态：ShortFirstOpen / ShortDoubleAdd =====
             PinStatus::ShortFirstOpen | PinStatus::ShortDoubleAdd => {
                 // v3.0: Python 风格加仓逻辑
+                // 必须有信号 AND 价格在某个区间内
                 // 条件1: signal.short_entry AND price < entry * 0.98 (下跌2%)
-                // 条件2: price < entry * 0.92 (硬阈值，下跌8%)
-                let can_add = signal.short_entry && short_add_cond1.unwrap_or(false)
-                    || short_add_hard.unwrap_or(false);
+                // 条件2: signal.short_entry AND price < entry * 0.92 (硬阈值，下跌8%)
+                let can_add = (signal.short_entry && short_add_cond1.unwrap_or(false))
+                    || (signal.short_entry && short_add_hard.unwrap_or(false));
                 if can_add {
                     return Some((
                         self.build_open_signal(PositionSide::Short, OrderType::DoubleAdd),
@@ -1366,10 +1369,11 @@ impl Trader {
                 }
 
                 // v3.0: Python 风格对冲逻辑
+                // 必须有信号 AND 价格在某个区间内
                 // 条件1: signal.short_hedge AND price > entry * 1.02 (上涨2%)
-                // 条件2: price > entry * 1.10 (硬阈值，上涨10%)
+                // 条件2: signal.short_hedge AND price > entry * 1.10 (硬阈值，上涨10%)
                 let can_hedge = (signal.short_hedge && short_hedge_cond1.unwrap_or(false))
-                    || short_hedge_hard.unwrap_or(false);
+                    || (signal.short_hedge && short_hedge_hard.unwrap_or(false));
                 if can_hedge {
                     return Some((
                         self.build_open_signal(PositionSide::Long, OrderType::HedgeOpen),
@@ -1463,8 +1467,9 @@ impl Trader {
 
             PinStatus::LongFirstOpen | PinStatus::LongDoubleAdd => {
                 // v3.0: Python 风格加仓逻辑
-                let can_add = signal.long_entry && long_add_cond1.unwrap_or(false)
-                    || long_add_hard.unwrap_or(false);
+                // 必须有信号 AND 价格在某个区间内
+                let can_add = (signal.long_entry && long_add_cond1.unwrap_or(false))
+                    || (signal.long_entry && long_add_hard.unwrap_or(false));
                 if can_add {
                     return Some(self.build_open_signal(PositionSide::Long, OrderType::DoubleAdd));
                 }
@@ -1482,8 +1487,9 @@ impl Trader {
                 }
 
                 // v3.0: Python 风格对冲逻辑
+                // 必须有信号 AND 价格在某个区间内
                 let can_hedge = (signal.long_hedge && long_hedge_cond1.unwrap_or(false))
-                    || long_hedge_hard.unwrap_or(false);
+                    || (signal.long_hedge && long_hedge_hard.unwrap_or(false));
                 if can_hedge {
                     return Some(self.build_open_signal(PositionSide::Short, OrderType::HedgeOpen));
                 }
@@ -1491,8 +1497,9 @@ impl Trader {
 
             PinStatus::ShortFirstOpen | PinStatus::ShortDoubleAdd => {
                 // v3.0: Python 风格加仓逻辑
-                let can_add = signal.short_entry && short_add_cond1.unwrap_or(false)
-                    || short_add_hard.unwrap_or(false);
+                // 必须有信号 AND 价格在某个区间内
+                let can_add = (signal.short_entry && short_add_cond1.unwrap_or(false))
+                    || (signal.short_entry && short_add_hard.unwrap_or(false));
                 if can_add {
                     return Some(self.build_open_signal(PositionSide::Short, OrderType::DoubleAdd));
                 }
@@ -1510,8 +1517,9 @@ impl Trader {
                 }
 
                 // v3.0: Python 风格对冲逻辑
+                // 必须有信号 AND 价格在某个区间内
                 let can_hedge = (signal.short_hedge && short_hedge_cond1.unwrap_or(false))
-                    || short_hedge_hard.unwrap_or(false);
+                    || (signal.short_hedge && short_hedge_hard.unwrap_or(false));
                 if can_hedge {
                     return Some(self.build_open_signal(PositionSide::Long, OrderType::HedgeOpen));
                 }
