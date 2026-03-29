@@ -1,157 +1,223 @@
-//! Trading System Rust Version - Main Entry
+//! Trading System Rust Version - Main Entry (v5.0)
 //!
-//! 【v4.0 重构后】
-//! - TradingEngineV2 已迁移到 h_15m 层（自循环架构）
-//! - 实盘使用 sandbox_main.rs 进行沙盒测试
-//! - main.rs 仅保留数据源订阅功能
+//! 【架构】
+//! - 唯一程序入口：main.rs
+//! - 数据源：b_data_mock（模拟/回测）
+//! - 策略层：d_checktable/h_15m（Pin策略 + Trader）
+//! - 心跳监控：a_common/heartbeat（真实心跳系统）
+//!
+//! 【使用项目已有组件】
+//! - MarketDataStoreImpl: 数据存储（b_data_source）
+//! - MockApiGateway: 模拟网关（b_data_mock）
+//! - Trader: 交易逻辑（d_checktable/h_15m）
+//! - MinSignalGenerator: 信号生成（d_checktable/h_15m）
+//! - HeartbeatReporter: 心跳监控（a_common/heartbeat）
 
-use a_common::BinanceApiGateway;
-use b_data_source::{Paths, api::FuturesDataSyncer, ws::{Kline1mStream, Kline1dStream, DepthStream}};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, filter::LevelFilter};
+use std::sync::Arc;
+
+use a_common::heartbeat::{self as hb, Config as HbConfig};
+use b_data_mock::{
+    api::{MockApiGateway, MockConfig},
+};
+use d_checktable::h_15m::{
+    Executor, ExecutorConfig, Repository, ThresholdConfig, Trader, TraderConfig,
+};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+use tokio::time::{interval, Duration};
+use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+// ============================================================================
+// 常量配置
+// ============================================================================
+
+const INITIAL_BALANCE: Decimal = dec!(10000);
+const SYMBOL: &str = "HOTUSDT";
+const DB_PATH: &str = "D:/RusProject/barter-rs-main/data/trade_records.db";
+
+// ============================================================================
+// 主程序
+// ============================================================================
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. 初始化日志
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(true)
-                .with_level(true)
-                .with_thread_ids(false)
-        )
-        .with(LevelFilter::INFO)
+        .with(tracing_subscriber::fmt::layer().with_target(true).with_level(true))
         .init();
 
-    tracing::info!("Trading system starting (Data Source Mode)");
+    tracing::info!("==============================================");
+    tracing::info!("Trading System v5.0 - Main Entry");
+    tracing::info!("Symbol: {}", SYMBOL);
+    tracing::info!("==============================================");
 
-    let paths = Paths::new();
-    tracing::info!("Platform: {:?}", paths.platform());
-    tracing::info!("Memory backup: {}", paths.memory_backup_dir);
+    // 2. 初始化心跳监控系统
+    init_heartbeat().await;
+    tracing::info!("Heartbeat system initialized");
 
-    // ========================================
-    // 数据源订阅示例
-    // ========================================
-    tracing::info!("=== Data Source Example ===");
+    // 3. 初始化组件
+    let gateway = init_gateway()?;
+    let trader = create_trader().await?;
 
-    let mut gateway = BinanceApiGateway::new();
-    let all_symbols = gateway.fetch_and_save_all_usdt_symbol_rules().await?;
+    tracing::info!("All components initialized");
+    tracing::info!("Trader config: {:?}", trader.config());
 
-    let trading_symbols: Vec<String> = all_symbols
-        .iter()
-        .map(|s| s.symbol.clone())
-        .collect();
+    // 4. 主循环
+    run_main_loop(trader, gateway).await?;
 
-    tracing::info!("Found {} USDT trading pairs", trading_symbols.len());
+    // 5. 打印心跳报告
+    print_heartbeat_report().await;
 
-    // 2. 启动 1m K线 WS 订阅 (分片: 50个/批, 500ms间隔)
-    tracing::info!("Starting 1m KLine WS subscription...");
-    let mut kline_1m_stream = Kline1mStream::new(trading_symbols.clone()).await?;
-    tracing::info!("1m KLine WS subscription started");
+    Ok(())
+}
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+// ============================================================================
+// 心跳模块（使用 a_common/heartbeat 真实系统）
+// ============================================================================
 
-    // 3. 启动 1d K线 WS 订阅 (分片: 50个/批, 500ms间隔)
-    tracing::info!("Starting 1d KLine WS subscription...");
-    let mut kline_1d_stream = Kline1dStream::new(trading_symbols).await?;
-    tracing::info!("1d KLine WS subscription started");
+/// 心跳点名称
+const POINT_MAIN_LOOP: &str = "DT-002";
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+/// 初始化心跳系统
+async fn init_heartbeat() {
+    let stale_threshold = 3u64;
+    let config = HbConfig {
+        stale_threshold,
+        report_interval_secs: 300,
+        max_file_age_hours: 24,
+        max_file_size_mb: 100,
+    };
+    hb::init(config);
+    tracing::info!("Heartbeat reporter initialized, stale_threshold={}", stale_threshold);
+}
 
-    // 4. 启动 Depth 订单簿 WS (仅 BTC)
-    tracing::info!("Starting Depth WS subscription (BTC only)...");
-    let mut depth_stream = DepthStream::new_btc_only().await?;
-    tracing::info!("Depth WS subscription started");
+/// 全局报到（异步）
+async fn heartbeat_report(point_id: &str, module: &str, function: &str) {
+    let reporter = hb::global();
+    let token = reporter.generate_token().await;
+    reporter.report(&token, point_id, module, function, file!()).await;
+}
 
-    // 5. 初始化账户数据同步器 (实盘行情 + 测试网账户)
-    let account_syncer = FuturesDataSyncer::new();
-    tracing::info!("Account syncer initialized (market: fapi.binance.com, account: testnet.binancefuture.com)");
+// ============================================================================
+// 组件初始化
+// ============================================================================
 
-    // 主循环：交替处理三个流
-    let mut count_1m = 0;
-    let mut count_1d = 0;
-    let mut count_depth = 0;
-    let mut account_print_flag = false;
+fn init_gateway() -> Result<MockApiGateway, Box<dyn std::error::Error>> {
+    let mock_config = MockConfig::new(INITIAL_BALANCE);
+    let gateway = MockApiGateway::new(INITIAL_BALANCE, mock_config);
+
+    tracing::info!("MockApiGateway initialized with balance: {}", INITIAL_BALANCE);
+
+    Ok(gateway)
+}
+
+// ============================================================================
+// Trader创建
+// ============================================================================
+
+async fn create_trader() -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
+    // 心跳报到
+    heartbeat_report(POINT_MAIN_LOOP, "main", "create_trader").await;
+
+    // 1. Trader配置（包含 Python 对齐阈值 v3.0）
+    let trader_config = TraderConfig {
+        symbol: SYMBOL.to_string(),
+        interval_ms: 100,
+        max_position: dec!(0.15),
+        initial_ratio: dec!(0.05),
+        db_path: DB_PATH.to_string(),
+        order_interval_ms: 100,
+        lot_size: dec!(0.001),
+        thresholds: ThresholdConfig::default(),
+    };
+
+    tracing::info!("Trader config thresholds: {:?}", trader_config.thresholds);
+
+    // 2. Executor配置
+    let executor_config = ExecutorConfig {
+        symbol: SYMBOL.to_string(),
+        order_interval_ms: trader_config.order_interval_ms,
+        initial_ratio: trader_config.initial_ratio,
+        lot_size: trader_config.lot_size,
+        max_position: trader_config.max_position,
+    };
+    let executor = Arc::new(Executor::new(executor_config));
+
+    // 3. Repository
+    let repository = Arc::new(Repository::new(SYMBOL, DB_PATH)?);
+
+    // 4. 创建Trader（使用 with_default_store，内部自动转换 StoreRef）
+    let trader = Arc::new(Trader::with_default_store(
+        trader_config,
+        executor,
+        repository,
+    ));
+
+    tracing::info!("Trader created successfully");
+
+    Ok(trader)
+}
+
+// ============================================================================
+// 主循环
+// ============================================================================
+
+async fn run_main_loop(trader: Arc<Trader>, _gateway: MockApiGateway) -> Result<(), Box<dyn std::error::Error>> {
+    let mut loop_count = 0u64;
+    let mut main_tick = interval(Duration::from_millis(100));
+
+    tracing::info!("Main loop started");
 
     loop {
-        tokio::select! {
-            // 1m K线消息
-            msg_1m = kline_1m_stream.next_message() => {
-                if let Some(_msg) = msg_1m {
-                    count_1m += 1;
-                    if count_1m % 1000 == 0 {
-                        tracing::debug!("1m: Processed {} messages", count_1m);
-                    }
-                } else {
-                    tracing::warn!("1m Stream ended");
-                    break;
-                }
-            }
-            // 1d K线消息
-            msg_1d = kline_1d_stream.next_message() => {
-                if let Some(_msg) = msg_1d {
-                    count_1d += 1;
-                    if count_1d % 1000 == 0 {
-                        tracing::debug!("1d: Processed {} messages", count_1d);
-                    }
-                } else {
-                    tracing::warn!("1d Stream ended");
-                    break;
-                }
-            }
-            // Depth 消息
-            msg_depth = depth_stream.next_message() => {
-                if let Some(_msg) = msg_depth {
-                    count_depth += 1;
-                    if count_depth % 1000 == 0 {
-                        tracing::debug!("Depth: Processed {} messages", count_depth);
-                    }
-                } else {
-                    tracing::warn!("Depth Stream ended");
-                    break;
-                }
-            }
-            // 账户打印 (5秒后)
-            _ = async {
-                if !account_print_flag {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                }
-            } => {
-                if !account_print_flag {
-                    println!("========== 账户信息查询 ==========");
-                    match account_syncer.fetch_account().await {
-                        Ok(account) => {
-                            println!("总保证金: {} USDT", account.total_margin_balance);
-                            println!("可用余额: {} USDT", account.available);
-                            println!("未实现盈亏: {} USDT", account.unrealized_pnl);
-                            println!("有效保证金: {} USDT", account.effective_margin);
-                        }
-                        Err(e) => {
-                            println!("获取账户信息失败: {:?}", e);
-                        }
-                    }
+        main_tick.tick().await;
+        loop_count += 1;
 
-                    match account_syncer.fetch_positions().await {
-                        Ok(positions) => {
-                            if positions.is_empty() {
-                                println!("当前无持仓");
-                            } else {
-                                for pos in &positions {
-                                    println!(
-                                        "{} {} 数量:{} 杠杆:{}x",
-                                        pos.symbol, pos.side, pos.qty, pos.leverage
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("获取持仓信息失败: {:?}", e);
-                        }
-                    }
-                    println!("==================================");
-                    account_print_flag = true;
-                }
-            }
+        // 心跳：主循环（异步报到）
+        heartbeat_report(POINT_MAIN_LOOP, "main", "run_main_loop").await;
+
+        // 每1000次迭代打印状态
+        if loop_count % 1000 == 0 {
+            let status = trader.current_status();
+            tracing::info!(
+                "[Loop {}] System alive | Trader status: {:?}",
+                loop_count,
+                status
+            );
+        }
+
+        // 安全退出：避免无限循环
+        if loop_count >= 10000 {
+            tracing::info!("Loop limit reached ({}), exiting", loop_count);
+            break;
         }
     }
 
     Ok(())
+}
+
+// ============================================================================
+// 心跳报告
+// ============================================================================
+
+async fn print_heartbeat_report() {
+    tracing::info!("==============================================");
+    tracing::info!("Heartbeat Report:");
+    let reporter = hb::global();
+    let summary = reporter.summary().await;
+    tracing::info!(
+        "  Total points: {}, Active: {}, Inactive: {}, Reports: {}",
+        summary.total_points,
+        summary.active_count,
+        summary.inactive_count,
+        summary.reports_count,
+    );
+    tracing::info!("==============================================");
+
+    // 保存 JSON 报告到文件
+    if let Err(e) = reporter.save_report("heartbeat_report.json").await {
+        tracing::warn!("Failed to save heartbeat report: {}", e);
+    } else {
+        tracing::info!("Heartbeat report saved to heartbeat_report.json");
+    }
 }

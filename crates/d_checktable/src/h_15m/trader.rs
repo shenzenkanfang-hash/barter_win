@@ -443,6 +443,16 @@ impl Trader {
             .and_then(|k| k.close.parse().ok())
     }
 
+    /// 获取配置引用（供 main.rs 使用）
+    pub fn config(&self) -> &TraderConfig {
+        &self.config
+    }
+
+    /// 获取当前状态（供 main.rs 使用）
+    pub fn current_status(&self) -> PinStatus {
+        self.status_machine.read().current_status()
+    }
+
     /// 获取波动率值
     pub fn volatility_value(&self) -> Option<f64> {
         self.get_volatility().map(|v| v.volatility)
