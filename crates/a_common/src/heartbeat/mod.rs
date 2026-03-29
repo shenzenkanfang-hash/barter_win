@@ -15,7 +15,7 @@ pub use crate::function_name;
 pub use crate::heartbeat;
 pub use mode::ReportMode as Mode;
 pub use points::{TEST_POINT_NAMES, get_point_name as Points};
-pub use reporter::{HeartbeatReporter as Reporter, Summary};
+pub use reporter::{HeartbeatReporter as Reporter, Summary, HeartbeatReport, StalePoint, PointDetail};
 pub use token::HeartbeatToken as Token;
 
 use once_cell::sync::OnceCell;
