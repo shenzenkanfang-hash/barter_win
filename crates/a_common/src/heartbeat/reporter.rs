@@ -126,6 +126,13 @@ impl HeartbeatReporter {
         }
     }
 
+    /// 保存报告到文件
+    pub async fn save_report(&self, path: &str) -> std::io::Result<()> {
+        let report = self.generate_report().await;
+        let json = serde_json::to_string_pretty(&report)?;
+        tokio::fs::write(path, json).await
+    }
+
     /// 设置模式
     pub async fn set_mode(&self, mode: Mode) {
         *self.mode.write().await = Arc::new(mode);
