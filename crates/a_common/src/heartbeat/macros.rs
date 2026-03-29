@@ -1,8 +1,8 @@
 #[macro_export]
 macro_rules! heartbeat {
     ($token:expr, $point_id:expr) => {{
-        $crate::heartbeat_reporter::global()
-            .report($token, $point_id, module_path!(), function_name!(), file!())
+        $crate::heartbeat::global()
+            .report($token, $point_id, module_path!(), $crate::function_name!(), file!())
             .await;
     }};
 }
@@ -10,7 +10,7 @@ macro_rules! heartbeat {
 #[macro_export]
 macro_rules! heartbeat_with_info {
     ($token:expr, $point_id:expr, $module:expr, $function:expr, $file:expr) => {{
-        $crate::heartbeat_reporter::global()
+        $crate::heartbeat::global()
             .report($token, $point_id, $module, $function, $file)
             .await;
     }};

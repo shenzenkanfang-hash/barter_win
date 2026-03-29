@@ -18,18 +18,16 @@ pub use points::{TEST_POINT_NAMES, get_point_name as Points};
 pub use reporter::{HeartbeatReporter as Reporter, Summary};
 pub use token::HeartbeatToken as Token;
 
-use once_cell::sync::Lazy;
-use tokio::sync::Mutex;
+use once_cell::sync::OnceCell;
 
-static REPORTER: Lazy<Mutex<Option<Reporter>>> = Lazy::new(|| Mutex::new(None));
+static REPORTER: OnceCell<Reporter> = OnceCell::new();
 
 /// 初始化全局报告器
-pub async fn init(config: Config) {
-    let mut reporter = REPORTER.lock().await;
-    *reporter = Some(Reporter::new(config));
+pub fn init(config: Config) {
+    let _ = REPORTER.set(Reporter::new(config));
 }
 
 /// 获取全局报告器
 pub fn global() -> &'static Reporter {
-    panic!("HeartbeatReporter not initialized. Call heartbeat::init() first.")
+    REPORTER.get().expect("HeartbeatReporter not initialized. Call heartbeat::init() first.")
 }
