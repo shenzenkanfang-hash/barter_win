@@ -18,6 +18,7 @@ pub mod util;
 pub mod backup;
 pub mod exchange;
 pub mod volatility;
+pub mod heartbeat;
 
 // Re-exports - Volatility
 pub use volatility::{VolatilityCalc, VolatilityStats, VolatilityState, VolatilityRank, VolatilityEntry, KLineInput};
@@ -68,3 +69,6 @@ pub use exchange::{
 
 // Re-export OrderStatus from models::types
 pub use models::types::OrderStatus;
+
+// Re-exports - Heartbeat
+pub use heartbeat::{Clock, Config, Entry, Mode, Points, Reporter, Summary, Token};
