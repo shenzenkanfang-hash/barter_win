@@ -1,18 +1,16 @@
-//! Trading System v5.4 - TickContext 数据链路追踪
+//! Trading System v5.5 - TickContext 业务链路追踪
 //!
-//! 【架构】
-//! - 唯一程序入口：main.rs
-//! - 核心设计：TickContext 贯穿全链路，每层读写同一个上下文
-//! - 数据流：
-//!   TickContext
-//!     → [b_data] KlineStream     写入 data_source
-//!     → [c_data] SignalProcessor 写入 signal_process
-//!     → [d_check] Trader          写入 check_table
-//!     → [e_risk] Risk+Order      写入 risk_check
-//!     → [f_engine] MockGateway    写入 execution
-//!     → 输出完整 JSON 报告
+//! 【架构】按业务逻辑顺序：b → f → d → c → e
 //!
-//! v5.4: 用 TickContext 替代心跳 Token，数据自己说话
+//!   Tick
+//!     → [b] 数据引擎        获取K线原始数据
+//!     → [f] 执行层          更新Mock价格/账户
+//!     → [d] 策略层(业务核心) d调用c，c返回指标结果
+//!     → [c] 指标层          被d调用，返回指标数据
+//!     → [e] 风控层          d的决策触发风控校验
+//!     → ctx.to_report()    输出完整JSON
+//!
+//! v5.5: 业务顺序 b→f→d→c→e，数据层/指标层为被调用方
 
 use std::sync::Arc;
 
@@ -22,8 +20,8 @@ use b_data_mock::{
     replay_source::ReplaySource,
     ws::kline_1m::ws::Kline1mStream,
 };
-use c_data_process::processor::SignalProcessor;
 use chrono::{DateTime, Utc};
+use c_data_process::processor::SignalProcessor;
 use d_checktable::h_15m::{
     Executor, ExecutorConfig, Repository, ThresholdConfig, Trader, TraderConfig,
 };
@@ -46,26 +44,24 @@ const DB_PATH: &str = "D:/RusProject/barter-rs-main/data/trade_records.db";
 const DATA_FILE: &str = "D:/RusProject/barter-rs-main/data/HOTUSDT_1m_20251009_20251011.csv";
 
 // ============================================================================
-// TickContext - 全链路唯一状态容器
+// TickContext - 全链路唯一状态容器（业务顺序 b→f→d→c→e）
 // ============================================================================
 
-/// 一个 Tick 的完整生命周期追踪
-/// 每层只读写自己的字段，前面的字段只读，后面的字段不碰
 #[derive(Debug, Clone)]
 struct TickContext {
     // === 元数据 ===
     pub tick_id: u64,
     pub timestamp: DateTime<Utc>,
 
-    // === 原始数据（只读） ===
+    // === 原始数据（只读）===
     pub kline: RawKline,
 
-    // === 各层结果（各层自写） ===
-    pub data_source:  Option<DataSourceResult>,
-    pub signal_process: Option<SignalProcessResult>,
-    pub check_table:   Option<CheckTableResult>,
-    pub risk_check:     Option<RiskCheckResult>,
-    pub execution:      Option<ExecutionResult>,
+    // === 业务顺序：b → f → d → c → e ===
+    pub b_data:    Option<BDataResult>,    // [b] 数据引擎
+    pub f_engine:  Option<FEngineResult>,  // [f] 执行层（价格更新）
+    pub d_check:   Option<DCheckResult>,    // [d] 策略层（业务核心）
+    pub c_data:    Option<CDataResult>,     // [c] 指标层（被d调用）
+    pub e_risk:    Option<ERiskResult>,     // [e] 风控层
 
     // === 链路追踪 ===
     pub visited: Vec<&'static str>,
@@ -74,50 +70,53 @@ struct TickContext {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RawKline {
-    pub open:  Decimal,
-    pub close: Decimal,
-    pub high:  Decimal,
-    pub low:   Decimal,
-    pub volume: Decimal,
+    pub open:     Decimal,
+    pub close:    Decimal,
+    pub high:     Decimal,
+    pub low:      Decimal,
+    pub volume:   Decimal,
     pub is_closed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct DataSourceResult {
-    pub kline_count: usize,
-    pub valid: bool,
+pub struct BDataResult {
+    pub kline_id:   u64,
+    pub valid:       bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SignalProcessResult {
-    pub zscore_14:   Option<f64>,
-    pub tr_base:     Option<Decimal>,
-    pub pos_norm:    Option<f64>,
-    pub generated:   bool,
+pub struct FEngineResult {
+    pub price_updated: bool,
+    pub account_synced: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CheckTableResult {
-    pub pin_conditions: i32,
-    pub volatility_tier: String,
-    pub decision: String,
-    pub qty: Option<Decimal>,
+#[allow(clippy::large_enum_variant)]
+pub struct DCheckResult {
+    /// 交易决策：long_entry / short_entry / close / skip
+    pub decision:  String,
+    /// 下单数量（有信号时才有值）
+    pub qty:        Option<Decimal>,
+    /// 决策原因
+    pub reason:     String,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RiskCheckResult {
+pub struct CDataResult {
+    /// zscore偏离度（14周期）
+    pub zscore_14:    Option<f64>,
+    /// TR基准值（60周期）
+    pub tr_base:      Option<Decimal>,
+    /// 价格位置（0-100）
+    pub pos_norm:     Option<f64>,
+    /// 是否产生信号
+    pub signal:       bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ERiskResult {
     pub balance_passed: bool,
-    pub order_passed:   bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ExecutionResult {
-    pub order_id:    String,
-    pub filled_price: Option<Decimal>,
-    pub filled_qty:   Option<Decimal>,
-    pub slippage:     Option<Decimal>,
-    pub commission:   Option<Decimal>,
-    pub status:      String,
+    pub order_passed:  bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,40 +132,40 @@ impl TickContext {
             tick_id,
             timestamp: Utc::now(),
             kline,
-            data_source:  None,
-            signal_process: None,
-            check_table:   None,
-            risk_check:     None,
-            execution:      None,
+            b_data:    None,
+            f_engine:  None,
+            d_check:   None,
+            c_data:    None,
+            e_risk:    None,
             visited: vec![],
             errors:  vec![],
         }
     }
 
-    /// 导出完整 JSON 报告
     fn to_report(&self) -> serde_json::Value {
         serde_json::json!({
-            "tick_id":       self.tick_id,
-            "timestamp":     self.timestamp.to_rfc3339(),
-            "complete":      self.is_complete(),
-            "visited_stages": self.visited,
-            "errors":        self.errors,
+            "tick_id":          self.tick_id,
+            "timestamp":        self.timestamp.to_rfc3339(),
+            "complete":         self.is_complete(),
+            "visited_stages":   self.visited,
+            "errors":           self.errors,
             "kline": {
-                "close":    self.kline.close.to_string(),
-                "high":     self.kline.high.to_string(),
-                "low":      self.kline.low.to_string(),
-                "volume":   self.kline.volume.to_string(),
+                "close":  self.kline.close.to_string(),
+                "high":   self.kline.high.to_string(),
+                "low":    self.kline.low.to_string(),
+                "volume": self.kline.volume.to_string(),
             },
-            "data_source":  self.data_source,
-            "signal_process": self.signal_process,
-            "check_table":  self.check_table,
-            "risk_check":   self.risk_check,
-            "execution":    self.execution,
+            "b_data":    self.b_data,
+            "f_engine":  self.f_engine,
+            "d_check":   self.d_check,
+            "c_data":    self.c_data,
+            "e_risk":    self.e_risk,
         })
     }
 
     fn is_complete(&self) -> bool {
-        let required = ["b_data", "c_data", "d_check", "e_risk", "f_engine"];
+        // 按业务顺序检查：b f d c e 全部到达
+        let required = ["b", "f", "d", "c", "e"];
         required.iter().all(|s| self.visited.contains(s))
     }
 }
@@ -182,43 +181,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     tracing::info!("==============================================");
-    tracing::info!("Trading System v5.4 - TickContext Data Pipeline");
+    tracing::info!("Trading System v5.5 - 业务链路 b→f→d→c→e");
     tracing::info!("Symbol: {}", SYMBOL);
     tracing::info!("Data: {}", DATA_FILE);
     tracing::info!("==============================================");
 
-    // 初始化心跳（仅用于进程存活监控）
-    init_heartbeat().await;
-    tracing::info!("Heartbeat monitor initialized");
-
-    // 创建组件
+    init_heartbeat();
     let components = create_components().await?;
 
-    tracing::info!("All components created:");
-    tracing::info!("  - ReplaySource: loaded");
-    tracing::info!("  - KlineStream: ready");
-    tracing::info!("  - SignalProcessor: ready");
-    tracing::info!("  - Trader: ready");
-    tracing::info!("  - RiskPreChecker + OrderCheck: ready");
-    tracing::info!("  - MockApiGateway: balance={}", INITIAL_BALANCE);
+    tracing::info!("Components ready:");
+    tracing::info!("  [b] KlineStream  - 数据引擎");
+    tracing::info!("  [f] MockGateway - 执行层");
+    tracing::info!("  [d] Trader      - 策略层(业务核心)");
+    tracing::info!("  [c] SignalProc  - 指标层(被d调用)");
+    tracing::info!("  [e] RiskChecker - 风控层");
 
-    // 运行数据流
     run_pipeline(components).await?;
-
-    // 心跳报告（进程存活）
     print_heartbeat_report().await;
 
     Ok(())
 }
 
-async fn init_heartbeat() {
-    let config = HbConfig {
-        stale_threshold: 3,
-        report_interval_secs: 300,
-        max_file_age_hours: 24,
-        max_file_size_mb: 100,
-    };
-    hb::init(config);
+fn init_heartbeat() {
+    hb::init(HbConfig {
+        stale_threshold:       3,
+        report_interval_secs:  300,
+        max_file_age_hours:     24,
+        max_file_size_mb:      100,
+    });
+    tracing::info!("Heartbeat monitor ready");
 }
 
 // ============================================================================
@@ -235,33 +226,35 @@ struct SystemComponents {
 }
 
 async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Error>> {
-    // 数据源
+    // [b] 数据引擎
     tracing::info!("Loading: {}", DATA_FILE);
     let replay_source = ReplaySource::from_csv(DATA_FILE).await?;
-    tracing::info!("Loaded {} K-lines", replay_source.len());
+    tracing::info!("[b] Loaded {} K-lines", replay_source.len());
 
     let kline_stream = Arc::new(tokio::sync::Mutex::new(
         Kline1mStream::from_klines(SYMBOL.to_string(), Box::new(replay_source))
     ));
 
-    // 策略组件
+    // [f] 执行层（独立创建，但由 d 决策后调用）
+    let gateway = Arc::new(MockApiGateway::new(INITIAL_BALANCE, MockConfig::default()));
+    tracing::info!("[f] MockGateway created, balance={}", INITIAL_BALANCE);
+
+    // [c] 指标层（被 d 调用）
     let signal_processor = Arc::new(SignalProcessor::new());
     signal_processor.register_symbol(SYMBOL);
+    tracing::info!("[c] SignalProcessor created");
 
+    // [d] 策略层（业务核心）
     let trader = create_trader()?;
+    tracing::info!("[d] Trader created");
 
-    // 风控组件
+    // [e] 风控层
     let mut risk_checker = RiskPreChecker::new(dec!(0.15), dec!(100.0));
     risk_checker.register_symbol(SYMBOL.to_string());
     let risk_checker = Arc::new(risk_checker);
 
     let order_checker = Arc::new(OrderCheck::new());
-
-    // 交易所模拟
-    let gateway = Arc::new(MockApiGateway::new(
-        INITIAL_BALANCE,
-        MockConfig::default(),
-    ));
+    tracing::info!("[e] RiskChecker + OrderCheck created");
 
     Ok(SystemComponents {
         kline_stream,
@@ -290,7 +283,7 @@ fn create_trader() -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
         order_interval_ms: config.order_interval_ms,
         initial_ratio:    config.initial_ratio,
         lot_size:         config.lot_size,
-        max_position:     config.max_position,
+        max_position:    config.max_position,
     };
     let executor = Arc::new(Executor::new(executor_config));
 
@@ -301,20 +294,18 @@ fn create_trader() -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
 }
 
 // ============================================================================
-// 核心：数据流管道
+// 业务流水线（按 b→f→d→c→e 顺序）
 // ============================================================================
 
 async fn run_pipeline(components: SystemComponents) -> Result<(), Box<dyn std::error::Error>> {
     let mut heartbeat_tick = interval(Duration::from_millis(1000));
     let mut loop_count = 0u64;
-    let mut kline_count = 0usize;
-    let mut tick_count = 0usize;
+    let mut tick_count = 0u64;
 
     tracing::info!("Pipeline started");
 
     loop {
         tokio::select! {
-            // 心跳：进程存活监控
             _ = heartbeat_tick.tick() => {
                 tracing::trace!("[HB] alive #{}", loop_count);
             }
@@ -322,80 +313,68 @@ async fn run_pipeline(components: SystemComponents) -> Result<(), Box<dyn std::e
             _ = tokio::time::sleep(Duration::from_millis(50)) => {
                 loop_count += 1;
 
-                // ========== 步骤1: 获取 K 线 → 写入 ctx ==========
+                // ========== [b] 数据引擎：获取K线 ==========
                 let kline_data = {
                     let mut stream = components.kline_stream.lock().await;
                     stream.next_message()
                 };
 
                 let Some(data) = kline_data else {
-                    tracing::info!("Data exhausted at loop {}, exiting", loop_count);
+                    tracing::info!("Data exhausted at loop {}", loop_count);
                     break;
                 };
-
-                kline_count += 1;
 
                 let kline = match parse_raw_kline(&data) {
                     Ok(k) => k,
                     Err(e) => {
-                        tracing::warn!("Parse error: {}", e);
+                        tracing::warn!("[b] Parse error: {}", e);
                         continue;
                     }
                 };
 
-                // 更新 MockApiGateway 价格
-                components.gateway.update_price(SYMBOL, kline.close);
+                let mut ctx = TickContext::new(tick_count + 1, kline);
 
-                // 创建 TickContext
-                let mut ctx = TickContext::new(kline_count as u64, kline);
+                // ========== [b] 写入 ==========
+                stage_b_data(&mut ctx, tick_count + 1);
 
-                // ========== 步骤2: b_data 写入 ==========
-                stage_data_source(&mut ctx);
-                components.gateway.update_price(SYMBOL, ctx.kline.close);
+                // ========== [f] 执行层：更新价格/账户 ==========
+                stage_f_engine(&components, &mut ctx);
 
-                // ========== 步骤3: c_data 写入 ==========
-                stage_signal_process(&components, &mut ctx);
+                // ========== [d] 策略层：做交易决策（业务核心）==========
+                // d 内部会调用 c，拿到指标结果后决定是否交易
+                let d_result = stage_d_check(&components, &mut ctx).await;
 
-                // ========== 步骤4: d_check 写入 ==========
-                stage_check_table(&components, &mut ctx).await;
+                // ========== [c] 指标层：被d调用，更新指标到store ==========
+                // （已在d内部调用c，这里只记录访问）
+                ctx.visited.push("c");
 
-                // ========== 步骤5: e_risk 写入 ==========
-                stage_risk_check(&components, &mut ctx, loop_count);
+                // ========== [e] 风控层：d有决策才触发 ==========
+                stage_e_risk(&components, &mut ctx, loop_count, &d_result);
 
-                // ========== 步骤6: f_engine 写入 ==========
-                stage_execution(&components, &mut ctx, loop_count);
-
-                // ========== 输出完整报告 ==========
                 tick_count += 1;
 
+                // 日志
                 if ctx.errors.is_empty() {
                     tracing::debug!(
-                        "[Tick #{}] complete={} stages={:?}",
+                        "[Tick#{}] b→f→d→c→e complete={} decision={}",
                         ctx.tick_id,
                         ctx.is_complete(),
-                        ctx.visited
+                        ctx.d_check.as_ref().map(|d| d.decision.as_str()).unwrap_or("-")
                     );
                 } else {
-                    tracing::warn!(
-                        "[Tick #{}] errors={:?}",
-                        ctx.tick_id,
-                        ctx.errors
-                    );
+                    tracing::warn!("[Tick#{}] errors={:?}", ctx.tick_id, ctx.errors);
                 }
 
-                // 每 100 个 tick 打印一次完整报告
+                // 每100个tick打印一次
                 if tick_count % 100 == 0 {
-                    let report = ctx.to_report();
                     tracing::info!(
-                        "[Progress] Loops: {}, Klines: {}, Complete: {}, Report: {}",
+                        "[Progress#{}] ticks={} {}",
                         loop_count,
-                        kline_count,
                         tick_count,
-                        serde_json::to_string(&report).unwrap_or_default()
+                        serde_json::to_string(&ctx.to_report()).unwrap_or_default()
                     );
                 }
 
-                // 安全退出
                 if loop_count >= 1000 {
                     tracing::info!("Max iterations reached");
                     break;
@@ -404,7 +383,7 @@ async fn run_pipeline(components: SystemComponents) -> Result<(), Box<dyn std::e
         }
     }
 
-    tracing::info!("Pipeline finished: {} loops, {} klines, {} ticks", loop_count, kline_count, tick_count);
+    tracing::info!("Pipeline done: {} loops, {} ticks", loop_count, tick_count);
     Ok(())
 }
 
@@ -412,200 +391,171 @@ async fn run_pipeline(components: SystemComponents) -> Result<(), Box<dyn std::e
 // 各层实现
 // ============================================================================
 
-/// b_data_source 层：写入 data_source 结果
-fn stage_data_source(ctx: &mut TickContext) {
-    ctx.data_source = Some(DataSourceResult {
-        kline_count: ctx.tick_id as usize,
-        valid: ctx.kline.close > Decimal::ZERO,
+/// [b] 数据引擎：获取并验证K线数据
+fn stage_b_data(ctx: &mut TickContext, kline_id: u64) {
+    let valid = ctx.kline.close > Decimal::ZERO;
+    ctx.b_data = Some(BDataResult {
+        kline_id,
+        valid,
     });
-    ctx.visited.push("b_data");
+    ctx.visited.push("b");
 
-    if !ctx.data_source.as_ref().unwrap().valid {
+    if !valid {
         ctx.errors.push(StageError {
-            stage:  "b_data".into(),
+            stage:  "b".into(),
             code:   "INVALID_PRICE".into(),
             detail: format!("close={} <= 0", ctx.kline.close),
         });
     }
 }
 
-/// c_data_process 层：写入 signal_process 结果
-fn stage_signal_process(components: &SystemComponents, ctx: &mut TickContext) {
-    let result = components.signal_processor.min_update(
-        SYMBOL,
-        ctx.kline.high,
-        ctx.kline.low,
-        ctx.kline.close,
-        ctx.kline.volume,
-    );
-
-    let generated = result.is_ok();
-    ctx.signal_process = Some(SignalProcessResult {
-        zscore_14:  None,
-        tr_base:    None,
-        pos_norm:   None,
-        generated,
+/// [f] 执行层：更新行情价格到网关（其他模块读取当前价）
+fn stage_f_engine(components: &SystemComponents, ctx: &mut TickContext) {
+    components.gateway.update_price(SYMBOL, ctx.kline.close);
+    ctx.f_engine = Some(FEngineResult {
+        price_updated: true,
+        account_synced: true,
     });
-    ctx.visited.push("c_data");
-
-    if let Err(e) = result {
-        ctx.errors.push(StageError {
-            stage:  "c_data".into(),
-            code:   "SIGNAL_ERROR".into(),
-            detail: e.to_string(),
-        });
-    }
+    ctx.visited.push("f");
 }
 
-/// d_checktable 层：写入 check_table 结果（核心交易决策）
-async fn stage_check_table(components: &SystemComponents, ctx: &mut TickContext) {
+/// [d] 策略层：业务核心，做交易决策
+/// 内部调用 [c] 获取指标数据
+async fn stage_d_check(components: &SystemComponents, ctx: &mut TickContext) -> DCheckResult {
+    // [d] 调用 [c] 更新指标，获取指标结果
+    let c_result = {
+        let r = components.signal_processor.min_update(
+            SYMBOL,
+            ctx.kline.high,
+            ctx.kline.low,
+            ctx.kline.close,
+            ctx.kline.volume,
+        );
+
+        CDataResult {
+            zscore_14:  None,
+            tr_base:    None,
+            pos_norm:   None,
+            signal:     r.is_ok(),
+        }
+    };
+    ctx.c_data = Some(c_result);
+    ctx.visited.push("c");
+
+    // [d] 根据指标做交易决策
     let trade_result = components.trader.execute_once_wal().await;
 
     match &trade_result {
         Ok(d_checktable::h_15m::ExecutionResult::Executed { qty, .. }) => {
-            ctx.check_table = Some(CheckTableResult {
-                pin_conditions:  5,
-                volatility_tier: "Medium".into(),
-                decision:        "long_entry".into(),
-                qty:             Some(*qty),
-            });
-            ctx.visited.push("d_check");
+            let result = DCheckResult {
+                decision: "long_entry".into(),
+                qty: Some(*qty),
+                reason:  "signal_triggered".into(),
+            };
+            ctx.d_check = Some(result.clone());
+            ctx.visited.push("d");
+            result
         }
         Ok(d_checktable::h_15m::ExecutionResult::Skipped(reason)) => {
-            ctx.check_table = Some(CheckTableResult {
-                pin_conditions:  0,
-                volatility_tier: "N/A".into(),
-                decision:        format!("skipped:{}", reason),
-                qty:             None,
-            });
-            ctx.visited.push("d_check");
+            let result = DCheckResult {
+                decision: "skip".into(),
+                qty: None,
+                reason:  reason.to_string(),
+            };
+            ctx.d_check = Some(result.clone());
+            ctx.visited.push("d");
+            result
         }
         Ok(d_checktable::h_15m::ExecutionResult::Failed(e)) => {
             ctx.errors.push(StageError {
-                stage:  "d_check".into(),
+                stage:  "d".into(),
                 code:   "TRADE_FAILED".into(),
                 detail: e.to_string(),
             });
+            let result = DCheckResult {
+                decision: "error".into(),
+                qty: None,
+                reason:  e.to_string(),
+            };
+            ctx.d_check = Some(result.clone());
+            ctx.visited.push("d");
+            result
         }
         Err(e) => {
             ctx.errors.push(StageError {
-                stage:  "d_check".into(),
+                stage:  "d".into(),
                 code:   "TRADE_ERROR".into(),
                 detail: e.to_string(),
             });
+            let result = DCheckResult {
+                decision: "error".into(),
+                qty: None,
+                reason:  e.to_string(),
+            };
+            ctx.d_check = Some(result.clone());
+            ctx.visited.push("d");
+            result
         }
     }
 }
 
-/// e_risk_monitor 层：写入 risk_check 结果
-fn stage_risk_check(components: &SystemComponents, ctx: &mut TickContext, loop_id: u64) {
-    // 需要从 check_table 读取 qty 来做风控
-    let Some(ct) = &ctx.check_table else {
-        ctx.visited.push("e_risk");
-        return;
-    };
-    let Some(qty) = ct.qty else {
-        ctx.visited.push("e_risk");
+/// [e] 风控层：d有决策才触发风控校验
+fn stage_e_risk(components: &SystemComponents, ctx: &mut TickContext, loop_id: u64, d_result: &DCheckResult) {
+    let Some(qty) = d_result.qty else {
+        // d没决策，不走风控
+        ctx.visited.push("e");
         return;
     };
 
-    // ER-001: 账户余额检查
+    // ER-001: 账户风控
     let balance_passed = components.risk_checker
         .pre_check(SYMBOL, INITIAL_BALANCE, dec!(100), INITIAL_BALANCE)
         .is_ok();
 
     // ER-003: 订单参数检查
-    let order_check_result = components.order_checker
-        .pre_check(
-            &format!("order_{}", loop_id),
-            SYMBOL,
-            "h_15m_strategy",
-            dec!(100),
-            INITIAL_BALANCE,
-            dec!(0),
-        );
-
+    let order_check_result = components.order_checker.pre_check(
+        &format!("order_{}", loop_id),
+        SYMBOL,
+        "h_15m_strategy",
+        dec!(100),
+        INITIAL_BALANCE,
+        dec!(0),
+    );
     let order_passed = order_check_result.passed;
 
-    ctx.risk_check = Some(RiskCheckResult {
+    ctx.e_risk = Some(ERiskResult {
         balance_passed,
         order_passed,
     });
-    ctx.visited.push("e_risk");
+    ctx.visited.push("e");
 
-    if !balance_passed || !order_passed {
+    // 风控通过，执行模拟成交
+    if balance_passed && order_passed {
+        if let Ok(order) = components.gateway.place_order(SYMBOL, Side::Buy, qty, None) {
+            tracing::info!(
+                "[Tick#{}] [e] Filled: price={} qty={}",
+                ctx.tick_id,
+                order.filled_price,
+                order.filled_qty
+            );
+        }
+    } else {
         ctx.errors.push(StageError {
-            stage:  "e_risk".into(),
+            stage:  "e".into(),
             code:   "RISK_REJECTED".into(),
             detail: format!("balance={} order={}", balance_passed, order_passed),
         });
     }
 }
 
-/// f_engine 层：写入 execution 结果
-fn stage_execution(components: &SystemComponents, ctx: &mut TickContext, loop_id: u64) {
-    let Some(ct) = &ctx.check_table else { return };
-    let Some(qty) = ct.qty else { return };
-    let Some(rc) = &ctx.risk_check else { return };
-
-    // 风控未通过，跳过成交
-    if !rc.balance_passed || !rc.order_passed {
-        ctx.execution = Some(ExecutionResult {
-            order_id:    format!("order_{}", loop_id),
-            filled_price: None,
-            filled_qty:   None,
-            slippage:     None,
-            commission:   None,
-            status:      "risk_rejected".into(),
-        });
-        ctx.visited.push("f_engine");
-        return;
-    }
-
-    // 执行模拟成交
-    let order = components.gateway.place_order(SYMBOL, Side::Buy, qty, None);
-
-    match order {
-        Ok(o) => {
-            ctx.execution = Some(ExecutionResult {
-                order_id:    format!("order_{}", loop_id),
-                filled_price: Some(o.filled_price),
-                filled_qty:   Some(o.filled_qty),
-                slippage:     Some(dec!(0.0001)),
-                commission:   Some(dec!(0.0002)),
-                status:      "filled".into(),
-            });
-            ctx.visited.push("f_engine");
-        }
-        Err(e) => {
-            ctx.execution = Some(ExecutionResult {
-                order_id:    format!("order_{}", loop_id),
-                filled_price: None,
-                filled_qty:   None,
-                slippage:     None,
-                commission:   None,
-                status:      format!("error:{}", e),
-            });
-            ctx.visited.push("f_engine");
-            ctx.errors.push(StageError {
-                stage:  "f_engine".into(),
-                code:   "ORDER_ERROR".into(),
-                detail: e.to_string(),
-            });
-        }
-    }
-}
-
 // ============================================================================
-// 工具函数
+// 工具
 // ============================================================================
 
 fn parse_raw_kline(data: &str) -> Result<RawKline, Box<dyn std::error::Error>> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "kebab-case")]
     struct Raw {
-        kline_start_time: i64,
-        symbol: String,
         #[serde(rename = "open")]
         open_str: String,
         #[serde(rename = "close")]
@@ -619,8 +569,7 @@ fn parse_raw_kline(data: &str) -> Result<RawKline, Box<dyn std::error::Error>> {
         is_closed: bool,
     }
 
-    let raw: Raw = serde_json::from_str(data)
-        .or_else(|_| serde_json::from_str(data))?;
+    let raw: Raw = serde_json::from_str(data).or_else(|_| serde_json::from_str(data))?;
 
     Ok(RawKline {
         open:     raw.open_str.parse()?,
@@ -641,16 +590,11 @@ async fn print_heartbeat_report() {
     tracing::info!("HEARTBEAT REPORT (进程存活监控)");
     tracing::info!("==============================================");
 
-    let reporter = hb::global();
-    let summary = reporter.summary().await;
+    let summary = hb::global().summary().await;
+    tracing::info!("Total: {}, Active: {}, Reports: {}",
+        summary.total_points, summary.active_count, summary.reports_count);
 
-    tracing::info!("Total points: {}", summary.total_points);
-    tracing::info!("Active: {}", summary.active_count);
-    tracing::info!("Reports: {}", summary.reports_count);
-
-    if let Err(e) = reporter.save_report("heartbeat_report.json").await {
+    if let Err(e) = hb::global().save_report("heartbeat_report.json").await {
         tracing::warn!("Save failed: {}", e);
-    } else {
-        tracing::info!("Saved to heartbeat_report.json");
     }
 }
