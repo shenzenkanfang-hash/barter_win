@@ -84,3 +84,11 @@ pub use history::{DataIssue, DataSource, HistoryError, HistoryRequest, HistoryRe
 pub mod interceptor;
 pub use interceptor::{TickInterceptor, OrderInterceptor};
 pub use interceptor::order_interceptor::{OrderInterceptorConfig, OrderStats};
+
+// TradingEventTracker - 策略交易事件追踪器
+pub mod trading_event_tracker;
+pub use trading_event_tracker::{
+    StrategyEventTracker, SimpleMatchEngine,
+    TradingEvent, EventStats, PnlDataPoint,
+    ReplayReport, MaxProfitMoment, MaxDrawdownMoment, InvalidPeriod,
+};
