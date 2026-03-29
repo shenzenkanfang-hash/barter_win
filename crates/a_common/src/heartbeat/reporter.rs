@@ -38,7 +38,7 @@ impl HeartbeatReporter {
         Token::new(seq, started_at)
     }
 
-    /// 报到
+    /// 报到（无延迟信息）
     pub async fn report(
         &self,
         token: &Token,
@@ -59,6 +59,30 @@ impl HeartbeatReporter {
             Entry::new(point_id, name, module, function, file)
         });
         entry.record_report(token.sequence);
+    }
+
+    /// 报到（带延迟信息）
+    pub async fn report_with_latency(
+        &self,
+        token: &Token,
+        point_id: &str,
+        module: &str,
+        function: &str,
+        file: &str,
+        latency_ms: i64,
+    ) {
+        // 检查模式
+        let mode = self.mode.read().await;
+        if !mode.should_report() {
+            return;
+        }
+
+        let mut entries = self.entries.write().await;
+        let entry = entries.entry(point_id.to_string()).or_insert_with(|| {
+            let name = get_point_name(point_id).unwrap_or("Unknown");
+            Entry::new(point_id, name, module, function, file)
+        });
+        entry.record_report_with_latency(token.sequence, latency_ms);
     }
 
     /// 获取摘要
@@ -104,6 +128,10 @@ impl HeartbeatReporter {
                 reports_count: e.reports_count,
                 last_report_at: e.last_report_at,
                 is_stale: e.is_stale,
+                // 延迟统计
+                avg_latency_ms: e.avg_latency_ms(),
+                max_latency_ms: if e.max_latency_ms == 0 && e.reports_count == 0 { None } else { Some(e.max_latency_ms) },
+                last_latency_ms: if e.reports_count == 0 { None } else { Some(e.last_latency_ms) },
             })
             .collect();
 
@@ -186,6 +214,13 @@ pub struct PointDetail {
     pub last_report_at: DateTime<Utc>,
     /// 是否失联
     pub is_stale: bool,
+    // ===== 延迟统计 =====
+    /// 平均延迟（毫秒）
+    pub avg_latency_ms: Option<i64>,
+    /// 最大延迟（毫秒）
+    pub max_latency_ms: Option<i64>,
+    /// 最后延迟（毫秒）
+    pub last_latency_ms: Option<i64>,
 }
 
 /// 失联点信息

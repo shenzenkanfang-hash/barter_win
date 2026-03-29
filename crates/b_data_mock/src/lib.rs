@@ -79,3 +79,8 @@ pub use replay_source::{KLineSource, ReplayError, ReplaySource};
 // History
 pub use history::{HistoryDataManager, HistoryDataProvider};
 pub use history::{DataIssue, DataSource, HistoryError, HistoryRequest, HistoryResponse, KlineMetadata};
+
+// Interceptor - 心跳延迟监控拦截器
+pub mod interceptor;
+pub use interceptor::{TickInterceptor, OrderInterceptor};
+pub use interceptor::order_interceptor::{OrderInterceptorConfig, OrderStats};

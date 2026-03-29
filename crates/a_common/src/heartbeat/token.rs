@@ -1,10 +1,12 @@
 use chrono::{DateTime, Utc};
 
-/// 心跳标记 - 携带心跳序号和时间信息
+/// 心跳标记 - 携带心跳序号、延迟追踪和时间信息
 #[derive(Clone, Debug)]
 pub struct HeartbeatToken {
     /// 心跳序号
     pub sequence: u64,
+    /// 数据产生时间（用于延迟计算）
+    pub data_timestamp: Option<DateTime<Utc>>,
     /// 墙钟时间 (用于展示)
     pub created_at: DateTime<Utc>,
     /// 单调时钟锚点 (用于计算elapsed)
@@ -12,11 +14,23 @@ pub struct HeartbeatToken {
 }
 
 impl HeartbeatToken {
+    /// 创建新的心跳（无数据时间戳）
     pub(crate) fn new(sequence: u64, started_at: std::time::Instant) -> Self {
         Self {
             sequence,
+            data_timestamp: None,
             created_at: Utc::now(),
             started_at,
+        }
+    }
+
+    /// 创建带数据时间戳的心跳（用于延迟追踪）
+    pub fn with_data_timestamp(sequence: u64, data_timestamp: DateTime<Utc>) -> Self {
+        Self {
+            sequence,
+            data_timestamp: Some(data_timestamp),
+            created_at: Utc::now(),
+            started_at: std::time::Instant::now(),
         }
     }
 
@@ -28,6 +42,20 @@ impl HeartbeatToken {
     /// 获取自创建以来经过的时间
     pub fn elapsed(&self) -> std::time::Duration {
         self.started_at.elapsed()
+    }
+
+    /// 计算数据延迟（毫秒）- 数据产生到现在的时间
+    pub fn data_latency_ms(&self) -> Option<i64> {
+        self.data_timestamp.map(|ts| {
+            (Utc::now() - ts).num_milliseconds()
+        })
+    }
+
+    /// 获取数据延迟（秒）- 方便显示
+    pub fn data_latency_secs(&self) -> Option<f64> {
+        self.data_timestamp.map(|ts| {
+            (Utc::now() - ts).num_milliseconds() as f64 / 1000.0
+        })
     }
 }
 
