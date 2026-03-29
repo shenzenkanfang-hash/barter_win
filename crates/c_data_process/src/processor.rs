@@ -10,7 +10,10 @@
 //! - TTL 机制自动清理过时的 1m 品种（默认10分钟无更新则移除）
 //! - 日级品种上限清理（超过 MAX_DAY_SYMBOLS 时清理最旧的）
 //! - 信号缓存机制：缓存最新的 TradingDecision，供 f_engine 拉取
+//!
+//! v3.0: 心跳报到集成 (CP-001)
 
+use a_common::heartbeat::Token as HeartbeatToken;
 use crate::min::trend::{Indicator1m, Indicator1mOutput};
 use crate::day::trend::{BigCycleCalculator, BigCycleIndicators, PineColorBig as DayPineColorBig};
 use crate::types::{PineColor, TradingDecision};
@@ -22,6 +25,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
+
+/// 心跳报到测试点 ID
+const HEARTBEAT_POINT_SIGNAL_PROCESSOR: &str = "CP-001";
 
 /// 信号缓存条目
 #[derive(Debug, Clone)]
@@ -55,6 +61,8 @@ pub struct SignalProcessor {
     min_signal_cache: RwLock<HashMap<String, SignalCacheEntry>>,
     /// 日线级信号缓存
     day_signal_cache: RwLock<HashMap<String, SignalCacheEntry>>,
+    /// v3.0: 心跳 Token
+    heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
 }
 
 /// 日级指标最大数量
@@ -77,6 +85,7 @@ impl SignalProcessor {
             running: AtomicBool::new(false),
             min_signal_cache: RwLock::new(HashMap::new()),
             day_signal_cache: RwLock::new(HashMap::new()),
+            heartbeat_token: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -94,7 +103,45 @@ impl SignalProcessor {
             running: AtomicBool::new(false),
             min_signal_cache: RwLock::new(HashMap::new()),
             day_signal_cache: RwLock::new(HashMap::new()),
+            heartbeat_token: Arc::new(RwLock::new(None)),
         }
+    }
+
+    // ==================== v3.0: 心跳报到 ====================
+
+    /// 设置心跳 Token
+    pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
+        let mut guard = self.heartbeat_token.write();
+        *guard = Some(token);
+    }
+
+    /// 获取当前心跳 Token
+    pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
+        self.heartbeat_token.read().clone()
+    }
+
+    /// 心跳报到（内部方法）
+    pub async fn heartbeat_report(&self) {
+        let token = self.get_heartbeat_token();
+        if let Some(token) = token {
+            if let Ok(reporter) = std::panic::catch_unwind(|| a_common::heartbeat::global()) {
+                reporter.report(
+                    &token,
+                    HEARTBEAT_POINT_SIGNAL_PROCESSOR,
+                    "c_data_process",
+                    "min_update",
+                    file!(),
+                ).await;
+            }
+        }
+    }
+
+    /// 更新分钟级指标（带心跳报到）
+    pub async fn min_update_with_heartbeat(&self, symbol: &str, high: Decimal, low: Decimal, close: Decimal, volume: Decimal) -> Result<(), String> {
+        // 心跳报到
+        self.heartbeat_report().await;
+        // 调用原有逻辑
+        self.min_update(symbol, high, low, close, volume)
     }
 
     // ==================== 注册管理 ====================

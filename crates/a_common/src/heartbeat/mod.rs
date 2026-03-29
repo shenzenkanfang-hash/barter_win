@@ -18,16 +18,37 @@ pub use points::{TEST_POINT_NAMES, get_point_name as Points};
 pub use reporter::{HeartbeatReporter as Reporter, Summary, HeartbeatReport, StalePoint, PointDetail};
 pub use token::HeartbeatToken as Token;
 
-use once_cell::sync::OnceCell;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-static REPORTER: OnceCell<Reporter> = OnceCell::new();
+/// 全局报告器（使用 RwLock 支持重置）
+static REPORTER: RwLock<Option<Arc<Reporter>>> = RwLock::const_new(None);
 
-/// 初始化全局报告器
+/// 初始化全局报告器（如果已存在则替换）
 pub fn init(config: Config) {
-    let _ = REPORTER.set(Reporter::new(config));
+    let reporter = Arc::new(Reporter::new(config));
+    let mut global = REPORTER.try_write();
+    if let Ok(mut guard) = global {
+        *guard = Some(reporter);
+    }
 }
 
-/// 获取全局报告器
-pub fn global() -> &'static Reporter {
-    REPORTER.get().expect("HeartbeatReporter not initialized. Call heartbeat::init() first.")
+/// 重置全局报告器（用于测试隔离）
+pub fn reset() {
+    let mut global = REPORTER.try_write();
+    if let Ok(mut guard) = global {
+        *guard = None;
+    }
+}
+
+/// 获取全局报告器引用（克隆Arc以确保所有权正确）
+pub fn global() -> Arc<Reporter> {
+    // 尝试获取，如果不存在则panic
+    let guard = REPORTER.try_read();
+    if let Ok(guard) = guard {
+        if let Some(reporter) = guard.as_ref() {
+            return reporter.clone();
+        }
+    }
+    panic!("HeartbeatReporter not initialized. Call heartbeat::init() first.")
 }

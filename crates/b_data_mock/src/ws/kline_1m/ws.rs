@@ -1,13 +1,20 @@
 //! 模拟 1m K线 WebSocket
 //!
 //! 使用 KlineStreamGenerator + KLineSynthesizer 替代真实 Binance WS
+//!
+//! v3.0: 心跳报到集成 (BS-001)
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
+use parking_lot::RwLock;
 
+use a_common::heartbeat::Token as HeartbeatToken;
 use crate::store::{MarketDataStore, MarketDataStoreImpl};
 use crate::ws::kline_1m::kline::KLineSynthesizer;
+
+/// 心跳报到测试点 ID
+const HEARTBEAT_POINT_KLINE_STREAM: &str = "BS-001";
 
 /// Kline 数据结构（与 b_data_source 完全对齐）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +53,8 @@ pub struct Kline1mStream {
     current_sub: Option<crate::ws::kline_generator::SimulatedKline>,
     /// K线生成器
     kline_generator: Option<crate::ws::kline_generator::KlineStreamGenerator>,
+    /// v3.0: 心跳 Token
+    heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
 }
 
 impl Kline1mStream {
@@ -59,12 +68,24 @@ impl Kline1mStream {
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
+            heartbeat_token: Arc::new(RwLock::new(None)),
         }
     }
 
     /// 获取共享存储
     pub fn store(&self) -> &Arc<MarketDataStoreImpl> {
         &self.store
+    }
+
+    /// v3.0: 设置心跳 Token
+    pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
+        let mut guard = self.heartbeat_token.write();
+        *guard = Some(token);
+    }
+
+    /// v3.0: 获取当前心跳 Token
+    pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
+        self.heartbeat_token.read().clone()
     }
 
     /// 获取下一个 K线数据（从子K线生成）
@@ -140,6 +161,29 @@ impl Kline1mStream {
         serde_json::to_string(&kline_data).ok()
     }
 
+    /// v3.0: 获取下一个 K线数据（带心跳报到）
+    pub async fn next_message_with_heartbeat(&mut self) -> Option<String> {
+        // 心跳报到（使用 spawn_blocking 因为 next_message 是同步的）
+        let token = self.get_heartbeat_token();
+        if let Some(token) = token {
+            let reporter = a_common::heartbeat::global();
+            let point_id = HEARTBEAT_POINT_KLINE_STREAM.to_string();
+            let module = "b_data_mock::ws::kline_1m".to_string();
+            let function = "next_message_with_heartbeat".to_string();
+            let file = file!().to_string();
+
+            // 使用 spawn_blocking 执行异步心跳报到
+            tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    reporter.report(&token, &point_id, &module, &function, &file).await;
+                });
+            }).await.ok();
+        }
+
+        self.next_message()
+    }
+
     /// 是否还有数据
     pub fn is_exhausted(&self) -> bool {
         self.kline_generator.as_ref().map(|_g| {
@@ -158,6 +202,7 @@ impl Default for Kline1mStream {
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: None,
+            heartbeat_token: Arc::new(RwLock::new(None)),
         }
     }
 }

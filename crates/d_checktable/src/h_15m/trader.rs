@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! h_15m/trader.rs - 品种交易主循环
 //!
 //! 从 MarketDataStore 读取数据，生成交易信号
@@ -6,8 +8,10 @@
 //! # 修复记录
 //! - v2.0: P0-1 主循环启用、P0-2 local_position 填充、P0-3 风控接入、P1-2 锁日志、P1-3 价格偏离度
 //! - v2.1: P2-1 gc_pending 定时调用基础设施
+//! - v3.0: 心跳报到集成 (DT-002)
 
-#![forbid(unsafe_code)]
+//! 心跳报到测试点 ID
+const HEARTBEAT_POINT_TRADER: &str = "DT-002";
 
 use chrono::Utc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -22,6 +26,7 @@ use tokio::time::interval;
 use x_data::position::{LocalPosition, PositionDirection, PositionSide};
 use x_data::trading::signal::{StrategyId, StrategySignal, TradeCommand};
 
+use a_common::heartbeat::Token as HeartbeatToken;
 use b_data_source::MarketDataStore;
 
 use crate::h_15m::executor::{Executor, OrderType};
@@ -351,6 +356,8 @@ pub struct Trader {
     quantity_calculator: Option<MinQuantityCalculator>,
     /// v2.3: P1-1 指标计算器（可选，不配置时使用默认值）
     indicator_calculator: Option<IndicatorCalcFn>,
+    /// v3.0: 心跳 Token（用于心跳报到）
+    heartbeat_token: Arc<ParkingRwLock<Option<HeartbeatToken>>>,
 }
 
 impl Trader {
@@ -383,6 +390,8 @@ impl Trader {
             gc_handle: Arc::new(Mutex::new(None)),
             quantity_calculator: None,
             indicator_calculator: None,
+            // v3.0: 心跳 Token
+            heartbeat_token: Arc::new(ParkingRwLock::new(None)),
         }
     }
 
@@ -417,6 +426,8 @@ impl Trader {
             gc_handle: Arc::new(Mutex::new(None)),
             quantity_calculator: None,
             indicator_calculator: None,
+            // v3.0: 心跳 Token
+            heartbeat_token: Arc::new(ParkingRwLock::new(None)),
         }
     }
 
@@ -451,6 +462,38 @@ impl Trader {
     /// 获取当前状态（供 main.rs 使用）
     pub fn current_status(&self) -> PinStatus {
         self.status_machine.read().current_status()
+    }
+
+    // ==================== v3.0: 心跳报到 ====================
+
+    /// 设置心跳 Token（用于心跳报到）
+    /// v3.0: 心跳报到集成
+    pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
+        let mut guard = self.heartbeat_token.write();
+        *guard = Some(token);
+    }
+
+    /// 获取当前心跳 Token（如果存在）
+    /// v3.0: 心跳报到集成
+    pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
+        self.heartbeat_token.read().clone()
+    }
+
+    /// 心跳报到（内部方法）
+    /// v3.0: 心跳报到集成
+    async fn heartbeat_report(&self) {
+        let token = self.get_heartbeat_token();
+        if let Some(token) = token {
+            if let Ok(reporter) = std::panic::catch_unwind(|| a_common::heartbeat::global()) {
+                reporter.report(
+                    &token,
+                    HEARTBEAT_POINT_TRADER,
+                    "d_checktable::h_15m",
+                    "execute_once_wal",
+                    file!(),
+                ).await;
+            }
+        }
     }
 
     /// 获取波动率值
@@ -992,7 +1035,11 @@ impl Trader {
     ///
     /// P0-1 修复：返回 ExecutionResult 而非 bool，避免静默跳过
     /// P0-3 修复：使用 fetch_account_info() 获取真实风控参数
+    /// v3.0: 心跳报到集成
     pub async fn execute_once_wal(&self) -> Result<ExecutionResult, TraderError> {
+        // v3.0: 心跳报到
+        self.heartbeat_report().await;
+
         // 1. 预创建记录（包含持仓快照）
         let mut record = match self.build_pending_record() {
             Some(r) => r,

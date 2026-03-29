@@ -25,18 +25,25 @@
 //! - tokio::spawn: 0 个（全部直接 await）
 //! - tokio::sleep: 0 个（事件驱动，无轮询）
 //! - 数据竞争: 0 次（单线程串行处理）
+//!
+//! v3.0: 心跳报到集成 (FE-001)
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::sync::mpsc;
 
+use a_common::heartbeat::Token as HeartbeatToken;
 use crate::types::{OrderRequest, Side, TradingDecision, TradingAction};
 use crate::interfaces::RiskChecker;
 use a_common::OrderStatus;
+
+/// 心跳报到测试点 ID
+const HEARTBEAT_POINT_EVENT_ENGINE: &str = "FE-001";
 
 // ============================================================================
 // 事件类型
@@ -230,6 +237,8 @@ pub struct EventEngine<S: Strategy, G: ExchangeGateway> {
     gateway: G,
     /// 指标计算器
     indicators: IndicatorCalculator,
+    /// v3.0: 心跳 Token
+    heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
 }
 
 impl<S: Strategy, G: ExchangeGateway> EventEngine<S, G> {
@@ -250,6 +259,36 @@ impl<S: Strategy, G: ExchangeGateway> EventEngine<S, G> {
             strategy,
             gateway,
             indicators: IndicatorCalculator::default(),
+            heartbeat_token: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    // ==================== v3.0: 心跳报到 ====================
+
+    /// 设置心跳 Token
+    pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
+        let mut guard = self.heartbeat_token.write();
+        *guard = Some(token);
+    }
+
+    /// 获取当前心跳 Token
+    pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
+        self.heartbeat_token.read().clone()
+    }
+
+    /// 心跳报到（内部方法）
+    pub async fn heartbeat_report(&self) {
+        let token = self.get_heartbeat_token();
+        if let Some(token) = token {
+            if let Ok(reporter) = std::panic::catch_unwind(|| a_common::heartbeat::global()) {
+                reporter.report(
+                    &token,
+                    HEARTBEAT_POINT_EVENT_ENGINE,
+                    "f_engine::event",
+                    "on_tick",
+                    file!(),
+                ).await;
+            }
         }
     }
 
@@ -311,6 +350,9 @@ impl<S: Strategy, G: ExchangeGateway> EventEngine<S, G> {
 
     /// 处理单个 Tick 事件
     async fn on_tick(&mut self, tick: TickEvent) {
+        // v3.0: 心跳报到
+        self.heartbeat_report().await;
+
         let start = if self.config.log_timing {
             Some(Instant::now())
         } else {

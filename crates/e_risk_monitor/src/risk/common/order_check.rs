@@ -3,6 +3,12 @@ use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+use a_common::heartbeat::Token as HeartbeatToken;
+
+/// 心跳报到测试点 ID
+const HEARTBEAT_POINT_ORDER_CHECK: &str = "ER-003";
 
 /// 订单检查结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +52,8 @@ pub struct OrderReservation {
 /// 线程安全: 使用 RwLock 保护 reservations
 ///
 /// 注: Lua 脚本功能需要集成 mlua crate，此处提供基础实现
+///
+/// v3.0: 心跳报到集成
 pub struct OrderCheck {
     /// 最大持仓比例 (RwLock 保护)
     max_position_ratio: RwLock<Decimal>,
@@ -55,6 +63,8 @@ pub struct OrderCheck {
     reservations: RwLock<FnvHashMap<String, OrderReservation>>,
     /// 总冻结金额 (RwLock 保护)
     total_frozen: RwLock<Decimal>,
+    /// v3.0: 心跳 Token
+    heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
 }
 
 impl Default for OrderCheck {
@@ -71,10 +81,57 @@ impl OrderCheck {
             min_order_notional: RwLock::new(dec!(10.0)),
             reservations: RwLock::new(FnvHashMap::default()),
             total_frozen: RwLock::new(dec!(0)),
+            heartbeat_token: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// 预检订单 (读锁)
+    /// v3.0: 设置心跳 Token
+    pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
+        let mut guard = self.heartbeat_token.write();
+        *guard = Some(token);
+    }
+
+    /// v3.0: 获取当前心跳 Token
+    pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
+        self.heartbeat_token.read().clone()
+    }
+
+    /// v3.0: 心跳报到（内部方法）
+    pub async fn heartbeat_report(&self) {
+        let token = self.get_heartbeat_token();
+        if let Some(token) = token {
+            if let Ok(reporter) = std::panic::catch_unwind(|| a_common::heartbeat::global()) {
+                reporter.report(
+                    &token,
+                    HEARTBEAT_POINT_ORDER_CHECK,
+                    "e_risk_monitor::order_check",
+                    "pre_check",
+                    file!(),
+                ).await;
+            }
+        }
+    }
+
+    /// 预检订单（带心跳报到）
+    ///
+    /// 在下单前预检订单的风控条件。
+    /// 如果通过，返回冻结金额。
+    pub async fn pre_check_with_heartbeat(
+        &self,
+        order_id: &str,
+        symbol: &str,
+        strategy_id: &str,
+        order_value: Decimal,
+        available_balance: Decimal,
+        current_exposure: Decimal,
+    ) -> OrderCheckResult {
+        // v3.0: 心跳报到
+        self.heartbeat_report().await;
+        // 调用原有逻辑
+        self.pre_check(order_id, symbol, strategy_id, order_value, available_balance, current_exposure)
+    }
+
+    /// 预检订单 (读锁，同步版本)
     ///
     /// 在下单前预检订单的风控条件。
     /// 如果通过，返回冻结金额。

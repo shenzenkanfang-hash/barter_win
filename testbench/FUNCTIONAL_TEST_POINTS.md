@@ -7,7 +7,7 @@
 
 一、项目概述
 --------------------------------------------------------------------------------
-
+创立团队并发执行测试 
 1. 项目名称: barter-rs 加密货币交易系统
 2. 技术栈: Rust (Edition 2024), Tokio async runtime
 3. 架构: 分层模块化架构 (a_common -> b_data_* -> c_data_process -> d_checktable -> e_risk_monitor -> f_engine)

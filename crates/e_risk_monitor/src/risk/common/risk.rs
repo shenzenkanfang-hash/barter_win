@@ -1,6 +1,12 @@
 use a_common::EngineError;
+use a_common::heartbeat::Token as HeartbeatToken;
+use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use std::collections::HashSet;
+use std::sync::Arc;
+
+/// 心跳报到测试点 ID
+const HEARTBEAT_POINT_RISK_PRE_CHECKER: &str = "ER-001";
 
 /// 风控预检器
 ///
@@ -9,12 +15,16 @@ use std::collections::HashSet;
 /// 2. 持仓比例是否超限
 /// 3. 品种是否已注册
 /// 4. 波动率模式是否允许交易
+///
+/// v3.0: 心跳报到集成
 #[derive(Debug, Clone)]
 pub struct RiskPreChecker {
     max_position_ratio: Decimal,
     min_reserve_balance: Decimal,
     registered_symbols: HashSet<String>,
     volatility_mode: VolatilityMode,
+    /// v3.0: 心跳 Token
+    heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
 }
 
 /// 波动率模式
@@ -42,6 +52,34 @@ impl RiskPreChecker {
             min_reserve_balance,
             registered_symbols: HashSet::new(),
             volatility_mode: VolatilityMode::Normal,
+            heartbeat_token: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// v3.0: 设置心跳 Token
+    pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
+        let mut guard = self.heartbeat_token.write();
+        *guard = Some(token);
+    }
+
+    /// v3.0: 获取当前心跳 Token
+    pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
+        self.heartbeat_token.read().clone()
+    }
+
+    /// v3.0: 心跳报到（内部方法）
+    pub async fn heartbeat_report(&self) {
+        let token = self.get_heartbeat_token();
+        if let Some(token) = token {
+            if let Ok(reporter) = std::panic::catch_unwind(|| a_common::heartbeat::global()) {
+                reporter.report(
+                    &token,
+                    HEARTBEAT_POINT_RISK_PRE_CHECKER,
+                    "e_risk_monitor::risk",
+                    "pre_check",
+                    file!(),
+                ).await;
+            }
         }
     }
 
@@ -55,7 +93,27 @@ impl RiskPreChecker {
         self.volatility_mode = mode;
     }
 
-    /// 预检订单
+    /// 预检订单（带心跳报到）
+    ///
+    /// 检查顺序:
+    /// 1. 品种是否注册
+    /// 2. 波动率模式是否允许交易
+    /// 3. 资金是否足够
+    /// 4. 持仓比例是否超限
+    pub async fn pre_check_with_heartbeat(
+        &self,
+        symbol: &str,
+        available_balance: Decimal,
+        order_value: Decimal,
+        total_equity: Decimal,
+    ) -> Result<(), EngineError> {
+        // v3.0: 心跳报到
+        self.heartbeat_report().await;
+        // 调用原有逻辑
+        self.pre_check(symbol, available_balance, order_value, total_equity)
+    }
+
+    /// 预检订单（同步版本，不进行心跳报到）
     ///
     /// 检查顺序:
     /// 1. 品种是否注册
