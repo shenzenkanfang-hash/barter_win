@@ -62,6 +62,55 @@ impl MarketDataStoreImpl {
     pub fn history(&self) -> &HistoryStore {
         &self.history
     }
+
+    /// 预加载 K线数据（NO_SIGNAL 修复：历史数据预填充）
+    ///
+    /// 将历史 K线批量写入 history 分区，最后一条作为当前 K线。
+    /// 这样 Trader 在第一根 tick 前即可读取历史 K线计算指标。
+    ///
+    /// 接受 b_data_source 的 KlineData（用于 main.rs replay_source.to_store_klines()）
+    pub fn preload_klines(&self, symbol: &str, klines: Vec<BKlineData>) {
+        if klines.is_empty() {
+            tracing::warn!(symbol = %symbol, "preload_klines: empty!");
+            return;
+        }
+        tracing::info!(symbol = %symbol, count = klines.len(), is_closed = klines.first().map(|k| k.is_closed), "preload_klines: starting");
+        // 1. 全部写入历史分区（强制 is_closed=true 确保进入 history）
+        for kline in &klines {
+            let mock_kline = MockKlineData {
+                kline_start_time: kline.kline_start_time,
+                kline_close_time: kline.kline_close_time,
+                symbol: kline.symbol.clone(),
+                interval: kline.interval.clone(),
+                open: kline.open.clone(),
+                close: kline.close.clone(),
+                high: kline.high.clone(),
+                low: kline.low.clone(),
+                volume: kline.volume.clone(),
+                is_closed: true, // 强制写入 history
+            };
+            self.history.append_kline(symbol, mock_kline.clone());
+        }
+        tracing::info!(symbol = %symbol, history_count = self.history.get_klines(symbol).len(), "preload_klines: history check");
+        // 2. 最后一条作为当前 K线（供实时计算使用）
+        if let Some(last) = klines.last() {
+            let mock_last = MockKlineData {
+                kline_start_time: last.kline_start_time,
+                kline_close_time: last.kline_close_time,
+                symbol: last.symbol.clone(),
+                interval: last.interval.clone(),
+                open: last.open.clone(),
+                close: last.close.clone(),
+                high: last.high.clone(),
+                low: last.low.clone(),
+                volume: last.volume.clone(),
+                is_closed: last.is_closed,
+            };
+            self.memory.write_kline(symbol, mock_last.clone());
+            self.volatility.update(symbol, &mock_last);
+            tracing::debug!(symbol = %symbol, last_price = %last.close, "preload_klines: current set");
+        }
+    }
 }
 
 impl MarketDataStore for MarketDataStoreImpl {
@@ -99,11 +148,14 @@ impl MarketDataStore for MarketDataStoreImpl {
     }
 
     fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
+        tracing::debug!(symbol = %symbol, "store: write_indicator");
         self.indicators.write().insert(symbol.to_uppercase(), indicator);
     }
 
     fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {
-        self.indicators.read().get(&symbol.to_uppercase()).cloned()
+        let result = self.indicators.read().get(&symbol.to_uppercase()).cloned();
+        tracing::debug!(symbol = %symbol, found = result.is_some(), "store: get_indicator");
+        result
     }
 }
 
@@ -198,11 +250,14 @@ impl BMarketDataStore for MarketDataStoreImpl {
     }
 
     fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
+        tracing::debug!(symbol = %symbol, "store(b): write_indicator");
         self.indicators.write().insert(symbol.to_uppercase(), indicator);
     }
 
     fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {
-        self.indicators.read().get(&symbol.to_uppercase()).cloned()
+        let result = self.indicators.read().get(&symbol.to_uppercase()).cloned();
+        tracing::debug!(symbol = %symbol, found = result.is_some(), "store(b): get_indicator");
+        result
     }
 }
 

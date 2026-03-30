@@ -18,6 +18,7 @@ use a_common::heartbeat::{self as hb, Config as HbConfig};
 use b_data_mock::{
     api::{mock_account::Side, MockApiGateway, MockConfig},
     replay_source::ReplaySource,
+    store::MarketDataStoreImpl,
     ws::kline_1m::ws::Kline1mStream,
 };
 use b_data_source::store::PipelineStore;
@@ -235,8 +236,8 @@ async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Err
     tracing::info!("[b] Loaded {} K-lines", replay_source.len());
 
     // 共享 Store：Kline1mStream 写入，Trader 读取
-    // 统一使用 b_data_source::store::MarketDataStore trait
-    let store = Arc::new(b_data_source::store::MarketDataStoreImpl::new());
+    // 使用 b_data_mock::MarketDataStoreImpl（支持 write_indicator/get_indicator）
+    let store: Arc<MarketDataStoreImpl> = Arc::new(MarketDataStoreImpl::new());
 
     // 预加载历史数据到 Store（解决沙盒 history_len=0 问题）
     // Trader 在第一根 tick 前即可读取历史 K线，无需等待逐根闭合
@@ -691,6 +692,9 @@ async fn print_heartbeat_report() {
 // ============================================================================
 
 /// 从 Store 读取 Indicator1mOutput JSON 并转换为 MarketIndicators
+///
+/// NO_SIGNAL 修复关键：从 Store 历史K线计算 price_deviation 和
+/// price_deviation_horizontal_position（SignalProcessor 不直接计算这两个字段）
 fn convert_store_indicator_to_market_indicators(
     store: &StoreRef,
     symbol: &str,
@@ -701,6 +705,86 @@ fn convert_store_indicator_to_market_indicators(
     // 反序列化为 Indicator1mOutput
     let ind: c_data_process::min::trend::Indicator1mOutput = serde_json::from_value(json)
         .map_err(|e| TraderError::Other(format!("indicator deserialize error: {}", e)))?;
+
+    // =============================================================
+    // NO_SIGNAL 根因修复：从 Store 历史K线计算 price_deviation
+    //
+    // 与 build_signal_input_fallback 相同的计算逻辑（参考 d_checktable trader.rs）
+    // price_deviation: 当前价偏离14周期均线的百分比（与 zscore_14 相关）
+    // =============================================================
+    let (price_deviation, price_deviation_horizontal_position) = {
+        // 调试日志：检查 store 中的数据状态
+        let history = store.get_history_klines(symbol);
+        let current = store.get_current_kline(symbol);
+        tracing::trace!(
+            symbol = %symbol,
+            history_len = history.len(),
+            current_price = ?current.as_ref().map(|k| &k.close),
+            "convert: checking store state"
+        );
+
+        match (history.len(), current) {
+            (len, Some(curr)) if len >= 14 => {
+                // 计算14周期收盘价均值和标准差（与 build_signal_input_fallback 一致）
+                let closes: Vec<f64> = history.iter()
+                    .filter_map(|k| k.close.parse::<f64>().ok())
+                    .collect();
+                let current_price = match curr.close.parse::<f64>() {
+                    Ok(p) => p,
+                    Err(_) => 0.0,
+                };
+
+                let n = closes.len();
+                let mean = closes.iter().sum::<f64>() / n as f64;
+                let variance = closes.iter()
+                    .map(|p| (p - mean).powi(2))
+                    .sum::<f64>() / n as f64;
+                let stddev = variance.sqrt();
+
+                // price_deviation = (current - mean) / mean * 100（百分比偏离）
+                let pd = if mean > 0.0 && stddev > 0.0 {
+                    Decimal::try_from((current_price - mean) / mean * 100.0).ok()
+                } else {
+                    None
+                };
+
+                // price_deviation_horizontal_position：价格在最近N根中的相对位置（0-100）
+                let recent: Vec<f64> = history.iter().rev().take(60)
+                    .filter_map(|k| k.close.parse::<f64>().ok())
+                    .collect();
+                let hpos = if let Some((min_p, max_p)) = recent.iter().cloned().fold(None, |acc, p| {
+                    match acc {
+                        None => Some((p, p)),
+                        Some((min_v, max_v)) => Some((min_v.min(p), max_v.max(p))),
+                    }
+                }) {
+                    let range = max_p - min_p;
+                    if range > 0.0 {
+                        let pos = ((current_price - min_p) / range * 100.0).clamp(0.0, 100.0);
+                        Decimal::try_from(pos).ok()
+                    } else {
+                        Decimal::try_from(50.0).ok()
+                    }
+                } else {
+                    Decimal::try_from(50.0).ok()
+                };
+
+                tracing::debug!(
+                    symbol = %symbol,
+                    closes_count = closes.len(),
+                    mean = %mean,
+                    stddev = %stddev,
+                    current_price = %current_price,
+                    price_deviation = ?pd,
+                    hpos = ?hpos,
+                    "convert: computed values"
+                );
+
+                (pd.unwrap_or(Decimal::ZERO), hpos.unwrap_or(dec!(50)))
+            }
+            _ => (Decimal::ZERO, dec!(50)), // 历史数据不足时保守值
+        }
+    };
 
     Ok(MarketIndicators {
         tr_base_60min: ind.tr_base_10min,       // 近似：10min TR基准作为 60min 基准
@@ -714,7 +798,8 @@ fn convert_store_indicator_to_market_indicators(
         velocity_percentile_1h: ind.velocity_percentile,
         pine_bg_color: String::new(),           // SignalProcessor 暂不计算 Pine 颜色
         pine_bar_color: String::new(),
-        price_deviation: Decimal::ZERO,          // SignalProcessor 暂不计算价格偏离度
-        price_deviation_horizontal_position: dec!(50),
+        // NO_SIGNAL 修复：从 Store 历史K线计算真实值
+        price_deviation,
+        price_deviation_horizontal_position,
     })
 }
