@@ -16,7 +16,7 @@
 //! - 使用独立 block { let _guard = lock.await; data = fn(); } 确保 guard 在 await 前 drop
 //! - Stop signal 使用 broadcast::Receiver（Send-safe）而非 watch::Receiver（非 Send）
 
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 use rust_decimal::Decimal;
 
 use crate::event_bus::{
@@ -50,6 +50,7 @@ pub async fn run_strategy_actor(
 ) {
     tracing::info!("[Actor:strategy] started");
 
+    let accumulator = components.health_logger.accumulator();
     let mut tick_id = 0u64;
     let mut heartbeat_tick = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
 
@@ -71,6 +72,8 @@ pub async fn run_strategy_actor(
             // 主动从数据层拉取数据（50ms 间隔，actor 自驱动节奏控制）
             // 注意：mutex guard 必须在 await 前释放（Kline1mStream 含非 Send RNG）
             _ = sleep(Duration::from_millis(50)) => {
+                let t0 = Instant::now();
+
                 let kline_data = {
                     // guard 在此 block 结束时立即释放，不跨越 await
                     let mut stream = data_layer.kline_stream.lock().await;
@@ -88,9 +91,16 @@ pub async fn run_strategy_actor(
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("[StageB] Parse error: {}", e);
+                        // 记录解析错误
+                        accumulator.add_error();
                         continue;
                     }
                 };
+
+                // 更新健康状态（数据接收成功）
+                let elapsed_ms = t0.elapsed().as_millis() as u64;
+                let ts_ms = chrono::Utc::now().timestamp_millis();
+                accumulator.update_tick(ts_ms, elapsed_ms);
 
                 // ===== Stage B: 数据验证 =====
                 let valid = kline.close > Decimal::ZERO;
@@ -114,9 +124,25 @@ pub async fn run_strategy_actor(
                 // ===== Stage D: 策略执行（带 TradeLock） =====
                 let trade_result = {
                     let guard = match components.trade_lock.acquire("h_15m_strategy") {
-                        Ok(g) => g,
+                        Ok(g) => {
+                            tracing::info!(
+                                component = "strategy",
+                                event = "trade.lock.acquired",
+                                symbol = SYMBOL,
+                                tick_id = tick_id,
+                                "trade_lock_acquired"
+                            );
+                            g
+                        }
                         Err(e) => {
-                            tracing::warn!("[StageD] TradeLock conflict: {}", e);
+                            tracing::info!(
+                                component = "strategy",
+                                event = "trade.lock.skipped",
+                                symbol = SYMBOL,
+                                tick_id = tick_id,
+                                reason = %format!("lock_conflict: {}", e),
+                                "trade_lock_skipped"
+                            );
                             // 锁冲突：发送 Skip 信号
                             let signal = StrategySignalEvent {
                                 tick_id,
@@ -156,8 +182,20 @@ pub async fn run_strategy_actor(
                     symbol: SYMBOL.to_string(),
                     decision,
                     qty,
-                    reason,
+                    reason: reason.clone(),
                 };
+
+                // 记录策略信号事件
+                tracing::info!(
+                    component = "strategy",
+                    event = "strategy.signal",
+                    symbol = %signal.symbol,
+                    tick_id = signal.tick_id,
+                    decision = ?signal.decision,
+                    qty = ?signal.qty,
+                    reason = %signal.reason,
+                    "strategy_signal"
+                );
 
                 if bus_handle.send_strategy_signal(signal).is_err() {
                     tracing::warn!("[Actor:strategy] strategy_tx channel closed");
@@ -241,6 +279,17 @@ pub async fn run_risk_actor(
                 let order_passed = order_check_result.passed;
 
                 if balance_passed && order_passed {
+                    // 风控检查通过，记录事件
+                    tracing::info!(
+                        component = "risk",
+                        event = "risk.check",
+                        symbol = SYMBOL,
+                        order_id = %order_id,
+                        balance_passed = balance_passed,
+                        order_passed = order_passed,
+                        "risk_check"
+                    );
+
                     match components.gateway.place_order(
                         SYMBOL,
                         b_data_mock::api::mock_account::Side::Buy,
@@ -249,10 +298,13 @@ pub async fn run_risk_actor(
                     ) {
                         Ok(order) => {
                             tracing::info!(
-                                "[StageE] Filled: {} price={} qty={}",
-                                order_id,
-                                order.filled_price,
-                                order.filled_qty
+                                component = "risk",
+                                event = "order.filled",
+                                symbol = SYMBOL,
+                                order_id = %order_id,
+                                filled_price = %order.filled_price,
+                                filled_qty = %order.filled_qty,
+                                "order_filled"
                             );
                             let event = OrderEvent {
                                 order_id,
@@ -265,7 +317,14 @@ pub async fn run_risk_actor(
                             let _ = bus_handle.send_order(event).await;
                         }
                         Err(e) => {
-                            tracing::warn!("[StageE] Order failed: {}", e);
+                            tracing::info!(
+                                component = "risk",
+                                event = "order.rejected",
+                                symbol = SYMBOL,
+                                order_id = %order_id,
+                                reason = %e,
+                                "order_rejected"
+                            );
                             let event = OrderEvent {
                                 order_id,
                                 symbol: SYMBOL.to_string(),
@@ -278,11 +337,23 @@ pub async fn run_risk_actor(
                         }
                     }
                 } else {
-                    tracing::warn!(
-                        "[StageE] {} Risk rejected: balance={} order={}",
-                        order_id,
-                        balance_passed,
-                        order_passed
+                    // 风控检查跳过（失败）
+                    tracing::info!(
+                        component = "risk",
+                        event = "risk.check.skipped",
+                        symbol = SYMBOL,
+                        order_id = %order_id,
+                        reason = %format!("balance={} order={}", balance_passed, order_passed),
+                        "risk_check_skipped"
+                    );
+
+                    tracing::info!(
+                        component = "risk",
+                        event = "order.cancelled",
+                        symbol = SYMBOL,
+                        order_id = %order_id,
+                        reason = %format!("risk_rejected: balance={} order={}", balance_passed, order_passed),
+                        "order_cancelled"
                     );
                     let event = OrderEvent {
                         order_id,

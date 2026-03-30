@@ -34,7 +34,11 @@ pub use api::{ApiKlineFetcher, KlineFetcherConfig, KlineInterval, ApiKline};
 pub use config::{Platform, Paths, VolatilityConfig, VOLATILITY_CONFIG};
 
 // Re-exports - Logs
-pub use logs::{CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult, TracingCheckpointLogger};
+pub use logs::{
+    CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult,
+    TracingCheckpointLogger, ComponentHealth, HealthAccumulator, ComponentHealthLogger,
+    TradingLogEventType, JsonLinesWriter, init_log_dir,
+};
 
 // Re-exports - Models
 pub use models::*;

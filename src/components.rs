@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use a_common::heartbeat::{self as hb, Config as HbConfig};
+use a_common::logs::ComponentHealthLogger;
 use b_data_mock::{
     api::{MockApiGateway, MockConfig},
     replay_source::ReplaySource,
@@ -34,6 +35,8 @@ pub struct SystemComponents {
     #[allow(dead_code)]
     pub pipeline_store: Arc<PipelineStore>,
     pub trade_lock: Arc<TradeLock>,
+    /// 健康监控累加器（数据流层日志）
+    pub health_logger: Arc<ComponentHealthLogger>,
 }
 
 /// DataLayer - Kline1mStream 数据层（非 Send，驱动专有）
@@ -106,6 +109,11 @@ pub async fn create_components() -> Result<(SystemComponents, DataLayer), Box<dy
     let trade_lock = Arc::new(TradeLock::new());
     tracing::info!("[e] TradeLock created");
 
+    // 组件健康监控（每小时输出一次 health.summary）
+    let health_logger = Arc::new(ComponentHealthLogger::new("h15m_strategy", 3600));
+    let _logger_handle = health_logger.clone().start_background_logger();
+    tracing::info!("[a_common] ComponentHealthLogger started (interval=3600s)");
+
     let components = SystemComponents {
         signal_processor,
         trader,
@@ -114,6 +122,7 @@ pub async fn create_components() -> Result<(SystemComponents, DataLayer), Box<dy
         gateway,
         pipeline_store,
         trade_lock,
+        health_logger,
     };
 
     let data_layer = DataLayer { kline_stream };
@@ -161,6 +170,9 @@ fn create_trader(
 }
 
 /// 打印心跳报告
+///
+/// 注意：Phase 7 已将详细状态输出迁移到 JSON Lines 日志。
+/// heartbeat_report.json 降级为兜底手段，不再作为主研判依据。
 pub async fn print_heartbeat_report() {
     tracing::info!("==============================================");
     tracing::info!("HEARTBEAT REPORT (进程存活监控)");
@@ -174,7 +186,9 @@ pub async fn print_heartbeat_report() {
         summary.reports_count
     );
 
-    if let Err(e) = hb::global().save_report("heartbeat_report.json").await {
-        tracing::warn!("Save failed: {}", e);
-    }
+    // 降级：仅在日志中输出，heartbeat_report.json 不再作为主要研判依据
+    // 详细状态研判已迁移到 ./logs/trading.YYYYMMDD.jsonl
+    tracing::info!(
+        "Heartbeat report is deprecated as primary monitoring. Use JSON Lines logs instead."
+    );
 }

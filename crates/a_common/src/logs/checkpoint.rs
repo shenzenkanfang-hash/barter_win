@@ -76,6 +76,9 @@ pub trait CheckpointLogger: Send + Sync {
 
     /// 记录完整 checkpoint（所有环节结果）
     fn log_checkpoint(&self, symbol: &str, results: &[StageResult], blocked_at: Option<Stage>);
+
+    /// 记录通用事件（用于交易系统各组件的关键操作日志）
+    fn log_event(&self, component: &str, event: &str, symbol: Option<&str>, data: &str);
 }
 
 /// 控制台彩色输出 CheckpointLogger
@@ -124,6 +127,18 @@ impl CheckpointLogger for ConsoleCheckpointLogger {
         } else {
             eprintln!("  └─ [COMPLETE] Pipeline 完成");
         }
+    }
+
+    fn log_event(&self, component: &str, event: &str, symbol: Option<&str>, data: &str) {
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        eprintln!(
+            "[{}] [{}] [{}] {} {:?}",
+            timestamp,
+            component,
+            event,
+            data,
+            symbol
+        );
     }
 }
 
@@ -179,6 +194,16 @@ impl CheckpointLogger for TracingCheckpointLogger {
             );
         }
     }
+
+    fn log_event(&self, component: &str, event: &str, symbol: Option<&str>, data: &str) {
+        tracing::info!(
+            component = component,
+            event = event,
+            symbol = symbol,
+            data = data,
+            "trading_event"
+        );
+    }
 }
 
 /// 组合多个 Logger
@@ -225,6 +250,192 @@ impl CheckpointLogger for CompositeCheckpointLogger {
     fn log_checkpoint(&self, symbol: &str, results: &[StageResult], blocked_at: Option<Stage>) {
         for logger in &self.loggers {
             logger.log_checkpoint(symbol, results, blocked_at);
+        }
+    }
+
+    fn log_event(&self, component: &str, event: &str, symbol: Option<&str>, data: &str) {
+        for logger in &self.loggers {
+            logger.log_event(component, event, symbol, data);
+        }
+    }
+}
+
+/// 组件健康状态（用于数据层/指标层1小时间隔健康摘要）
+#[derive(Debug, Clone, Default)]
+pub struct ComponentHealth {
+    /// 最后处理K线时间戳（毫秒，Unix epoch）
+    pub last_tick_timestamp_ms: i64,
+    /// 已处理K线数
+    pub processed_kline_count: u64,
+    /// 上次计算延迟（毫秒）
+    pub last_compute_latency_ms: u64,
+    /// 累计错误数
+    pub error_count: u32,
+}
+
+impl ComponentHealth {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn update_tick(&mut self, timestamp_ms: i64, latency_ms: u64) {
+        self.last_tick_timestamp_ms = timestamp_ms;
+        self.last_compute_latency_ms = latency_ms;
+        self.processed_kline_count += 1;
+    }
+
+    pub fn add_error(&mut self) {
+        self.error_count += 1;
+    }
+}
+
+/// Thread-safe 健康状态累加器（无锁设计）
+pub struct HealthAccumulator {
+    last_tick_timestamp_ms: std::sync::atomic::AtomicI64,
+    processed_kline_count: std::sync::atomic::AtomicU64,
+    last_compute_latency_ms: std::sync::atomic::AtomicU64,
+    error_count: std::sync::atomic::AtomicU32,
+}
+
+impl HealthAccumulator {
+    pub fn new() -> Self {
+        Self {
+            last_tick_timestamp_ms: std::sync::atomic::AtomicI64::new(0),
+            processed_kline_count: std::sync::atomic::AtomicU64::new(0),
+            last_compute_latency_ms: std::sync::atomic::AtomicU64::new(0),
+            error_count: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+
+    pub fn update_tick(&self, timestamp_ms: i64, latency_ms: u64) {
+        self.last_tick_timestamp_ms.store(timestamp_ms, std::sync::atomic::Ordering::SeqCst);
+        self.last_compute_latency_ms.store(latency_ms, std::sync::atomic::Ordering::SeqCst);
+        self.processed_kline_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn add_error(&self) {
+        self.error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn snapshot(&self) -> ComponentHealth {
+        ComponentHealth {
+            last_tick_timestamp_ms: self.last_tick_timestamp_ms.load(std::sync::atomic::Ordering::SeqCst),
+            processed_kline_count: self.processed_kline_count.load(std::sync::atomic::Ordering::SeqCst),
+            last_compute_latency_ms: self.last_compute_latency_ms.load(std::sync::atomic::Ordering::SeqCst),
+            error_count: self.error_count.load(std::sync::atomic::Ordering::SeqCst),
+        }
+    }
+}
+
+impl Default for HealthAccumulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// ComponentHealthLogger - 定时输出 health.summary 日志
+///
+/// 每小时输出一次组件健康摘要，使用 tokio 定时器。
+/// 输出格式：JSON Lines，字段对齐 ComponentHealth。
+pub struct ComponentHealthLogger {
+    component: String,
+    accumulator: std::sync::Arc<HealthAccumulator>,
+    interval_secs: u64,
+}
+
+impl ComponentHealthLogger {
+    pub fn new(component: &str, interval_secs: u64) -> Self {
+        Self {
+            component: component.to_string(),
+            accumulator: std::sync::Arc::new(HealthAccumulator::new()),
+            interval_secs,
+        }
+    }
+
+    pub fn accumulator(&self) -> std::sync::Arc<HealthAccumulator> {
+        std::sync::Arc::clone(&self.accumulator)
+    }
+
+    /// 启动后台定时日志任务（tokio::spawn）
+    pub fn start_background_logger(self: std::sync::Arc<Self>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(self.interval_secs));
+            loop {
+                interval.tick().await;
+                let health = self.accumulator.snapshot();
+                tracing::info!(
+                    component = %self.component,
+                    event = "health.summary",
+                    last_tick_ms = health.last_tick_timestamp_ms,
+                    processed = health.processed_kline_count,
+                    latency_ms = health.last_compute_latency_ms,
+                    errors = health.error_count,
+                    "health_summary"
+                );
+            }
+        })
+    }
+}
+
+/// 交易系统日志事件类型
+///
+/// 对齐 07-CONTEXT.md 中定义的所有事件类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradingLogEventType {
+    // 组件生命周期
+    ComponentStarted,
+    ComponentStopped,
+    HealthSummary,
+
+    // 数据层
+    DataReceived,
+    IndicatorComputed,
+
+    // 策略层
+    StrategySignal,
+
+    // 风控层
+    RiskCheck,
+    RiskCheckSkipped,
+
+    // 交易执行
+    TradeLockAcquired,
+    TradeLockSkipped,
+    OrderSubmitted,
+    OrderFilled,
+    OrderRejected,
+    OrderCancelled,
+
+    // 仓位
+    PositionOpened,
+    PositionClosed,
+
+    // 异常
+    StaleDetected,
+    Error,
+}
+
+impl std::fmt::Display for TradingLogEventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TradingLogEventType::ComponentStarted => write!(f, "component.started"),
+            TradingLogEventType::ComponentStopped => write!(f, "component.stopped"),
+            TradingLogEventType::HealthSummary => write!(f, "health.summary"),
+            TradingLogEventType::DataReceived => write!(f, "data.received"),
+            TradingLogEventType::IndicatorComputed => write!(f, "indicator.computed"),
+            TradingLogEventType::StrategySignal => write!(f, "strategy.signal"),
+            TradingLogEventType::RiskCheck => write!(f, "risk.check"),
+            TradingLogEventType::RiskCheckSkipped => write!(f, "risk.check.skipped"),
+            TradingLogEventType::TradeLockAcquired => write!(f, "trade.lock.acquired"),
+            TradingLogEventType::TradeLockSkipped => write!(f, "trade.lock.skipped"),
+            TradingLogEventType::OrderSubmitted => write!(f, "order.submitted"),
+            TradingLogEventType::OrderFilled => write!(f, "order.filled"),
+            TradingLogEventType::OrderRejected => write!(f, "order.rejected"),
+            TradingLogEventType::OrderCancelled => write!(f, "order.cancelled"),
+            TradingLogEventType::PositionOpened => write!(f, "position.opened"),
+            TradingLogEventType::PositionClosed => write!(f, "position.closed"),
+            TradingLogEventType::StaleDetected => write!(f, "stale.detected"),
+            TradingLogEventType::Error => write!(f, "error"),
         }
     }
 }
