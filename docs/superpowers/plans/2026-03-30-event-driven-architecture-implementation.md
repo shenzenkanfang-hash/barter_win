@@ -1848,23 +1848,911 @@ git commit -m "feat(main): 重构为纯启动引导 v6.0"
 - [ ] RiskService trait 定义完整
 - [ ] 锁机制生效
 
-### 第三阶段验收
-- [ ] IndicatorStore trait 定义完整
-- [ ] 编译通过
+---
 
-### 第四阶段验收
-- [ ] SharedStore trait 定义完整
-- [ ] 序列号机制生效
+## 第七阶段: pipeline.rs 事件驱动重构（Path B - Complete Event-Driven）
 
-### 第五阶段验收
-- [ ] StrategyService trait 定义完整
-- [ ] EngineManager 编译通过
-- [ ] 重启循环生效
+### 概述
 
-### 第六阶段验收
-- [ ] main.rs < 50 行（不含注释和空行）
-- [ ] 无业务流水线逻辑
-- [ ] 系统正常启动
+将 `pipeline.rs` 从 260 行串行轮询（`tokio::time::sleep(50ms)` + `tokio::select!` 循环）重构为完整事件驱动架构。
+
+**核心问题：**
+```rust
+// 当前：串行轮询，每 50ms 强行拉取一次数据
+loop {
+    tokio::select! {
+        _ = heartbeat_tick.tick() => { ... }
+        _ = tokio::time::sleep(Duration::from_millis(50)) => {
+            // 串行执行 b→f→d→c→e，无事件驱动
+        }
+    }
+}
+```
+
+**目标架构：**
+```
+Kline1mStream (生产者协程)
+    │
+    │ RawKline 数据
+    ▼
+PipelineBus::raw_data_tx (mpsc channel)
+    │
+    ▼
+PipelineBus (统一事件总线 - src/event_bus.rs)
+    ├── raw_data_tx: 原始 K线数据
+    ├── kline_1m_tx: 1m K线闭合事件
+    ├── strategy_tx: 策略信号 (d_checktable)
+    └── order_tx: 订单事件
+    │
+    ▼
+stage_b_actor → stage_f_actor → stage_cd_actor → stage_e_actor
+(每个阶段都是自运行协程，通过 channel 接收/发送事件)
+```
+
+**关键约束：**
+- rust_decimal 用于所有金融计算
+- tokio 异步运行时
+- 复用 f_engine 的 EventBusHandle 和 EngineManager
+- 保持现有 119 个测试全部通过
+
+### 文件结构
+
+```
+src/
+├── event_bus.rs        # 新增: PipelineBus 统一事件总线
+├── pipeline.rs         # 重构: 移除 serial polling loop
+├── components.rs       # 重构: create_components 返回 PipelineBus
+└── main.rs            # 更新: spawn 所有协程后 join
+```
+
+### Task 7.1: 创建 PipelineBus 统一事件总线
+
+**Files:**
+- Create: `src/event_bus.rs`
+- Modify: `src/main.rs` (import)
+
+- [ ] **Step 1: 创建 event_bus.rs**
+
+```rust
+//! PipelineBus - 流水线统一事件总线
+//!
+//! 统一分发: 原始K线数据 → K线闭合事件 → 策略信号 → 订单结果
+//! 复用 f_engine 的 EventBusHandle 模式
+
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
+
+// ============================================================================
+// 事件类型
+// ============================================================================
+
+/// 原始 K线数据事件（从 ReplaySource 读取）
+#[derive(Debug, Clone)]
+pub struct RawKlineEvent {
+    /// Tick ID
+    pub tick_id: u64,
+    /// 品种
+    pub symbol: String,
+    /// 开盘价
+    pub open: Decimal,
+    /// 最高价
+    pub high: Decimal,
+    /// 最低价
+    pub low: Decimal,
+    /// 收盘价
+    pub close: Decimal,
+    /// 成交量
+    pub volume: Decimal,
+    /// 是否闭合（1m K线边界）
+    pub is_closed: bool,
+    /// 时间戳
+    pub timestamp: DateTime<Utc>,
+}
+
+/// K线闭合事件（15m，用于策略计算）
+#[derive(Debug, Clone)]
+pub struct Kline1mClosedEvent {
+    pub symbol: String,
+    pub high: Decimal,
+    pub low: Decimal,
+    pub close: Decimal,
+    pub volume: Decimal,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// 策略信号事件（来自 d_checktable h_15m::ExecutionResult）
+#[derive(Debug, Clone)]
+pub struct StrategySignalEvent {
+    pub tick_id: u64,
+    pub decision: StrategyDecision,
+    pub qty: Option<Decimal>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum StrategyDecision {
+    LongEntry,
+    ShortEntry,
+    Flat,
+    Skip,
+    Error,
+}
+
+/// 订单事件（来自风控/交易所）
+#[derive(Debug, Clone)]
+pub struct OrderEvent {
+    pub order_id: String,
+    pub symbol: String,
+    pub side: OrderSide,
+    pub qty: Decimal,
+    pub filled_price: Decimal,
+    pub status: OrderStatus,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum OrderSide { Buy, Sell }
+
+#[derive(Debug, Clone, Copy)]
+pub enum OrderStatus { Pending, Filled, Rejected, Cancelled }
+
+// ============================================================================
+// PipelineBus
+// ============================================================================
+
+/// PipelineBus 句柄（发送端，所有协程持有 Arc<PipelineBusHandle>）
+#[derive(Clone)]
+pub struct PipelineBusHandle {
+    pub raw_data_tx: mpsc::Sender<RawKlineEvent>,
+    pub kline_1m_tx: mpsc::Sender<Kline1mClosedEvent>,
+    pub strategy_tx: mpsc::Sender<StrategySignalEvent>,
+    pub order_tx: mpsc::Sender<OrderEvent>,
+}
+
+/// PipelineBus 核心（接收端，每个 channel 对应一个消费者）
+pub struct PipelineBus {
+    pub raw_data_rx: mpsc::Receiver<RawKlineEvent>,
+    pub kline_1m_rx: mpsc::Receiver<Kline1mClosedEvent>,
+    pub strategy_rx: mpsc::Sender<StrategySignalEvent>, // 消费者从 Receiver 接收
+    pub order_rx: mpsc::Receiver<OrderEvent>,
+}
+
+/// PipelineBus 发送端（从 Receiver 拆分出来）
+pub struct PipelineBusReceiver {
+    pub strategy_rx: mpsc::Receiver<StrategySignalEvent>,
+}
+
+impl PipelineBus {
+    /// 创建 PipelineBus
+    ///
+    /// 返回: (bus_handle, bus_receiver)
+    /// - bus_handle: 发送端，所有生产者协程共享
+    /// - bus_receiver: 接收端，主循环分配给各消费者
+    pub fn new(
+        raw_buffer: usize,
+        kline_buffer: usize,
+        strategy_buffer: usize,
+        order_buffer: usize,
+    ) -> (PipelineBusHandle, (PipelineBus, PipelineBusReceiver)) {
+        let (raw_data_tx, raw_data_rx) = mpsc::channel(raw_buffer);
+        let (kline_1m_tx, kline_1m_rx) = mpsc::channel(kline_buffer);
+        let (strategy_tx, strategy_rx) = mpsc::channel(strategy_buffer);
+        let (order_tx, order_rx) = mpsc::channel(order_buffer);
+
+        let handle = PipelineBusHandle {
+            raw_data_tx,
+            kline_1m_tx,
+            strategy_tx,
+            order_tx,
+        };
+
+        let bus = PipelineBus {
+            raw_data_rx,
+            kline_1m_rx,
+            strategy_rx: strategy_tx,
+            order_rx,
+        };
+
+        let receiver = PipelineBusReceiver { strategy_rx };
+
+        (handle, (bus, receiver))
+    }
+}
+
+impl PipelineBusHandle {
+    /// 发送原始 K线数据
+    pub async fn send_raw_kline(&self, event: RawKlineEvent) -> Result<(), mpsc::error::SendError<RawKlineEvent>> {
+        self.raw_data_tx.send(event).await
+    }
+
+    /// 发送 K线闭合事件
+    pub async fn send_kline_1m_closed(&self, event: Kline1mClosedEvent) -> Result<(), mpsc::error::SendError<Kline1mClosedEvent>> {
+        self.kline_1m_tx.send(event).await
+    }
+
+    /// 发送策略信号
+    pub async fn send_strategy_signal(&self, event: StrategySignalEvent) -> Result<(), mpsc::error::SendError<StrategySignalEvent>> {
+        self.strategy_tx.send(event).await
+    }
+
+    /// 发送订单事件
+    pub async fn send_order(&self, event: OrderEvent) -> Result<(), mpsc::error::SendError<OrderEvent>> {
+        self.order_tx.send(event).await
+    }
+
+    /// 检查 channel 状态
+    pub fn channel_status(&self) -> ChannelStatus {
+        ChannelStatus {
+            raw_remaining: self.raw_data_tx.capacity(),
+            kline_remaining: self.kline_1m_tx.capacity(),
+            strategy_remaining: self.strategy_tx.capacity(),
+            order_remaining: self.order_tx.capacity(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelStatus {
+    pub raw_remaining: usize,
+    pub kline_remaining: usize,
+    pub strategy_remaining: usize,
+    pub order_remaining: usize,
+}
+```
+
+- [ ] **Step 2: 编译验证**
+
+Run: `cargo check`
+Expected: 编译成功，无警告
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add src/event_bus.rs
+git commit -m "feat(src): 添加 PipelineBus 统一事件总线"
+```
+
+### Task 7.2: 创建 PipelineActor 数据生产者
+
+**Files:**
+- Create: `src/actors.rs`
+- Modify: `src/main.rs` (import actors)
+
+- [ ] **Step 1: 创建 actors.rs**
+
+```rust
+//! PipelineActors - 数据管道协程
+//!
+//! 每个协程自运行，通过 PipelineBusHandle 发送事件
+//! 不再依赖 serial polling loop
+
+use std::sync::Arc;
+use tokio::time::{interval, Duration};
+use chrono::Utc;
+use rust_decimal::Decimal;
+
+use crate::event_bus::{
+    PipelineBusHandle, RawKlineEvent, Kline1mClosedEvent,
+    StrategySignalEvent, StrategyDecision, OrderEvent, OrderSide, OrderStatus,
+};
+use crate::components::SystemComponents;
+use crate::tick_context::{SYMBOL, INITIAL_BALANCE};
+
+// ============================================================================
+// 常量
+// ============================================================================
+
+const TICK_INTERVAL_MS: u64 = 50;
+
+/// DataSourceActor - 数据源协程
+///
+/// 从 Kline1mStream 读取原始数据，转换为 RawKlineEvent 发送到 PipelineBus
+/// 无 polling：使用 stream.next_message() 阻塞等待
+pub async fn run_data_source_actor(
+    components: SystemComponents,
+    bus_handle: PipelineBusHandle,
+    mut stop_rx: tokio::sync::mpsc::Receiver<()>,
+) {
+    tracing::info!("[Actor:data_source] started");
+
+    let mut tick_id = 0u64;
+
+    loop {
+        tokio::select! {
+            biased;
+
+            // 停止信号
+            _ = stop_rx.recv() => {
+                tracing::info!("[Actor:data_source] stop signal received");
+                break;
+            }
+
+            // 数据读取（阻塞等待，无 polling）
+            _ = tokio::time::sleep(Duration::from_millis(TICK_INTERVAL_MS)) => {
+                let kline_data = {
+                    let mut stream = components.kline_stream.lock().await;
+                    stream.next_message()
+                };
+
+                let Some(data) = kline_data else {
+                    tracing::info!("[Actor:data_source] data exhausted at tick {}", tick_id);
+                    break;
+                };
+
+                tick_id += 1;
+
+                if let Ok(kline) = crate::utils::parse_raw_kline(&data) {
+                    let event = RawKlineEvent {
+                        tick_id,
+                        symbol: SYMBOL.to_string(),
+                        open: kline.open,
+                        high: kline.high,
+                        low: kline.low,
+                        close: kline.close,
+                        volume: kline.volume,
+                        is_closed: kline.is_closed,
+                        timestamp: Utc::now(),
+                    };
+
+                    if bus_handle.send_raw_kline(event).await.is_err() {
+                        tracing::warn!("[Actor:data_source] channel closed, stopping");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::info!("[Actor:data_source] stopped, total ticks={}", tick_id);
+}
+
+/// StageBFCDActor - b/f/c/d 联合处理协程
+///
+/// 接收 RawKlineEvent，依次执行 stage_b → stage_f → stage_c → stage_d
+/// 将 stage_d 结果通过 PipelineBus.strategy_tx 发送
+pub async fn run_stage_bfc_actor(
+    mut raw_data_rx: tokio::sync::mpsc::Receiver<RawKlineEvent>,
+    bus_handle: PipelineBusHandle,
+    components: SystemComponents,
+    mut stop_rx: tokio::sync::mpsc::Receiver<()>,
+) {
+    tracing::info!("[Actor:stage_bfc] started");
+
+    loop {
+        tokio::select! {
+            biased;
+
+            _ = stop_rx.recv() => {
+                tracing::info!("[Actor:stage_bfc] stop signal");
+                break;
+            }
+
+            Some(raw_event) = raw_data_rx.recv() => {
+                // Stage B: 数据验证
+                let valid = raw_event.close > Decimal::ZERO;
+                if !valid {
+                    tracing::warn!("[StageB] invalid price close={}", raw_event.close);
+                    continue;
+                }
+
+                // Stage F: 同步更新网关价格
+                components.gateway.update_price(&raw_event.symbol, raw_event.close);
+
+                // Stage C: 更新信号处理器（内部计算指标）
+                let signal_ok = components.signal_processor.min_update(
+                    &raw_event.symbol,
+                    raw_event.high,
+                    raw_event.low,
+                    raw_event.close,
+                    raw_event.volume,
+                ).is_ok();
+
+                // K线闭合时，发送 K线闭合事件（给日线协程等）
+                if raw_event.is_closed {
+                    let kline_event = Kline1mClosedEvent {
+                        symbol: raw_event.symbol.clone(),
+                        high: raw_event.high,
+                        low: raw_event.low,
+                        close: raw_event.close,
+                        volume: raw_event.volume,
+                        timestamp: raw_event.timestamp,
+                    };
+                    let _ = bus_handle.send_kline_1m_closed(kline_event).await;
+                }
+
+                // Stage D: 交易决策（带 TradeLock）
+                let trade_result = {
+                    let guard = match components.trade_lock.acquire("h_15m_strategy") {
+                        Ok(g) => g,
+                        Err(e) => {
+                            tracing::warn!("[StageD] TradeLock conflict: {}", e);
+                            let signal = StrategySignalEvent {
+                                tick_id: raw_event.tick_id,
+                                decision: StrategyDecision::Skip,
+                                qty: None,
+                                reason: format!("lock_conflict: {}", e),
+                            };
+                            let _ = bus_handle.send_strategy_signal(signal).await;
+                            continue;
+                        }
+                    };
+
+                    let r = components.trader.execute_once_wal().await;
+                    drop(guard);
+                    r
+                };
+
+                // 将执行结果转换为 StrategySignalEvent
+                let (decision, qty, reason) = match &trade_result {
+                    Ok(d_checktable::h_15m::ExecutionResult::Executed { qty, .. }) => {
+                        (StrategyDecision::LongEntry, Some(*qty), "signal_triggered".into())
+                    }
+                    Ok(d_checktable::h_15m::ExecutionResult::Skipped(reason)) => {
+                        (StrategyDecision::Skip, None, reason.to_string())
+                    }
+                    Ok(d_checktable::h_15m::ExecutionResult::Failed(e)) => {
+                        (StrategyDecision::Error, None, e.to_string())
+                    }
+                    Err(e) => {
+                        (StrategyDecision::Error, None, e.to_string())
+                    }
+                };
+
+                let signal = StrategySignalEvent {
+                    tick_id: raw_event.tick_id,
+                    decision,
+                    qty,
+                    reason,
+                };
+
+                if bus_handle.send_strategy_signal(signal).await.is_err() {
+                    tracing::warn!("[Actor:stage_bfc] strategy_tx channel closed");
+                    break;
+                }
+            }
+        }
+    }
+
+    tracing::info!("[Actor:stage_bfc] stopped");
+}
+
+/// StageEActor - 风控执行协程
+///
+/// 接收 StrategySignalEvent，执行 stage_e 风控检查和下单
+pub async fn run_stage_e_actor(
+    mut strategy_rx: tokio::sync::mpsc::Receiver<StrategySignalEvent>,
+    bus_handle: PipelineBusHandle,
+    components: SystemComponents,
+    mut stop_rx: tokio::sync::mpsc::Receiver<()>,
+) {
+    tracing::info!("[Actor:stage_e] started");
+
+    let mut loop_id = 0u64;
+
+    loop {
+        tokio::select! {
+            biased;
+
+            _ = stop_rx.recv() => {
+                tracing::info!("[Actor:stage_e] stop signal");
+                break;
+            }
+
+            Some(signal) = strategy_rx.recv() => {
+                loop_id += 1;
+
+                let Some(qty) = signal.qty else {
+                    continue;
+                };
+
+                // Stage E: 风控检查
+                let balance_passed = components
+                    .risk_checker
+                    .pre_check(
+                        &signal.reason, // 用 symbol 占位
+                        INITIAL_BALANCE,
+                        Decimal::try_from(100).unwrap(),
+                        INITIAL_BALANCE,
+                    )
+                    .is_ok();
+
+                let order_check_result = components.order_checker.pre_check(
+                    &format!("order_{}", loop_id),
+                    SYMBOL,
+                    "h_15m_strategy",
+                    Decimal::try_from(100).unwrap(),
+                    INITIAL_BALANCE,
+                    Decimal::try_from(0).unwrap(),
+                );
+                let order_passed = order_check_result.passed;
+
+                if balance_passed && order_passed {
+                    match components.gateway.place_order(
+                        SYMBOL,
+                        b_data_mock::api::mock_account::Side::Buy,
+                        qty,
+                        None,
+                    ) {
+                        Ok(order) => {
+                            tracing::info!(
+                                "[StageE] Filled: price={} qty={}",
+                                order.filled_price,
+                                order.filled_qty
+                            );
+                            let event = OrderEvent {
+                                order_id: format!("order_{}", loop_id),
+                                symbol: SYMBOL.to_string(),
+                                side: OrderSide::Buy,
+                                qty: order.filled_qty,
+                                filled_price: order.filled_price,
+                                status: OrderStatus::Filled,
+                            };
+                            let _ = bus_handle.send_order(event).await;
+                        }
+                        Err(e) => {
+                            tracing::warn!("[StageE] Order failed: {}", e);
+                            let event = OrderEvent {
+                                order_id: format!("order_{}", loop_id),
+                                symbol: SYMBOL.to_string(),
+                                side: OrderSide::Buy,
+                                qty,
+                                filled_price: Decimal::ZERO,
+                                status: OrderStatus::Rejected,
+                            };
+                            let _ = bus_handle.send_order(event).await;
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        "[StageE] Risk rejected: balance={} order={}",
+                        balance_passed,
+                        order_passed
+                    );
+                }
+            }
+        }
+    }
+
+    tracing::info!("[Actor:stage_e] stopped");
+}
+```
+
+- [ ] **Step 2: 编译验证**
+
+Run: `cargo check`
+Expected: 编译成功，无警告
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add src/actors.rs
+git commit -m "feat(src): 添加 PipelineActors 数据管道协程"
+```
+
+### Task 7.3: 重构 pipeline.rs 移除 serial polling loop
+
+**Files:**
+- Modify: `src/pipeline.rs` (删除 serial loop，重构为 channel-based run)
+- Modify: `src/main.rs` (spawn actors)
+
+- [ ] **Step 1: 重写 pipeline.rs**
+
+```rust
+//! 事件驱动流水线
+//!
+//! 不再使用 serial polling loop，而是通过 PipelineBus + actors 事件驱动。
+//!
+//! # 架构
+//! ```
+//! Kline1mStream (数据源)
+//!     ↓ RawKlineEvent
+//! PipelineBus (统一事件总线)
+//!     ↓ RawKlineEvent
+//! stage_bfc_actor (b/f/c/d)
+//!     ↓ StrategySignalEvent
+//! stage_e_actor (e 风控)
+//! ```
+
+use std::sync::Arc;
+use tokio::sync::mpsc;
+
+use crate::components::SystemComponents;
+use crate::event_bus::PipelineBus;
+use crate::actors::{
+    run_data_source_actor,
+    run_stage_bfc_actor,
+    run_stage_e_actor,
+};
+
+/// 事件驱动流水线启动函数
+///
+/// 从 components 和 PipelineBus 创建所有 actor 协程，
+/// 主循环通过 mpsc 协调各协程生命周期。
+pub async fn run_pipeline(
+    components: SystemComponents,
+    (bus, receiver): (PipelineBus, crate::event_bus::PipelineBusReceiver),
+) -> Result<(), Box<dyn std::error::Error>> {
+    tracing::info!("Event-driven pipeline starting");
+
+    // 创建停止 channel（主循环广播停止信号）
+    let (stop_tx, stop_rx) = mpsc::channel::<()>(4);
+
+    // 启动 DataSourceActor
+    let ds_stop_rx = stop_rx.resubscribe();
+    let ds_handle = tokio::spawn(run_data_source_actor(
+        components.clone(),
+        bus.clone(),
+        ds_stop_rx,
+    ));
+
+    // 启动 StageBFCDActor
+    let bfc_stop_rx = stop_rx.resubscribe();
+    let bfc_handle = tokio::spawn(run_stage_bfc_actor(
+        bus.raw_data_rx,
+        bus.clone(),
+        components.clone(),
+        bfc_stop_rx,
+    ));
+
+    // 启动 StageEActor
+    let e_stop_rx = stop_rx.resubscribe();
+    let e_handle = tokio::spawn(run_stage_e_actor(
+        receiver.strategy_rx,
+        bus,
+        components,
+        e_stop_rx,
+    ));
+
+    // 等待所有 actor 完成（任一 actor 结束则终止流水线）
+    tokio::select! {
+        r = ds_handle => {
+            tracing::info!("[Pipeline] DataSource actor finished: {:?}", r);
+        }
+        r = bfc_handle => {
+            tracing::info!("[Pipeline] StageBFC actor finished: {:?}", r);
+        }
+        r = e_handle => {
+            tracing::info!("[Pipeline] StageE actor finished: {:?}", r);
+        }
+    }
+
+    // 广播停止信号
+    let _ = stop_tx.send(()).await;
+
+    tracing::info!("Event-driven pipeline stopped");
+    Ok(())
+}
+```
+
+- [ ] **Step 2: 更新 main.rs spawn actors**
+
+```rust
+//! Trading System v7.0 - 事件驱动协程自治架构
+
+mod components;
+mod pipeline;
+mod tick_context;
+mod utils;
+mod event_bus;  // 新增
+mod actors;      // 新增
+
+use std::sync::Arc;
+use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+use crate::components::{create_components, init_heartbeat, print_heartbeat_report};
+use crate::event_bus::PipelineBus;
+use crate::pipeline::run_pipeline;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_target(true).with_level(true))
+        .init();
+
+    tracing::info!("=== Trading System v7.0 | Event-Driven ===");
+    init_heartbeat();
+
+    // 1. 创建组件
+    let components = create_components().await?;
+
+    // 2. 创建事件总线
+    let (bus_handle, (bus, receiver)) = PipelineBus::new(1024, 256, 128, 128);
+
+    // 3. 启动事件驱动流水线
+    run_pipeline(components, (bus, receiver)).await?;
+
+    // 4. 打印心跳报告
+    print_heartbeat_report().await;
+
+    Ok(())
+}
+```
+
+- [ ] **Step 3: 编译验证**
+
+Run: `cargo check --all`
+Expected: 编译成功，无警告
+
+- [ ] **Step 4: 运行测试**
+
+Run: `cargo test --all`
+Expected: 119 tests passed
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add src/pipeline.rs src/main.rs
+git commit -m "refactor(src): pipeline.rs 改为事件驱动架构
+- 移除 serial polling loop (tokio::time::sleep 50ms)
+- PipelineBus 统一事件总线分发数据
+- stage_bfc/stage_e 改为自运行协程
+- tokio::select! 用于协调多协程生命周期"
+```
+
+### Task 7.4: 添加 PipelineBus 单元测试
+
+**Files:**
+- Create: `src/event_bus_test.rs`
+
+- [ ] **Step 1: 编写测试**
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_pipeline_bus_create() {
+        let (handle, (bus, receiver)) = PipelineBus::new(10, 10, 10, 10);
+        assert!(handle.raw_data_tx.capacity() > 0);
+        assert!(handle.kline_1m_tx.capacity() > 0);
+        assert!(handle.strategy_tx.capacity() > 0);
+        assert!(handle.order_tx.capacity() > 0);
+        // 验证 channel 没有被错误拿走
+        let _ = (bus, receiver);
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_bus_send_and_receive_raw_kline() {
+        let (handle, (mut bus, _receiver)) = PipelineBus::new(10, 10, 10, 10);
+
+        let event = RawKlineEvent {
+            tick_id: 1,
+            symbol: "BTCUSDT".into(),
+            open: dec!(100),
+            high: dec!(110),
+            low: dec!(95),
+            close: dec!(105),
+            volume: dec!(1000),
+            is_closed: true,
+            timestamp: Utc::now(),
+        };
+
+        handle.send_raw_kline(event.clone()).await.unwrap();
+
+        let received = bus.raw_data_rx.recv().await.unwrap();
+        assert_eq!(received.tick_id, 1);
+        assert_eq!(received.symbol, "BTCUSDT");
+        assert_eq!(received.close, dec!(105));
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_bus_strategy_signal() {
+        let (handle, (mut bus, _receiver)) = PipelineBus::new(10, 10, 10, 10);
+
+        let signal = StrategySignalEvent {
+            tick_id: 5,
+            decision: StrategyDecision::LongEntry,
+            qty: Some(dec!(0.05)),
+            reason: "signal_triggered".into(),
+        };
+
+        handle.send_strategy_signal(signal).await.unwrap();
+
+        let received = bus.strategy_rx.recv().await.unwrap();
+        assert_eq!(received.tick_id, 5);
+        assert!(matches!(received.decision, StrategyDecision::LongEntry));
+        assert_eq!(received.qty, Some(dec!(0.05)));
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_bus_order_event() {
+        let (handle, (mut bus, _receiver)) = PipelineBus::new(10, 10, 10, 10);
+
+        let order = OrderEvent {
+            order_id: "order_1".into(),
+            symbol: "BTCUSDT".into(),
+            side: OrderSide::Buy,
+            qty: dec!(0.05),
+            filled_price: dec!(50000),
+            status: OrderStatus::Filled,
+        };
+
+        handle.send_order(order).await.unwrap();
+
+        let received = bus.order_rx.recv().await.unwrap();
+        assert_eq!(received.order_id, "order_1");
+        assert!(matches!(received.status, OrderStatus::Filled));
+    }
+
+    #[tokio::test]
+    async fn test_channel_status() {
+        let (handle, _) = PipelineBus::new(10, 20, 30, 40);
+        let status = handle.channel_status();
+        assert_eq!(status.raw_remaining, 10);
+        assert_eq!(status.kline_remaining, 20);
+        assert_eq!(status.strategy_remaining, 30);
+        assert_eq!(status.order_remaining, 40);
+    }
+
+    #[tokio::test]
+    async fn test_strategy_decision_variants() {
+        let decisions = vec![
+            (StrategyDecision::LongEntry, "long_entry"),
+            (StrategyDecision::ShortEntry, "short_entry"),
+            (StrategyDecision::Flat, "flat"),
+            (StrategyDecision::Skip, "skip"),
+            (StrategyDecision::Error, "error"),
+        ];
+
+        for (decision, _label) in decisions {
+            let signal = StrategySignalEvent {
+                tick_id: 1,
+                decision: decision.clone(),
+                qty: None,
+                reason: "test".into(),
+            };
+            assert!(matches!(signal.decision, _));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_kline_1m_closed_event() {
+        let (handle, _) = PipelineBus::new(10, 10, 10, 10);
+
+        let event = Kline1mClosedEvent {
+            symbol: "ETHUSDT".into(),
+            high: dec!(3000),
+            low: dec!(2900),
+            close: dec!(2950),
+            volume: dec!(500),
+            timestamp: Utc::now(),
+        };
+
+        handle.send_kline_1m_closed(event.clone()).await.unwrap();
+    }
+}
+```
+
+- [ ] **Step 2: 运行测试**
+
+Run: `cargo test --all`
+Expected: 所有 119+ tests passed（含新增 6 个 PipelineBus 测试）
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add src/event_bus_test.rs
+git commit -m "test(src): 添加 PipelineBus 单元测试"
+```
+
+### 第七阶段验收
+
+- [ ] PipelineBus 事件总线编译通过
+- [ ] PipelineActors (data_source/bfc/e) 编译通过
+- [ ] pipeline.rs 无 serial polling loop
+- [ ] `tokio::time::sleep(50)` 已从 pipeline.rs 移除
+- [ ] main.rs spawn 协程后 await 完成
+- [ ] 119+ tests passing
+
+### 第七阶段验收
+- [ ] PipelineBus 编译通过
+- [ ] PipelineActors 编译通过
+- [ ] pipeline.rs 移除 serial polling loop
+- [ ] tokio::time::sleep(50ms) 从 pipeline.rs 移除
+- [ ] 所有测试通过
 
 ---
 
