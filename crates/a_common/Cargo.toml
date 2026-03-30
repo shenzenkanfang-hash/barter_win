@@ -18,7 +18,7 @@ async-trait = { workspace = true }
 once_cell = "1.19"
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.10", features = ["small_rng"] }
 
 # x_data re-export for backward compatibility
 x_data = { path = "../x_data" }
