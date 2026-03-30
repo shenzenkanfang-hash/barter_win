@@ -1,23 +1,9 @@
 {
-  "heartbeat_sequence": 15,
+  "heartbeat_sequence": 0,
   "duration_minutes": 0,
-  "total_reports": 100,
-  "active_points": 1,
+  "total_reports": 0,
+  "active_points": 0,
   "stale_points_count": 0,
-  "points_detail": [
-    {
-      "point_id": "DT-002",
-      "point_name": "h_15m::Trader",
-      "module": "d_checktable::h_15m",
-      "function": "execute_once_wal",
-      "file": "crates\\d_checktable\\src\\h_15m\\trader.rs",
-      "reports_count": 100,
-      "last_report_at": "2026-03-29T21:14:52.865162200Z",
-      "is_stale": false,
-      "avg_latency_ms": 0,
-      "max_latency_ms": 0,
-      "last_latency_ms": 0
-    }
-  ],
+  "points_detail": [],
   "stale_points": []
 }

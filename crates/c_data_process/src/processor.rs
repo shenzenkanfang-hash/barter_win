@@ -63,6 +63,8 @@ pub struct SignalProcessor {
     day_signal_cache: RwLock<HashMap<String, SignalCacheEntry>>,
     /// v3.0: 心跳 Token
     heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
+    /// v4.0: 流水线观测表（可选，不配置则不记录）
+    pipeline_store: Option<Arc<b_data_source::store::PipelineStore>>,
 }
 
 /// 日级指标最大数量
@@ -86,6 +88,7 @@ impl SignalProcessor {
             min_signal_cache: RwLock::new(HashMap::new()),
             day_signal_cache: RwLock::new(HashMap::new()),
             heartbeat_token: Arc::new(RwLock::new(None)),
+            pipeline_store: None,
         }
     }
 
@@ -104,6 +107,28 @@ impl SignalProcessor {
             min_signal_cache: RwLock::new(HashMap::new()),
             day_signal_cache: RwLock::new(HashMap::new()),
             heartbeat_token: Arc::new(RwLock::new(None)),
+            pipeline_store: None,
+        }
+    }
+
+    /// 创建带流水线观测的信号处理器（v4.0）
+    ///
+    /// 推荐使用此构造函数，可记录 PipelineStage::IndicatorComputed 观测数据。
+    pub fn with_pipeline(pipeline_store: Arc<b_data_source::store::PipelineStore>) -> Self {
+        Self {
+            min_indicators: RwLock::new(HashMap::new()),
+            min_outputs: RwLock::new(HashMap::new()),
+            min_timestamps: RwLock::new(HashMap::new()),
+            registered_symbols: RwLock::new(HashSet::new()),
+            day_indicators: RwLock::new(HashMap::new()),
+            day_timestamps: RwLock::new(HashMap::new()),
+            ttl: Duration::from_secs(600),
+            max_day_symbols: MAX_DAY_SYMBOLS,
+            running: AtomicBool::new(false),
+            min_signal_cache: RwLock::new(HashMap::new()),
+            day_signal_cache: RwLock::new(HashMap::new()),
+            heartbeat_token: Arc::new(RwLock::new(None)),
+            pipeline_store: Some(pipeline_store),
         }
     }
 
@@ -224,7 +249,14 @@ impl SignalProcessor {
 
             // 更新 timestamp
             let mut timestamps = self.min_timestamps.write();
-            timestamps.insert(symbol_upper, Instant::now());
+            timestamps.insert(symbol_upper.clone(), Instant::now());
+
+            // v4.0: 流水线观测 - 记录指标计算完成
+            if let Some(ref ps) = self.pipeline_store {
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                ps.record(&symbol_upper, b_data_source::store::PipelineStage::IndicatorComputed, now_ms);
+            }
+
             Ok(())
         } else {
             Err(format!("Indicator not found for symbol {}", symbol_upper))
