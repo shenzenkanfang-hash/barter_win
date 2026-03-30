@@ -11,6 +11,7 @@ pub mod processor;
 pub mod strategy_state;
 
 pub mod indicator_store;
+pub mod indicator_services;
 
 pub use pine_indicator_full::{PineColorDetector as PineColorDetectorV5, colors, EMA, RSI};
 pub use types::*;
@@ -26,4 +27,9 @@ pub use strategy_state::{
 // Re-export indicator_store types
 pub use indicator_store::{
     IndicatorStore, Indicator1mOutput, Indicator1dOutput, SignalProcessorIndicatorStore,
+};
+
+// Re-export indicator_services types
+pub use indicator_services::{
+    MinIndicatorService, DayIndicatorService, KlineInput,
 };

@@ -238,6 +238,11 @@ impl SignalProcessor {
         self.registered_symbols.read().contains(&symbol.to_uppercase())
     }
 
+    /// 获取所有已注册日线品种
+    pub fn registered_day_symbols(&self) -> Vec<String> {
+        self.day_indicators.read().keys().cloned().collect()
+    }
+
     // ==================== 1m 数据更新 ====================
 
     /// 更新分钟级指标（被外部调用，通常来自 DataFeeder）
