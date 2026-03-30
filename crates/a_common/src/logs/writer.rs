@@ -5,13 +5,22 @@
 
 use std::path::PathBuf;
 use chrono::Local;
+use tracing_subscriber::layer::Layer;
 
 /// 日志文件目录
 static LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
+/// JSON Lines Writer 全局句柄
+static WRITER: std::sync::OnceLock<JsonLinesWriter> = std::sync::OnceLock::new();
+
 /// 初始化日志目录
 pub fn init_log_dir(dir: PathBuf) {
     LOG_DIR.set(dir).ok();
+}
+
+/// 获取全局 JsonLinesWriter（必须在 init_log_dir 之后调用）
+pub fn get_writer() -> Option<&'static JsonLinesWriter> {
+    WRITER.get()
 }
 
 /// 获取今日日志文件路径
@@ -31,37 +40,45 @@ pub struct JsonLinesWriter {
 }
 
 impl JsonLinesWriter {
-    /// 创建新的 Writer Service
-    pub fn new() -> Self {
+    /// 创建新的 Writer Service 并注册为全局单例
+    pub fn new() -> &'static Self {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(10000);
         let path = today_log_path();
 
         // 后台写入任务
         tokio::spawn(async move {
-            let file = tokio::fs::OpenOptions::new()
+            let file = match tokio::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&path)
                 .await
-                .expect("failed to open log file");
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!("[JsonLinesWriter] failed to open log file {}: {}", path.display(), e);
+                    return;
+                }
+            };
 
             // 4KB 缓冲，减少系统调用
             let mut writer = tokio::io::BufWriter::with_capacity(4096, file);
 
             while let Some(line) = rx.recv().await {
                 if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut writer, line.as_bytes()).await {
-                    tracing::error!("failed to write log: {}", e);
+                    tracing::error!("[JsonLinesWriter] failed to write log: {}", e);
+                    continue;
                 }
                 if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut writer, b"\n").await {
-                    tracing::error!("failed to write newline: {}", e);
+                    tracing::error!("[JsonLinesWriter] failed to write newline: {}", e);
+                    continue;
                 }
                 if let Err(e) = tokio::io::AsyncWriteExt::flush(&mut writer).await {
-                    tracing::error!("failed to flush log: {}", e);
+                    tracing::error!("[JsonLinesWriter] failed to flush log: {}", e);
                 }
             }
         });
 
-        Self { tx }
+        WRITER.get_or_init(|| Self { tx })
     }
 
     /// 异步发送日志行（< 1ms，非阻塞）
@@ -79,6 +96,113 @@ impl JsonLinesWriter {
 
 impl Default for JsonLinesWriter {
     fn default() -> Self {
-        Self::new()
+        panic!("JsonLinesWriter::default() called — use JsonLinesWriter::new() instead")
+    }
+}
+
+// ============================================================================
+// Tracing Layer — 将 tracing::info! 等调用写入 JSON Lines 文件
+// ============================================================================
+
+/// JSON Lines tracing layer
+pub struct JsonLinesLayer;
+
+impl JsonLinesLayer {
+    /// 构建带 JSON Lines layer 的 tracing subscriber
+    pub fn build() -> impl Layer<tracing_subscriber::registry::Registry> {
+        Self
+    }
+}
+
+impl Layer<tracing_subscriber::registry::Registry> for JsonLinesLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::registry::Registry>,
+    ) {
+        let writer = match get_writer() {
+            Some(w) => w,
+            None => return, // writer 尚未初始化，静默跳过
+        };
+
+        // 提取关键字段
+        let mut component = String::new();
+        let mut log_event = String::new();
+        let mut symbol = String::new();
+        let mut tick_id: Option<u64> = None;
+        let mut reason = String::new();
+
+        let mut visitor = JsonEventVisitor {
+            component: &mut component,
+            event: &mut log_event,
+            symbol: &mut symbol,
+            tick_id: &mut tick_id,
+            reason: &mut reason,
+        };
+
+        event.record(&mut visitor);
+
+        // 构造 JSON Line
+        let ts = chrono::Utc::now().to_rfc3339();
+        let level = format!("{:?}", event.metadata().level());
+        let target = event.metadata().target();
+
+        // 从 metadata 获取 event name（作为 message 兜底）
+        let message = event.metadata().name();
+
+        let line = serde_json::json!({
+            "ts": ts,
+            "level": level,
+            "target": target,
+            "message": message,
+            "component": component,
+            "event": log_event,
+            "symbol": symbol,
+            "tick_id": tick_id,
+            "reason": reason,
+        });
+
+        if let Ok(json) = serde_json::to_string(&line) {
+            writer.try_write(json);
+        }
+    }
+}
+
+/// tracing::field::Visit 实现 — 从事件字段中提取数据
+struct JsonEventVisitor<'a> {
+    component: &'a mut String,
+    event: &'a mut String,
+    symbol: &'a mut String,
+    tick_id: &'a mut Option<u64>,
+    reason: &'a mut String,
+}
+
+impl<'a> tracing::field::Visit for JsonEventVisitor<'a> {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        match field.name() {
+            "component" => self.component.push_str(value),
+            "event" => self.event.push_str(value),
+            "symbol" => self.symbol.push_str(value),
+            "reason" => self.reason.push_str(value),
+            _ => {}
+        }
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        match field.name() {
+            "tick_id" => *self.tick_id = Some(value),
+            _ => {}
+        }
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        // 处理其他数值字段（Decimal 等 Debug 打印）
+        match field.name() {
+            "component" | "event" | "symbol" | "reason" => {}
+            _ => {
+                // 将其他字段序列化为 Debug 字符串备用
+                let _ = value;
+            }
+        }
     }
 }

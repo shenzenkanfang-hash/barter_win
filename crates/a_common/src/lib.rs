@@ -37,7 +37,7 @@ pub use config::{Platform, Paths, VolatilityConfig, VOLATILITY_CONFIG};
 pub use logs::{
     CheckpointLogger, CompositeCheckpointLogger, ConsoleCheckpointLogger, Stage, StageResult,
     TracingCheckpointLogger, ComponentHealth, HealthAccumulator, ComponentHealthLogger,
-    TradingLogEventType, JsonLinesWriter, init_log_dir,
+    TradingLogEventType, JsonLinesWriter, JsonLinesLayer, init_log_dir, get_writer,
 };
 
 // Re-exports - Models

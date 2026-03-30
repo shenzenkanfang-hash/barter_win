@@ -3,7 +3,7 @@ ARCHITECTURE_OVERVIEW.md - Barter-Rs 系统全景图 v7.0
 ================================================================================
 Author: Claude Code
 Created: 2026-03-30
-Version: 7.0 (事件驱动协程自治架构)
+Version: 7.0 (指标数据自驱动协程架构)
 ================================================================================
 
 # Barter-Rs 量化交易系统全景图
@@ -57,7 +57,7 @@ x_data (业务数据类型抽象层)
 ```rust
 // 模块定义
 mod components;     // 系统组件创建
-mod pipeline;       // 事件驱动流水线
+mod pipeline;       // 自驱动流水线
 mod tick_context;   // 上下文配置
 mod utils;          // 工具函数
 mod event_bus;      // PipelineBus 事件总线
@@ -68,7 +68,7 @@ mod actors;         // StrategyActor + RiskActor
 async fn main() {
     // 1. 创建组件 (SystemComponents + DataLayer)
     // 2. 创建 PipelineBus
-    // 3. run_pipeline() - 启动事件驱动流水线
+    // 3. run_pipeline() - 启动自驱动流水线
     // 4. 打印心跳报告
 }
 ```
@@ -79,7 +79,7 @@ async fn main() {
 src/
   main.rs             # 程序入口 (v7.0)
   components.rs      # 系统组件创建 (create_components)
-  pipeline.rs        # 事件驱动流水线 (run_pipeline)
+  pipeline.rs        # 自驱动流水线 (run_pipeline)
   event_bus.rs       # PipelineBus 事件总线
   actors.rs          # StrategyActor + RiskActor 协程
   tick_context.rs    # 上下文配置 (SYMBOL, DATA_FILE 等)
@@ -284,7 +284,7 @@ a_common 允许包含：
 
 描述一根 K 线数据从产生到触发订单的全过程。
 
-## v7.0 事件驱动架构的数据流
+## v7.0 指标数据自驱动架构的数据流
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -376,7 +376,7 @@ src/event_bus.rs::PipelineBus
 第四层：执行时序与并发模型
 ================================================================================
 
-## v7.0 核心架构：事件驱动协程自治
+## v7.0 核心架构：指标数据自驱动协程
 
 ```
 src/main.rs
@@ -909,7 +909,7 @@ let kline_data = {
 
 ## 核心设计哲学一：并行 vs 串行（主动 vs 被动）
 
-系统选择了事件驱动协程架构：StrategyActor 主动 + RiskActor 被动。
+系统选择了指标数据自驱动协程架构：StrategyActor 主动拉取 + RiskActor 被动等待。
 
 ### 方案 A：传统轮询（已废弃）
 
@@ -923,7 +923,7 @@ loop {
 }
 ```
 
-### 方案 B：事件驱动协程（当前）
+### 方案 B：指标数据自驱动协程（当前）
 
 ```
 StrategyActor (主动驱动):
@@ -1026,12 +1026,12 @@ Kline1mStream 含 ThreadRng，watch::Receiver 含 RwLockReadGuard。
 总结：全景图纵览
 ================================================================================
 
-Barter-Rs v7.0 是一个层次清晰、事件驱动、可观测的交易专用 Rust 量化系统。
+Barter-Rs v7.0 是一个层次清晰、指标数据自驱动、可观测的交易专用 Rust 量化系统。
 
 它的核心架构哲学体现在三个选择上：
 
   1. 主动驱动 + 被动消费 = 职责分离 + 并发处理
-  2. 共享存储（数据） + PipelineBus（信号） = 零复制 + 灵活协调
+  2. 共享存储（数据） + PipelineBus（信号） = 零复制 + 自驱动协调
   3. 数据层被动接口 = 解耦 + 便于测试
 
 系统的设计始终围绕数据一致性和执行确定性两个核心目标展开，

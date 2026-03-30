@@ -48,6 +48,12 @@ pub async fn run_strategy_actor(
     bus_handle: PipelineBusHandle,
     mut stop_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
+    tracing::info!(
+        component = "strategy",
+        event = "component.started",
+        actor = "strategy",
+        "actor_strategy_started"
+    );
     tracing::info!("[Actor:strategy] started");
 
     let accumulator = components.health_logger.accumulator();
@@ -213,6 +219,13 @@ pub async fn run_strategy_actor(
         }
     }
 
+    tracing::info!(
+        component = "strategy",
+        event = "component.stopped",
+        actor = "strategy",
+        total_ticks = tick_id,
+        "actor_strategy_stopped"
+    );
     tracing::info!("[Actor:strategy] stopped, total ticks={}", tick_id);
 }
 
@@ -233,6 +246,12 @@ pub async fn run_risk_actor(
     mut stop_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     tracing::info!("[Actor:risk] started");
+    tracing::info!(
+        component = "risk",
+        event = "component.started",
+        actor = "risk",
+        "actor_risk_started"
+    );
 
     let mut strategy_rx = receiver.strategy_rx;
     let mut order_id_counter = 0u64;
@@ -369,5 +388,11 @@ pub async fn run_risk_actor(
         }
     }
 
+    tracing::info!(
+        component = "risk",
+        event = "component.stopped",
+        actor = "risk",
+        "actor_risk_stopped"
+    );
     tracing::info!("[Actor:risk] stopped");
 }

@@ -37,6 +37,8 @@ pub struct SystemComponents {
     pub trade_lock: Arc<TradeLock>,
     /// 健康监控累加器（数据流层日志）
     pub health_logger: Arc<ComponentHealthLogger>,
+    /// 健康监控后台任务句柄（必须保持活跃，否则任务会被 drop）
+    pub _health_logger_handle: Arc<tokio::task::JoinHandle<()>>,
 }
 
 /// DataLayer - Kline1mStream 数据层（非 Send，驱动专有）
@@ -111,7 +113,7 @@ pub async fn create_components() -> Result<(SystemComponents, DataLayer), Box<dy
 
     // 组件健康监控（每小时输出一次 health.summary）
     let health_logger = Arc::new(ComponentHealthLogger::new("h15m_strategy", 3600));
-    let _logger_handle = health_logger.clone().start_background_logger();
+    let health_logger_handle = health_logger.clone().start_background_logger();
     tracing::info!("[a_common] ComponentHealthLogger started (interval=3600s)");
 
     let components = SystemComponents {
@@ -123,6 +125,7 @@ pub async fn create_components() -> Result<(SystemComponents, DataLayer), Box<dy
         pipeline_store,
         trade_lock,
         health_logger,
+        _health_logger_handle: Arc::new(health_logger_handle),
     };
 
     let data_layer = DataLayer { kline_stream };

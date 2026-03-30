@@ -15,4 +15,4 @@ pub use checkpoint::{
     TradingLogEventType,
 };
 
-pub use writer::{JsonLinesWriter, init_log_dir};
+pub use writer::{JsonLinesWriter, JsonLinesLayer, init_log_dir, get_writer};

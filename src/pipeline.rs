@@ -1,4 +1,4 @@
-//! 事件驱动流水线
+//! 自驱动流水线
 //!
 //! # 架构（已纠正）
 //! - 数据层被动：Kline1mStream::next_message()（不主动发事件）
@@ -16,11 +16,11 @@ use crate::components::{SystemComponents, DataLayer};
 use crate::event_bus::{PipelineBus, PipelineBusHandle};
 use crate::actors::{run_strategy_actor, run_risk_actor};
 
-/// 事件驱动流水线启动函数
+/// 自驱动流水线启动函数
 ///
 /// # 参数
 /// - components: 所有共享组件（由 main.rs create_components 构造）
-/// - bus: PipelineBus（strategy signal channel）
+/// - bus: PipelineBus（自驱动协程间信号传递）
 ///
 /// # 行为
 /// 1. Spawn StrategyActor（主动驱动：拉取数据 → 处理 → 发信号）
@@ -34,7 +34,7 @@ pub async fn run_pipeline(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (bus_handle, bus_receiver) = bus;
 
-    tracing::info!("Event-driven pipeline starting");
+    tracing::info!("Self-driven pipeline starting");
 
     // 创建 broadcast channel（Send-safe stop signal，所有 actor 共用一个 sender）
     // 使用 broadcast 而非 watch：broadcast::Receiver 是 Send-safe（watch::Receiver 持
@@ -79,6 +79,6 @@ pub async fn run_pipeline(
     // 广播停止信号（优雅退出）：send() 触发所有 broadcast receiver 退出
     let _ = stop_tx.send(());
 
-    tracing::info!("Event-driven pipeline stopped");
+    tracing::info!("Self-driven pipeline stopped");
     Ok(())
 }
