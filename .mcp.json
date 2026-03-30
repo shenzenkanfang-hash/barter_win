@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "sentrux": {
+      "command": "cmd",
+      "args": ["/c", "C:\\Users\\char\\.cargo\\bin\\sentrux.exe", "--mcp"],
+      "cwd": "D:\\RusProject\\barter-rs-main"
+    }
+  }
+}
