@@ -331,7 +331,7 @@ impl PipelineState {
         }
 
         // 6. 输出结构化调试日志（AI 可解析）
-        tracing::info!(
+        tracing::debug!(
             target: "pipeline_debug",
             trace_id = trace_id,
             stage = ?stage,

@@ -150,19 +150,29 @@ impl Layer<tracing_subscriber::registry::Registry> for JsonLinesLayer {
         // 从 metadata 获取 event name（作为 message 兜底）
         let message = event.metadata().name();
 
-        let line = serde_json::json!({
-            "ts": ts,
-            "level": level,
-            "target": target,
-            "message": message,
-            "component": component,
-            "event": log_event,
-            "symbol": symbol,
-            "tick_id": tick_id,
-            "reason": reason,
-        });
+        // 只包含有值的字段（避免空字段噪声）
+        let mut obj = serde_json::Map::with_capacity(6);
+        obj.insert("ts".to_string(), serde_json::Value::String(ts));
+        obj.insert("level".to_string(), serde_json::Value::String(level));
+        obj.insert("target".to_string(), serde_json::Value::String(target.to_string()));
+        obj.insert("message".to_string(), serde_json::Value::String(message.to_string()));
+        if !component.is_empty() {
+            obj.insert("component".to_string(), serde_json::Value::String(component));
+        }
+        if !log_event.is_empty() {
+            obj.insert("event".to_string(), serde_json::Value::String(log_event));
+        }
+        if !symbol.is_empty() {
+            obj.insert("symbol".to_string(), serde_json::Value::String(symbol));
+        }
+        if let Some(tid) = tick_id {
+            obj.insert("tick_id".to_string(), serde_json::Value::String(tid.to_string()));
+        }
+        if !reason.is_empty() {
+            obj.insert("reason".to_string(), serde_json::Value::String(reason));
+        }
 
-        if let Ok(json) = serde_json::to_string(&line) {
+        if let Ok(json) = serde_json::to_string(&serde_json::Value::Object(obj)) {
             writer.try_write(json);
         }
     }

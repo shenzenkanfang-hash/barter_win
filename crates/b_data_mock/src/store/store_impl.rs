@@ -148,13 +148,13 @@ impl MarketDataStore for MarketDataStoreImpl {
     }
 
     fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
-        tracing::debug!(symbol = %symbol, "store: write_indicator");
+        tracing::trace!(symbol = %symbol, "store: write_indicator");
         self.indicators.write().insert(symbol.to_uppercase(), indicator);
     }
 
     fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {
         let result = self.indicators.read().get(&symbol.to_uppercase()).cloned();
-        tracing::debug!(symbol = %symbol, found = result.is_some(), "store: get_indicator");
+        tracing::trace!(symbol = %symbol, found = result.is_some(), "store: get_indicator");
         result
     }
 }
@@ -250,7 +250,7 @@ impl BMarketDataStore for MarketDataStoreImpl {
     }
 
     fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
-        tracing::debug!(symbol = %symbol, "store(b): write_indicator");
+        tracing::trace!(symbol = %symbol, "store(b): write_indicator");
         self.indicators.write().insert(symbol.to_uppercase(), indicator);
     }
 

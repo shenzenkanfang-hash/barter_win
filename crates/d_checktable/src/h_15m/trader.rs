@@ -542,7 +542,7 @@ impl Trader {
     /// 判断波动率通道
     fn volatility_tier(&self) -> VolatilityTier {
         let vol_val = self.volatility_value();
-        tracing::debug!(symbol = %self.config.symbol, volatility = ?vol_val, "波动率通道判断");
+        tracing::trace!(symbol = %self.config.symbol, volatility = ?vol_val, "波动率通道判断");
 
         let tier = match vol_val {
             Some(v) if v > 0.15 => VolatilityTier::High,
@@ -550,7 +550,7 @@ impl Trader {
             _ => VolatilityTier::Low,
         };
 
-        tracing::debug!(symbol = %self.config.symbol, tier = ?tier, "选择通道");
+        tracing::trace!(symbol = %self.config.symbol, tier = ?tier, "选择通道");
         tier
     }
 
@@ -559,7 +559,7 @@ impl Trader {
         if let Some(ref provider) = self.account_provider {
             match provider(self.config.symbol.clone()).await {
                 Ok(info) => {
-                    tracing::debug!(
+                    tracing::trace!(
                         symbol = %self.config.symbol,
                         available = %info.available_balance,
                         equity = %info.total_equity,
@@ -691,7 +691,7 @@ impl Trader {
             add_multiplier: qty_config.add_multiplier,
             vol_adjustment: qty_config.vol_adjustment,
         }));
-        tracing::debug!(
+        tracing::trace!(
             symbol = %self.config.symbol,
             base_open_qty = %qty_config.base_open_qty,
             max_position_qty = %qty_config.max_position_qty,
@@ -781,7 +781,7 @@ impl Trader {
         indicator_calculator: IndicatorCalcFn,
     ) -> Self {
         self.indicator_calculator = Some(indicator_calculator);
-        tracing::debug!(
+        tracing::trace!(
             symbol = %self.config.symbol,
             "指标计算器已启用"
         );
@@ -960,7 +960,7 @@ impl Trader {
         let handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(interval_secs));
             
-            tracing::debug!(
+            tracing::trace!(
                 symbol = %symbol,
                 timeout_secs = timeout_secs,
                 interval_secs = interval_secs,
@@ -999,7 +999,7 @@ impl Trader {
         // 使用锁安全存储 handle
         let mut guard = gc_handle.lock();
         *guard = Some(handle);
-        tracing::debug!(
+        tracing::trace!(
             symbol = %symbol_for_log,
             "GC 任务句柄已注册"
         );
@@ -1014,7 +1014,7 @@ impl Trader {
         };
         
         if let Some(h) = handle {
-            tracing::debug!(
+            tracing::trace!(
                 symbol = %self.config.symbol,
                 "正在停止 GC 任务"
             );
@@ -1174,7 +1174,7 @@ impl Trader {
             &signal_output,
         );
         
-        tracing::debug!(
+        tracing::trace!(
             symbol = %self.config.symbol,
             ?order_type,
             qty = %qty_result.qty,
@@ -1362,7 +1362,7 @@ impl Trader {
         let short_hedge_cond1 = entry_price.map(|e| price > e * thresholds.price_up_threshold);
         let short_hedge_hard = entry_price.map(|e| price > e * thresholds.price_up_hard_threshold);
 
-        tracing::debug!(
+        tracing::trace!(
             symbol = %self.config.symbol,
             status = ?status,
             price = %price,
@@ -1498,7 +1498,7 @@ impl Trader {
                 // Python 原版: 趋势模式下，总盈亏 >= 0 时先平对冲仓位
                 // 此处需要外部提供 total_pnl 信息，暂时跳过
                 // 实际实现需要对接 pnl_manager
-                tracing::debug!(
+                tracing::trace!(
                     symbol = %self.config.symbol,
                     status = ?status,
                     "PosLocked 状态，等待外部 PnL 信号"
@@ -1749,7 +1749,7 @@ impl Trader {
                             );
                         }
                         Ok(ExecutionResult::Skipped(reason)) => {
-                            tracing::debug!(
+                            tracing::trace!(
                                 symbol = %self.config.symbol,
                                 reason = %reason,
                                 "WAL 跳过执行"

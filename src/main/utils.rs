@@ -177,7 +177,7 @@ pub fn convert_store_indicator_to_market_indicators(
                     Decimal::try_from(50.0).ok()
                 };
 
-                tracing::debug!(
+                tracing::trace!(
                     symbol = %symbol,
                     closes_count = closes.len(),
                     mean = %mean,

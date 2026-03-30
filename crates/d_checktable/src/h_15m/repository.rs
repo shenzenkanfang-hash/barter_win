@@ -284,7 +284,7 @@ impl Repository {
 
         match self.exec_insert(sql, &record) {
             Ok(id) => {
-                tracing::debug!(id = id, symbol = %record.symbol, "预写记录 PENDING");
+                tracing::trace!(id = id, symbol = %record.symbol, "预写记录 PENDING");
                 Ok(id)
             }
             Err(RepoError::Database(rusqlite::Error::SqliteFailure(code, _))) => {
