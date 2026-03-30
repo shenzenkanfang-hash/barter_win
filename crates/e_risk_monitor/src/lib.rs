@@ -4,6 +4,8 @@ pub mod risk;
 pub mod position;
 pub mod persistence;
 pub mod shared;
+pub mod risk_service;
+pub mod trade_lock;
 
 // Re-exports - 从 a_common::backup 获取内存备份类型
 pub use a_common::backup::{MemoryBackup, memory_backup_dir};
@@ -19,3 +21,15 @@ pub use shared::{account_pool::{AccountInfo, AccountMargin, AccountPool, Circuit
 
 // Re-exports - x_data state management
 pub use x_data::state::{StateViewer, StateManager, UnifiedStateView, SystemSnapshot};
+
+// Re-exports - RiskService trait and types
+pub use risk_service::{
+    RiskService, RiskServiceError, RiskServiceAdapter,
+    PreCheckRequest, PreCheckResult, RiskSide, RiskLevel,
+    ReCheckRequest, ReCheckResult,
+    RiskSnapshot,
+    MockRiskService,
+};
+
+// Re-exports - TradeLock
+pub use trade_lock::{TradeLock, TradeLockGuard, AsyncTradeLockGuard, LockError};

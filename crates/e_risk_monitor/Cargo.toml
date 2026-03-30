@@ -20,3 +20,5 @@ reqwest = { workspace = true }
 a_common = { path = "../a_common" }
 b_data_source = { path = "../b_data_source" }
 x_data = { path = "../x_data" }
+
+async-trait = { workspace = true }

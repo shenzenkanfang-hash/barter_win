@@ -19,6 +19,7 @@ pub mod models;
 pub mod trader_pool;     // 品种池
 pub mod replay_source;    // 历史数据回放
 pub mod engine;           // 引擎时钟系统
+pub mod shared_store;     // 通用共享存储
 
 // 统一数据接口层
 pub mod ws;      // WebSocket 数据接口
@@ -61,6 +62,12 @@ pub mod store;
 pub use store::{MarketDataStore, MarketDataStoreImpl, OrderBookData, VolatilityData,
     PipelineStage, PipelineEvent, PipelineState, PipelineStateSnapshot,
     VersionTracker, VersionSnapshot, PipelineStore,
+};
+
+// Re-exports - SharedStore (通用共享存储)
+pub use shared_store::{SharedStore, SharedStoreImpl, SharedStoreRef,
+    VersionedData, StoreVersion, ChangeType, SharedStoreEvent,
+    create_shared_store,
 };
 
 // ============================================================================
