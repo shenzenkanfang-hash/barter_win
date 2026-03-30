@@ -26,7 +26,7 @@ use c_data_process::processor::SignalProcessor;
 use d_checktable::h_15m::{
     Executor, ExecutorConfig, Repository, ThresholdConfig, Trader, TraderConfig,
 };
-use d_checktable::h_15m::trader::StoreRef;
+use d_checktable::h_15m::trader::{MarketIndicators, StoreRef, TraderError};
 use e_risk_monitor::risk::common::{OrderCheck, RiskPreChecker};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -271,8 +271,9 @@ async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Err
 
     // [c] 指标层（被 d 调用）
     let signal_processor = Arc::new(SignalProcessor::with_pipeline(pipeline_store.clone()));
+    signal_processor.set_market_store(shared_store.clone());
     signal_processor.register_symbol(SYMBOL);
-    tracing::info!("[c] SignalProcessor created with pipeline_store");
+    tracing::info!("[c] SignalProcessor created with pipeline_store + market_store");
 
     // [d] 策略层（业务核心）
     let trader = create_trader(shared_store, pipeline_store.clone())?;
@@ -320,7 +321,13 @@ fn create_trader(store: StoreRef, pipeline_store: Arc<PipelineStore>) -> Result<
 
     let repository = Arc::new(Repository::new(SYMBOL, DB_PATH)?);
 
-    Ok(Arc::new(Trader::new_with_pipeline(config, executor, repository, store, pipeline_store)))
+    Ok(Arc::new(Trader::new_with_pipeline(config, executor, repository, store.clone(), pipeline_store)
+        .with_indicator_calculator(Box::new(move |symbol: String| {
+            let store = store.clone();
+            Box::pin(async move {
+                convert_store_indicator_to_market_indicators(&store, &symbol)
+            })
+        }))))
 }
 
 // ============================================================================
@@ -677,4 +684,37 @@ async fn print_heartbeat_report() {
     if let Err(e) = hb::global().save_report("heartbeat_report.json").await {
         tracing::warn!("Save failed: {}", e);
     }
+}
+
+// ============================================================================
+// NO_SIGNAL 修复：指标转换函数
+// ============================================================================
+
+/// 从 Store 读取 Indicator1mOutput JSON 并转换为 MarketIndicators
+fn convert_store_indicator_to_market_indicators(
+    store: &StoreRef,
+    symbol: &str,
+) -> Result<MarketIndicators, TraderError> {
+    let json = store.get_indicator(symbol)
+        .ok_or_else(|| TraderError::Other(String::from("no indicator in store")))?;
+
+    // 反序列化为 Indicator1mOutput
+    let ind: c_data_process::min::trend::Indicator1mOutput = serde_json::from_value(json)
+        .map_err(|e| TraderError::Other(format!("indicator deserialize error: {}", e)))?;
+
+    Ok(MarketIndicators {
+        tr_base_60min: ind.tr_base_10min,       // 近似：10min TR基准作为 60min 基准
+        tr_ratio_15min: ind.tr_ratio_10min_1h,  // 近似：用 10min/1h TR 比值
+        zscore_14_1m: ind.zscore_14_1m,
+        zscore_1h_1m: ind.zscore_1h_1m,
+        tr_ratio_60min_5h: ind.tr_ratio_10min_1h, // 近似
+        tr_ratio_10min_1h: ind.tr_ratio_10min_1h,
+        pos_norm_60: ind.pos_norm_60,
+        acc_percentile_1h: ind.acc_percentile,
+        velocity_percentile_1h: ind.velocity_percentile,
+        pine_bg_color: String::new(),           // SignalProcessor 暂不计算 Pine 颜色
+        pine_bar_color: String::new(),
+        price_deviation: Decimal::ZERO,          // SignalProcessor 暂不计算价格偏离度
+        price_deviation_horizontal_position: dec!(50),
+    })
 }

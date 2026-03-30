@@ -2,6 +2,7 @@
 //!
 //! 组合 MemoryStore + HistoryStore + VolatilityManager
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -24,6 +25,9 @@ pub struct MarketDataStoreImpl {
     memory: Arc<MemoryStore>,
     history: Arc<HistoryStore>,
     volatility: Arc<VolatilityManager>,
+    /// NO_SIGNAL 修复：分钟级指标存储（由 SignalProcessor 写入，Trader 读取）
+    /// 使用 parking_lot::RwLock 提供 interior mutability
+    indicators: parking_lot::RwLock<HashMap<String, serde_json::Value>>,
 }
 
 impl MarketDataStoreImpl {
@@ -34,8 +38,9 @@ impl MarketDataStoreImpl {
         let memory = Arc::new(MemoryStore::new());
         let history = Arc::new(HistoryStore::new(temp_dir));
         let volatility = Arc::new(VolatilityManager::new());
+        let indicators = parking_lot::RwLock::new(HashMap::new());
 
-        Self { memory, history, volatility }
+        Self { memory, history, volatility, indicators }
     }
 
     /// 创建带磁盘路径的实例
@@ -43,8 +48,9 @@ impl MarketDataStoreImpl {
         let memory = Arc::new(MemoryStore::new());
         let history = Arc::new(HistoryStore::new(path));
         let volatility = Arc::new(VolatilityManager::new());
+        let indicators = parking_lot::RwLock::new(HashMap::new());
 
-        Self { memory, history, volatility }
+        Self { memory, history, volatility, indicators }
     }
 
     /// 获取内部 MemoryStore
@@ -90,6 +96,14 @@ impl MarketDataStore for MarketDataStoreImpl {
 
     fn get_volatility(&self, symbol: &str) -> Option<VolatilityData> {
         self.volatility.get_volatility(symbol)
+    }
+
+    fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
+        self.indicators.write().insert(symbol.to_uppercase(), indicator);
+    }
+
+    fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {
+        self.indicators.read().get(&symbol.to_uppercase()).cloned()
     }
 }
 
@@ -181,6 +195,14 @@ impl BMarketDataStore for MarketDataStoreImpl {
             volatility: v.volatility,
             update_time_ms: v.update_time_ms,
         })
+    }
+
+    fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
+        self.indicators.write().insert(symbol.to_uppercase(), indicator);
+    }
+
+    fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {
+        self.indicators.read().get(&symbol.to_uppercase()).cloned()
     }
 }
 

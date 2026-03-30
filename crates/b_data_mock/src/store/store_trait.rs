@@ -48,4 +48,17 @@ pub trait MarketDataStore: Send + Sync {
 
     /// 获取波动率
     fn get_volatility(&self, symbol: &str) -> Option<VolatilityData>;
+
+    // ========== 指标存储（NO_SIGNAL 修复）==========
+
+    /// 写入分钟级指标（由 SignalProcessor 调用）
+    fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
+        let _ = (symbol, indicator);
+    }
+
+    /// 读取分钟级指标（由 Trader 调用）
+    fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {
+        let _ = symbol;
+        None
+    }
 }

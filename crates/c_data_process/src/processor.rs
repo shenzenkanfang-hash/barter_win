@@ -20,6 +20,7 @@ use crate::types::{PineColor, TradingDecision};
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,6 +66,9 @@ pub struct SignalProcessor {
     heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
     /// v4.0: 流水线观测表（可选，不配置则不记录）
     pipeline_store: Option<Arc<b_data_source::store::PipelineStore>>,
+    /// NO_SIGNAL 修复：共享 MarketDataStore（SignalProcessor 写入指标，Trader 读取）
+    /// 使用 RwLock 提供 interior mutability，允许 Arc<SignalProcessor> 调用 set_market_store
+    market_store: Arc<parking_lot::RwLock<Option<Arc<dyn b_data_source::MarketDataStore + Send + Sync>>>>,
 }
 
 /// 日级指标最大数量
@@ -89,6 +93,7 @@ impl SignalProcessor {
             day_signal_cache: RwLock::new(HashMap::new()),
             heartbeat_token: Arc::new(RwLock::new(None)),
             pipeline_store: None,
+            market_store: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -108,6 +113,7 @@ impl SignalProcessor {
             day_signal_cache: RwLock::new(HashMap::new()),
             heartbeat_token: Arc::new(RwLock::new(None)),
             pipeline_store: None,
+            market_store: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -129,7 +135,23 @@ impl SignalProcessor {
             day_signal_cache: RwLock::new(HashMap::new()),
             heartbeat_token: Arc::new(RwLock::new(None)),
             pipeline_store: Some(pipeline_store),
+            market_store: Arc::new(RwLock::new(None)),
         }
+    }
+
+    // ==================== NO_SIGNAL 修复：指标存储 ====================
+
+    /// 设置共享 MarketDataStore（NO_SIGNAL 修复）
+    ///
+    /// 将计算完成的指标写入共享 Store，供 Trader 读取。
+    /// 可链式调用：
+    /// ```ignore
+    /// let processor = Arc::new(SignalProcessor::with_pipeline(pipeline_store.clone()));
+    /// // 然后调用 set_market_store
+    /// processor.set_market_store(shared_store.clone());
+    /// ```
+    pub fn set_market_store(&self, store: Arc<dyn b_data_source::MarketDataStore + Send + Sync>) {
+        *self.market_store.write() = Some(store);
     }
 
     // ==================== v3.0: 心跳报到 ====================
@@ -245,11 +267,18 @@ impl SignalProcessor {
 
             // 缓存输出
             let mut outputs = self.min_outputs.write();
-            outputs.insert(symbol_upper.clone(), output);
+            outputs.insert(symbol_upper.clone(), output.clone());
 
             // 更新 timestamp
             let mut timestamps = self.min_timestamps.write();
             timestamps.insert(symbol_upper.clone(), Instant::now());
+
+            // NO_SIGNAL 修复：将指标写入共享 Store（供 Trader 读取）
+            if let Some(ref store) = *self.market_store.read() {
+                if let Ok(json_value) = serde_json::to_value(&output) {
+                    store.write_indicator(&symbol_upper, json_value);
+                }
+            }
 
             // v4.0: 流水线观测 - 记录指标计算完成
             if let Some(ref ps) = self.pipeline_store {
