@@ -2,7 +2,6 @@
 
 mod components;
 mod pipeline;
-mod tick_context;
 mod utils;
 mod event_bus;  // PipelineBus
 mod actors;     // StrategyActor + RiskActor
@@ -15,7 +14,7 @@ use a_common::logs::{JsonLinesWriter, JsonLinesLayer};
 use crate::components::{create_components, init_heartbeat, print_heartbeat_report};
 use crate::event_bus::PipelineBus;
 use crate::pipeline::run_pipeline;
-use crate::tick_context::{DATA_FILE, SYMBOL};
+use crate::utils::{DATA_FILE, SYMBOL};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

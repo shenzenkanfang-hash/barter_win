@@ -19,7 +19,8 @@ use e_risk_monitor::risk::common::{OrderCheck, RiskPreChecker};
 use e_risk_monitor::trade_lock::TradeLock;
 use rust_decimal::Decimal;
 
-use crate::tick_context::{DB_PATH, DATA_FILE, INITIAL_BALANCE, SYMBOL};
+use crate::utils::DB_PATH;
+use crate::utils::{DATA_FILE, INITIAL_BALANCE, SYMBOL};
 use crate::utils::{convert_store_indicator_to_market_indicators, StoreRef};
 
 /// SystemComponents - Send-safe 系统组件（排除 Kline1mStream）

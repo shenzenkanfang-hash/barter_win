@@ -1,8 +1,36 @@
 //! 工具函数
+//!
+//! 包含:
+//! - RawKline: K 线数据结构（从 tick_context.rs 迁移）
+//! - parse_raw_kline: K 线解析
+//! - convert_store_indicator_to_market_indicators: 指标转换
+//! - 全局常量: INITIAL_BALANCE, SYMBOL, DB_PATH, DATA_FILE
 
 use b_data_mock::MarketDataStore;
 use rust_decimal::Decimal;
-use crate::tick_context::RawKline;
+
+// ============================================================================
+// 常量（从 tick_context.rs 迁移）
+// ============================================================================
+
+pub const INITIAL_BALANCE: Decimal = rust_decimal_macros::dec!(10000);
+pub const SYMBOL: &str = "HOTUSDT";
+pub const DB_PATH: &str = "D:/RusProject/barter-rs-main/data/trade_records.db";
+pub const DATA_FILE: &str = "D:/RusProject/barter-rs-main/data/HOTUSDT_1m_20251009_20251011.csv";
+
+// ============================================================================
+// 数据结构（从 tick_context.rs 迁移，TickContext 等旧结构已删除）
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct RawKline {
+    pub open: Decimal,
+    pub close: Decimal,
+    pub high: Decimal,
+    pub low: Decimal,
+    pub volume: Decimal,
+    pub is_closed: bool,
+}
 
 /// 解析 K线原始数据
 pub fn parse_raw_kline(data: &str) -> Result<RawKline, Box<dyn std::error::Error>> {

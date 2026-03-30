@@ -24,7 +24,7 @@ use crate::event_bus::{
     OrderEvent, OrderSide, OrderStatus,
 };
 use crate::components::{SystemComponents, DataLayer};
-use crate::tick_context::{SYMBOL, INITIAL_BALANCE};
+use crate::utils::{SYMBOL, INITIAL_BALANCE};
 use crate::utils::parse_raw_kline;
 
 /// 心跳报到间隔（秒）
