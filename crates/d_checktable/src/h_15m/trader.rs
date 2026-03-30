@@ -358,6 +358,8 @@ pub struct Trader {
     indicator_calculator: Option<IndicatorCalcFn>,
     /// v3.0: 心跳 Token（用于心跳报到）
     heartbeat_token: Arc<ParkingRwLock<Option<HeartbeatToken>>>,
+    /// v4.0: 流水线观测表（可选，不配置则不记录）
+    pipeline_store: Option<Arc<b_data_source::store::PipelineStore>>,
 }
 
 impl Trader {
@@ -366,6 +368,7 @@ impl Trader {
     /// v2.1: 使用默认 GC 配置
     /// v2.2: quantity_calculator = None，使用 executor 默认逻辑
     /// v2.4 FIX: 使用 Arc<ParkingRwLock> 支持异步上下文
+    /// v4.0: pipeline_store = None，不记录观测表
     pub fn new(
         config: TraderConfig,
         executor: Arc<Executor>,
@@ -392,6 +395,39 @@ impl Trader {
             indicator_calculator: None,
             // v3.0: 心跳 Token
             heartbeat_token: Arc::new(ParkingRwLock::new(None)),
+            // v4.0: 流水线观测表（可选）
+            pipeline_store: None,
+        }
+    }
+
+    /// 创建带流水线观测的 Trader（v4.0）
+    ///
+    /// 推荐使用此构造函数，可记录 PipelineStage 观测数据。
+    pub fn new_with_pipeline(
+        config: TraderConfig,
+        executor: Arc<Executor>,
+        repository: Arc<Repository>,
+        store: StoreRef,
+        pipeline_store: Arc<b_data_source::store::PipelineStore>,
+    ) -> Self {
+        Self {
+            config: config.clone(),
+            status_machine: Arc::new(ParkingRwLock::new(PinStatusMachine::new())),
+            signal_generator: MinSignalGenerator::new(),
+            position: Arc::new(ParkingRwLock::new(None)),
+            executor,
+            repository,
+            store,
+            account_provider: None,
+            last_order_ms: AtomicU64::new(0),
+            is_running: AtomicBool::new(false),
+            shutdown: Notify::new(),
+            gc_config: GcConfig::default(),
+            gc_handle: Arc::new(Mutex::new(None)),
+            quantity_calculator: None,
+            indicator_calculator: None,
+            heartbeat_token: Arc::new(ParkingRwLock::new(None)),
+            pipeline_store: Some(pipeline_store),
         }
     }
 
@@ -428,6 +464,8 @@ impl Trader {
             indicator_calculator: None,
             // v3.0: 心跳 Token
             heartbeat_token: Arc::new(ParkingRwLock::new(None)),
+            // v4.0: pipeline_store = None，不记录观测表
+            pipeline_store: None,
         }
     }
 
@@ -1039,6 +1077,12 @@ impl Trader {
     pub async fn execute_once_wal(&self) -> Result<ExecutionResult, TraderError> {
         // v3.0: 心跳报到
         self.heartbeat_report().await;
+
+        // v4.0: 流水线观测 - 记录策略层开始
+        let now_ms = Utc::now().timestamp_millis();
+        if let Some(ref ps) = self.pipeline_store {
+            ps.record(&self.config.symbol, b_data_source::store::PipelineStage::DecisionMade, now_ms);
+        }
 
         // 1. 预创建记录（包含持仓快照）
         let mut record = match self.build_pending_record() {

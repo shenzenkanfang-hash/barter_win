@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
 use parking_lot::RwLock;
+use chrono::Utc;
 
 use a_common::heartbeat::Token as HeartbeatToken;
+use b_data_source::store::PipelineStage;
 use crate::store::MarketDataStoreImpl;
 use crate::ws::kline_1m::kline::KLineSynthesizer;
 
@@ -58,6 +60,8 @@ pub struct Kline1mStream {
     kline_generator: Option<crate::ws::kline_generator::KlineStreamGenerator>,
     /// v3.0: 心跳 Token
     heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
+    /// v4.0: 流水线观测表（可选，不配置则不记录）
+    pipeline_store: Option<Arc<b_data_source::store::PipelineStore>>,
 }
 
 impl Kline1mStream {
@@ -77,6 +81,7 @@ impl Kline1mStream {
             current_sub: None,
             kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
             heartbeat_token: Arc::new(RwLock::new(None)),
+            pipeline_store: None,
         }
     }
 
@@ -85,7 +90,7 @@ impl Kline1mStream {
         self.store.clone()
     }
 
-    /// 创建模拟 1m K线流（使用外部提供的 store）
+    /// 创建模拟 1m K线流（使用外部提供的 store + 流水线观测）
     ///
     /// 用于 main.rs 中让 Trader 和 Kline1mStream 共享同一个 store 实例，
     /// 这样 Trader 读取 K线时能获取到 Kline1mStream 写入的数据。
@@ -104,6 +109,27 @@ impl Kline1mStream {
             current_sub: None,
             kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
             heartbeat_token: Arc::new(RwLock::new(None)),
+            pipeline_store: None,
+        }
+    }
+
+    /// 创建模拟 1m K线流（使用外部 store + 流水线观测表）
+    ///
+    /// v4.0: 让 Kline1mStream 持有 PipelineStore，写入 K线后自动记录 DataWritten 观测。
+    /// 同时兼容 store 和 pipeline_store 为同一实例的场景（推荐）。
+    pub fn from_klines_with_pipeline(
+        symbol: String,
+        kline_iter: Box<dyn Iterator<Item = crate::models::KLine> + Send>,
+        store: StoreRef,
+        pipeline_store: Arc<b_data_source::store::PipelineStore>,
+    ) -> Self {
+        Self {
+            store,
+            synthesizers: HashMap::new(),
+            current_sub: None,
+            kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
+            heartbeat_token: Arc::new(RwLock::new(None)),
+            pipeline_store: Some(pipeline_store),
         }
     }
 
@@ -177,6 +203,12 @@ impl Kline1mStream {
         };
         self.store.write_kline(&sub.symbol, store_kline, sub.is_last_in_kline);
 
+        // v4.0: 流水线观测 - DataWritten（数据已写入 Store）
+        if let Some(ref ps) = self.pipeline_store {
+            let now_ms = Utc::now().timestamp_millis();
+            ps.record(&sub.symbol, PipelineStage::DataWritten, now_ms);
+        }
+
         // 如果有完成的 K线，序列化返回
         if sub.is_last_in_kline {
             if let Some(completed) = completed_kline {
@@ -247,6 +279,7 @@ impl Default for Kline1mStream {
             current_sub: None,
             kline_generator: None,
             heartbeat_token: Arc::new(RwLock::new(None)),
+            pipeline_store: None,
         }
     }
 }

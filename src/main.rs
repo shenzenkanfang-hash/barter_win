@@ -20,6 +20,7 @@ use b_data_mock::{
     replay_source::ReplaySource,
     ws::kline_1m::ws::Kline1mStream,
 };
+use b_data_source::store::PipelineStore;
 use chrono::{DateTime, Utc};
 use c_data_process::processor::SignalProcessor;
 use d_checktable::h_15m::{
@@ -223,6 +224,8 @@ struct SystemComponents {
     risk_checker:     Arc<RiskPreChecker>,
     order_checker:    Arc<OrderCheck>,
     gateway:          Arc<MockApiGateway>,
+    /// v4.0: 流水线观测表（所有组件共享）
+    pipeline_store:   Arc<PipelineStore>,
 }
 
 async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Error>> {
@@ -248,25 +251,31 @@ async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Err
 
     let shared_store: StoreRef = store;
 
+    // v4.0: 流水线观测表（所有组件共享）
+    let pipeline_store = Arc::new(PipelineStore::new());
+    tracing::info!("[pipeline] PipelineStore created");
+
     let kline_stream = Arc::new(tokio::sync::Mutex::new(
-        Kline1mStream::from_klines_with_store(
+        Kline1mStream::from_klines_with_pipeline(
             SYMBOL.to_string(),
             Box::new(replay_source),
             shared_store.clone(),
+            pipeline_store.clone(),
         )
     ));
+    tracing::info!("[b] KlineStream created with pipeline_store");
 
     // [f] 执行层（独立创建，但由 d 决策后调用）
     let gateway = Arc::new(MockApiGateway::new(INITIAL_BALANCE, MockConfig::default()));
     tracing::info!("[f] MockGateway created, balance={}", INITIAL_BALANCE);
 
     // [c] 指标层（被 d 调用）
-    let signal_processor = Arc::new(SignalProcessor::new());
+    let signal_processor = Arc::new(SignalProcessor::with_pipeline(pipeline_store.clone()));
     signal_processor.register_symbol(SYMBOL);
-    tracing::info!("[c] SignalProcessor created");
+    tracing::info!("[c] SignalProcessor created with pipeline_store");
 
     // [d] 策略层（业务核心）
-    let trader = create_trader(shared_store)?;
+    let trader = create_trader(shared_store, pipeline_store.clone())?;
     tracing::info!("[d] Trader created");
 
     // [e] 风控层
@@ -284,10 +293,11 @@ async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Err
         risk_checker,
         order_checker,
         gateway,
+        pipeline_store,
     })
 }
 
-fn create_trader(store: StoreRef) -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
+fn create_trader(store: StoreRef, pipeline_store: Arc<PipelineStore>) -> Result<Arc<Trader>, Box<dyn std::error::Error>> {
     let config = TraderConfig {
         symbol:           SYMBOL.to_string(),
         interval_ms:      100,
@@ -310,7 +320,7 @@ fn create_trader(store: StoreRef) -> Result<Arc<Trader>, Box<dyn std::error::Err
 
     let repository = Arc::new(Repository::new(SYMBOL, DB_PATH)?);
 
-    Ok(Arc::new(Trader::new(config, executor, repository, store)))
+    Ok(Arc::new(Trader::new_with_pipeline(config, executor, repository, store, pipeline_store)))
 }
 
 // ============================================================================
