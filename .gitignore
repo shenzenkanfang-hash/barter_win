@@ -8,3 +8,9 @@ Cargo.lock
 
 # Python
 autogen/
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
