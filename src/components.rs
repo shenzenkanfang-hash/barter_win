@@ -15,6 +15,7 @@ use d_checktable::h_15m::{
     Executor, ExecutorConfig, Repository, ThresholdConfig, Trader, TraderConfig,
 };
 use e_risk_monitor::risk::common::{OrderCheck, RiskPreChecker};
+use e_risk_monitor::trade_lock::TradeLock;
 use rust_decimal::Decimal;
 
 use crate::tick_context::{DB_PATH, DATA_FILE, INITIAL_BALANCE, SYMBOL};
@@ -28,6 +29,7 @@ pub struct SystemComponents {
     pub order_checker: Arc<OrderCheck>,
     pub gateway: Arc<MockApiGateway>,
     pub pipeline_store: Arc<PipelineStore>,
+    pub trade_lock: Arc<TradeLock>,
 }
 
 pub fn init_heartbeat() {
@@ -84,6 +86,9 @@ pub async fn create_components() -> Result<SystemComponents, Box<dyn std::error:
     let order_checker = Arc::new(OrderCheck::new());
     tracing::info!("[e] RiskChecker + OrderCheck created");
 
+    let trade_lock = Arc::new(TradeLock::new());
+    tracing::info!("[e] TradeLock created");
+
     Ok(SystemComponents {
         kline_stream,
         signal_processor,
@@ -92,6 +97,7 @@ pub async fn create_components() -> Result<SystemComponents, Box<dyn std::error:
         order_checker,
         gateway,
         pipeline_store,
+        trade_lock,
     })
 }
 

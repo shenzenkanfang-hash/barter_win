@@ -132,7 +132,22 @@ async fn stage_d_check(components: &SystemComponents, ctx: &mut TickContext) -> 
     ctx.c_data = Some(c_result);
     ctx.visited.push("c");
 
+    // 使用 TradeLock 确保同时只有一个策略在执行交易
+    let guard = match components.trade_lock.acquire("h_15m_strategy") {
+        Ok(g) => g,
+        Err(e) => {
+            tracing::warn!("[d] TradeLock conflict: {}", e);
+            return DCheckResult {
+                decision: "skip".into(),
+                qty: None,
+                reason: format!("lock_conflict: {}", e),
+            };
+        }
+    };
+
     let trade_result = components.trader.execute_once_wal().await;
+
+    drop(guard); // 显式释放锁（在 guard 超出作用域前）
 
     match &trade_result {
         Ok(d_checktable::h_15m::ExecutionResult::Executed { qty, .. }) => {
