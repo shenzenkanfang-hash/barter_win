@@ -1,339 +1,152 @@
-================================================================================
-ARCHITECTURE.md - Barter-Rs Layered Architecture
-================================================================================
-Author: Claude Code
-Created: 2026-03-29
-Status: Complete
-================================================================================
+ARCHITECTURE DOCUMENT
+=====================
 
-1. LAYERED ARCHITECTURE OVERVIEW
-================================================================================
+Layer Dependency Chain
+=====================
 
-The system follows a strict layered architecture where each layer has specific
-responsibilities and can only depend on layers below it.
+a_common -> x_data -> b_data_source -> c_data_process -> d_checktable -> e_risk_monitor -> f_engine
 
-Layer Dependency Chain (bottom to top):
---------------------------------------------------------------------------------
-  a_common (Infrastructure)
-       |
-       v
-  x_data (Business Data Types)
-       |
-       v
-  b_data_source / b_data_mock (Data Acquisition)
-       |
-       v
-  c_data_process (Indicators & Signals)
-       |
-       v
-  d_checktable (Strategy Decision Tables)
-       |
-       v
-  e_risk_monitor (Risk Management)
-       |
-       v
-  f_engine (Trading Engine)
-       |
-       v
-  g_test (Integration Tests)
+The system follows a strict unidirectional data flow through these layers.
+Each layer only depends on the layer directly to its left.
 
 
---------------------------------------------------------------------------------
-Layer Responsibilities:
---------------------------------------------------------------------------------
+Design Patterns
+===============
 
-a_common (Infrastructure Layer)
-  - No business type dependencies
-  - Pure infrastructure: API/WS gateways, configuration, errors, backup
-  - Provides: BinanceApiGateway, BinanceWsConnector, MemoryBackup, RateLimiter
-  - Re-exports types from x_data for convenience
+Gateway Pattern
+---------------
+Used for exchange connectivity abstraction. Concrete implementations:
+- BinanceApiGateway: REST API connectivity to Binance
+- MockApiGateway: Mock exchange for testing
+- BinanceWsConnector: WebSocket connector for real-time data
 
-x_data (Business Data Abstraction Layer)
-  - Unified business data types: Tick, KLine, Position, Account
-  - State management traits: StateViewer, StateManager
-  - Eliminates cross-module type duplication
-
-b_data_source (Real Market Data)
-  - DataFeeder: Unifies WS/REST data interfaces
-  - K-line synthesis (1m, 1d)
-  - Order book aggregation
-  - Volatility detection
-  - SymbolRegistry for trading pair management
-  - ReplaySource for historical data playback
-
-b_data_mock (Mock/Sandbox Data)
-  - Mirror of b_data_source with simulated data
-  - Feature flag switch: `cargo run --features mock`
-
-c_data_process (Indicator & Signal Processing)
-  - PineIndicator: Full Pine Script v5 indicators
-  - SignalProcessor: Manages 1m and 1d indicator calculators
-  - StrategyState: Persistent strategy state with SQLite
-
-d_checktable (Strategy Check Tables)
-  - h_15m: High-frequency 15-minute strategy checks
-  - l_1d: Low-frequency 1-day strategy checks
-  - h_volatility_trader: Volatility-based auto trader
-
-e_risk_monitor (Risk Management)
-  - RiskPreChecker: Pre-order risk validation
-  - PositionManager: Local position tracking
-  - DisasterRecovery: SQLite persistence + memory backup
-  - Shared: AccountPool, PnlManager, MarginConfig
-
-f_engine (Trading Engine Core)
-  - EventEngine: Event-driven tick processing (zero polling)
-  - Pipeline: on_tick -> update_store -> calc_indicators -> decide -> risk_check -> place_order
-  - Interfaces: RiskChecker trait, ExchangeGateway trait
-
-g_test (Integration Tests)
-  - b_data_source tests
-  - Strategy black-box tests
+These gateways abstract the exchange interface from the rest of the system.
 
 
-================================================================================
-2. DESIGN PATTERNS
-================================================================================
+Repository Pattern
+------------------
+MarketDataStore trait defines the repository interface for market data.
+Location: b_data_source/src/store/store_trait.rs
 
-2.1 Gateway Pattern
---------------------------------------------------------------------------------
-All external exchange communication goes through gateway interfaces:
+All market data access goes through this trait, enabling:
+- Real data source (b_data_source)
+- Mock data source (b_data_mock)
+- Replay data source for backtesting
 
-  a_common::api::BinanceApiGateway
-    - REST API client for Binance
-    - fetch_symbol_rules(), fetch_account_info(), fetch_position_risk()
-    - fetch_klines() for historical data
-    - RateLimiter with REQUEST_WEIGHT and ORDERS limits
-
-  a_common::ws::BinanceWsConnector
-    - WebSocket client for Binance streams
-    - Trade stream (@trade), Kline stream (@kline_1m), Depth stream (@depth)
-    - Exponential backoff reconnection
-    - Returns raw JSON messages (business conversion in b_data_source)
-
-  b_data_mock::api::MockApiGateway
-    - Mock implementation for sandbox testing
+The trait defines standard CRUD operations for klines, order books, and trades.
 
 
-2.2 Repository Pattern
---------------------------------------------------------------------------------
-Data access is abstracted through repository interfaces:
+Pipeline Pattern
+----------------
+Event processing pipeline in EventEngine:
 
-  b_data_source::store::MarketDataStore (trait)
-    - write_kline(), get_current_kline()
-    - get_volatility(), get_orderbook()
-    - Memory + disk persistence
+tick -> update_store -> calc_indicators -> decide -> risk_check -> place_order
 
-  b_data_source::history::HistoryDataManager (trait)
-    - HistoryDataProvider trait for backtesting
-    - KLineSource for replay
-
-  d_checktable::h_15m::repository::CheckTableRepository
-    - Persists check table state
+Each stage is a separate processing step:
+1. tick: Market data tick arrives
+2. update_store: Update internal market data store
+3. calc_indicators: Calculate technical indicators
+4. decide: Strategy decision logic
+5. risk_check: Risk validation
+6. place_order: Order execution
 
 
-2.3 Pipeline Pattern
---------------------------------------------------------------------------------
-Event-driven tick processing pipeline (f_engine::event::EventEngine):
+Observer Pattern
+---------------
+EventBus implements Observer pattern via mpsc channel distribution.
 
-  Tick Event
-      │
-      v
-  [1] update_store()      -> Write to MarketDataStore
-      │
-      v
-  [2] calc_indicators()   -> O(1) incremental EMA/RSI/volatility
-      │
-      v
-  [3] strategy.decide()   -> Generate TradingDecision
-      │
-      v
-  [4] risk_checker.pre_check() -> RiskPreChecker validation
-      │
-      v
-  [5] gateway.place_order() -> Submit to exchange
-
-  Design Principles:
-    - Zero tokio::spawn (fully synchronous await)
-    - Zero tokio::sleep (event-driven, no polling)
-    - Zero data races (single-threaded serial processing)
+Components subscribe to events they care about. When an event is published,
+it is distributed to all subscribers via channels. This decouples event
+producers from consumers.
 
 
-2.4 Observer Pattern
---------------------------------------------------------------------------------
-  f_engine::event::EventBus
-    - mpsc::Channel for tick event distribution
-    - EventBusHandle for subscribers
+Key Architectural Constraints
+=============================
 
-  b_data_source::engine::Clock
-    - Clock updates trigger downstream calculations
+a_common MUST NOT contain business types
+---------------------------------------
+The a_common crate is a shared foundation crate. It must NOT contain:
+- TradingDecision
+- OrderRequest
+- LocalPosition
+- Any other business-domain types
 
-
-================================================================================
-3. DATA FLOW
-================================================================================
-
-3.1 Real-time Tick Flow
---------------------------------------------------------------------------------
-
-Binance WebSocket
-      │
-      │ raw JSON (@trade, @kline_1m)
-      v
-a_common::ws::BinanceWsConnector
-      │ parses to BinanceTradeMsg, BinanceKlineMsg
-      v
-b_data_source::api::DataFeeder
-      │ converts to Tick, KLine, updates MarketDataStore
-      v
-b_data_source::ws::kline_1m::KlinePersistence
-      │ synthesizes 1m K-lines from trades
-      v
-c_data_process::SignalProcessor
-      │ min_update() / day_update() with OHLCV data
-      v
-c_data_process::min::trend::Indicator1m
-      │ calculates: tr_ratio, velocity, zscore, pine_color
-      v
-c_data_process::day::trend::BigCycleCalculator
-      │ calculates: tr_ratio_5d_20d, pine_color_100_200
-      v
-f_engine::EventEngine::on_tick()
-      │ receives tick events via mpsc channel
-      v
-d_checktable (h_15m / l_1d) CheckTable
-      │ executes trading strategy decision tables
-      v
-e_risk_monitor::RiskPreChecker
-      │ validates: max_position, lot_size, price_deviation
-      v
-e_risk_monitor::PositionManager
-      │ updates local position state
-      v
-a_common::api::BinanceApiGateway (or MockApiGateway)
-      │ place_order() via REST API
-      v
-Binance Exchange
+Business types belong in x_data (shared domain types) or in the
+respective functional crates.
 
 
-3.2 Historical Data Replay Flow
---------------------------------------------------------------------------------
+Incremental O(1) Calculations Only
+---------------------------------
+All hot path calculations must be incremental with O(1) complexity.
+No full recalculation allowed on each tick. Examples:
+- Indicator updates use incremental formulas
+- Position updates use delta calculations
 
-b_data_source::replay_source::ReplaySource
-      │ reads CSV/JSON historical data
-      v
-c_data_process (indicator calculators)
-      │ warm-up with historical bars
-      v
-f_engine::EventEngine (backtest mode)
-      │ simulates tick-by-tick processing
+This ensures consistent low-latency processing regardless of data volume.
 
 
-3.3 Persistence & Recovery Flow
---------------------------------------------------------------------------------
+Hot Path Lock-Free Design
+------------------------
+The hot path (tick processing) must be lock-free to minimize latency.
+Only cold path operations may use parking_lot::RwLock for sharing state.
 
-Normal Operation:
-  e_risk_monitor::SqliteEventRecorder -> SQLite (E:/backup/trading_events.db)
-  e_risk_monitor::MemoryBackup -> E:/shm/backup/ (high-speed memory disk)
-
-Recovery on Startup:
-  e_risk_monitor::StartupRecoveryManager
-      │
-      ├── SqliteRecoverySource (hard disk)
-      ├── MemoryDiskRecoverySource (E:/shm/backup/)
-      └── HardDiskRecoverySource (E:/backup/)
-      │
-      v
-  UnifiedAccountSnapshot, UnifiedPositionSnapshot
+Hot path characteristics:
+- Single producer, multiple consumers
+- Lock-free data structures
+- No blocking operations
 
 
-================================================================================
-4. KEY ARCHITECTURAL CONSTRAINTS
-================================================================================
-
-4.1 No Business Types in a_common
---------------------------------------------------------------------------------
-  a_common MUST NOT contain:
-    - TradingDecision, OrderRequest (f_engine types)
-    - CheckSignal, CheckChainResult (d_checktable types)
-    - LocalPosition, PositionSide (e_risk_monitor types)
-
-  a_common CAN contain:
-    - MarketError, EngineError (pure infrastructure errors)
-    - SymbolRulesData (exchange-agnostic trading rules)
-    - MemoryBackup types (backup infrastructure)
+Zero tokio::spawn in Hot Path
+-----------------------------
+Async spawning is not allowed in the hot path. The hot path:
+- Must not allocate or spawn tasks
+- Uses synchronous processing within a single async context
+- Async/await only for I/O operations that can tolerate latency
 
 
-4.2 Incremental O(1) Calculations
---------------------------------------------------------------------------------
-  All indicators MUST support incremental updates:
-    - EMA: new_ema = price * multiplier + prev_ema * (1 - multiplier)
-    - RSI: avg_gain/loss updated with exponential moving average
-    - K-line: update current bar in-place (no rebuild)
+Zero Polling (recv().await Blocking)
+------------------------------------
+The hot path must not use polling-based receive (recv().await).
+Instead:
+- Use blocking channel receive where latency is bounded
+- Design for backpressure handling
+- Avoid busy-waiting or wake-up patterns
 
 
-4.3 High-Frequency Path Lock-Free
---------------------------------------------------------------------------------
-  Tick reception, indicator updates, strategy decisions: LOCK-FREE
-  Order execution, position update: RwLock protected
+Dependency Injection
+====================
 
-  Lock order: 1. PositionManager (parking_lot::RwLock)
-              2. AccountPool (parking_lot::RwLock)
+EventEngine is generic over two key traits:
 
-
-4.4 Event-Driven (No Polling)
---------------------------------------------------------------------------------
-  Engine event loop uses recv().await (blocking channel receive)
-  No tokio::spawn for background polling
-  No tokio::time::interval for periodic checks
-
-
-================================================================================
-5. DEPENDENCY INJECTION
-================================================================================
-
-f_engine::EventEngine<S, G> takes generic parameters:
-  - S: Strategy (implements Strategy trait)
-  - G: ExchangeGateway (implements ExchangeGateway trait)
+EventEngine<S, G> where:
+- S: Strategy trait - defines trading strategy interface
+- G: ExchangeGateway trait - defines exchange connectivity interface
 
 This enables:
-  - Real trading: MockApiGateway or real BinanceApiGateway
-  - Backtesting: replay source feeds ticks directly
-  - Unit testing: mock strategy and gateway
-
-Example:
-  let engine = EventEngine::new(
-      config,
-      risk_checker,
-      my_strategy,
-      BinanceApiGateway::new_futures(),
-  );
+- Different strategies to be plugged in
+- Different exchange gateways (live, mock, replay)
+- Easy testing with mock implementations
 
 
-================================================================================
-6. STORAGE ARCHITECTURE
-================================================================================
+Version Tracking
+================
 
-Platform-Aware Path Selection:
-  Platform::detect() -> Windows (E:/) or Linux (/dev/shm/)
+AtomicU64 versioning system for data lineage tracking:
+- data version: Raw market data version
+- indicator version: Indicator calculation version
+- signal version: Signal generation version
+- decision version: Trading decision version
 
-Primary Storage (High-Speed Memory Disk):
-  E:/shm/backup/ (Windows)
-  /dev/shm/backup/ (Linux)
-
-Secondary Storage (Hard Disk):
-  E:/backup/trading_events.db (Windows)
-  data/trading_events.db (Linux)
-
-Backup Contents:
-  - KLINE_1M_REALTIME_DIR, KLINE_1D_REALTIME_DIR
-  - INDICATORS_1M_REALTIME_DIR, INDICATORS_1D_REALTIME_DIR
-  - DEPTH_DIR (order book snapshots)
-  - POSITIONS_FILE
-  - SYSTEM_CONFIG_FILE (rate limits state)
-  - TASKS_DIR (pending orders)
+This enables:
+- Change detection without full comparison
+- Incremental processing when version hasn't changed
+- Debugging and tracing of data flow
 
 
-================================================================================
-END OF ARCHITECTURE.md
-================================================================================
+a_common Re-exports from x_data
+===============================
+
+For developer convenience, a_common re-exports certain types from x_data.
+This reduces import churn and provides a stable internal API surface.
+
+All re-exports are documented and versioned to prevent breaking changes.

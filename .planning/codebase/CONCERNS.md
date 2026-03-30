@@ -1,109 +1,107 @@
-# Technical Concerns
+CONCERNS - 项目已知问题与风险跟踪
+=====================================
 
-## Fatal Issues
+项目: barter-rs-main
+更新日期: 2026-03-30
+状态: 活跃跟踪
 
-### F-001: g_test Module Compilation Failure
-- **Issue**: 544 compilation errors - incorrect API paths and types
-- **Root Cause**:
-  - Tries to import `f_engine::order::gateway::ExchangeGateway` (path doesn't exist)
-  - Uses non-existent types: Strategy, StrategyKLine, StrategyState, TradingSignal
-  - Missing imports for Arc, Utc, SignalType, Mode, SymbolState
-- **Impact**: Global test framework completely unusable
-- **Status**: Unfixed
-- **Resolution**: Requires full refactor to match new module structure
+=====================================
+FATAL 级问题
+=====================================
 
-## Serious Issues
+g_test crate 被禁用
+原因: 544 个编译错误，当前临时从 workspace 中排除
+影响: 无法运行测试套件，代码质量保证受阻
+修复计划: 需要逐个解决编译错误后重新启用
 
-### S-001: Clock Time Precision Test Failure
-- **Location**: `crates/b_data_source/src/engine/clock.rs`
-- **Issue**: `test_historical_clock_update` fails - time precision assertion
-- **Status**: Unfixed
+=====================================
+SERIOUS 级问题
+=====================================
 
-### S-002: f_engine Test Database Path Error
-- **Location**: `crates/f_engine/src/strategy/trader_manager.rs`
-- **Issue**: Test uses hardcoded database path, fails in test environment
-- **Status**: Unfixed
+1. Clock 时间精度测试失败
+现象: 时钟相关单元测试存在精度问题
+影响: 时间戳依赖的策略/风控逻辑可能受影响
+建议: 检查 SystemTime/Instant 混用场景
 
-### S-003: mock_ws_handshake Example Compilation Failure
-- **Location**: `crates/b_data_source/examples/mock_ws_handshake.rs`
-- **Issue**: Import path errors
-- **Status**: Unfixed
+2. mock_ws_handshake 示例编译失败
+现象: websocket 握手模拟示例无法通过编译
+影响: 新开发者无法参考示例快速上手
+建议: 检查 tokio-tungstenite 或其他 ws 依赖版本
 
-## Technical Debt
+=====================================
+MEDIUM 级问题
+=====================================
 
-### N-001: collapsible_if Warnings (~70)
-- **Issue**: Nested if statements that could be combined with &&
-- **Priority**: Low
+await_holding_lock 警告
+数量: 约 20 处
+来源: parking_lot 库的误报或真实问题
+影响: 代码可读性降低，可能掩盖真实问题
+建议: 审计每处用法，确认锁的持有期间无 await 调用
 
-### N-002: await_holding_lock Warnings (~20)
-- **Issue**: Potential deadlock - async operations while holding lock
-- **Locations**:
-  - `crates/a_common/src/api/binance_api.rs` (rate_limiter.lock().acquire().await)
-  - `crates/b_data_source/src/recovery.rs` (redis.lock().await)
-- **Priority**: Medium
-- **Resolution**: Consider tokio::sync::Mutex for async context
+=====================================
+LOW 级问题
+=====================================
 
-### N-003: dead_code Warnings
-- **Locations**:
-  - `crates/c_data_process/src/types.rs:71`
-  - `crates/c_data_process/src/pine_indicator_full.rs`
-  - `crates/x_data/src/account/pool.rs:12`
-  - `crates/a_common/src/ws/binance_ws.rs:24,261`
-- **Priority**: Low
+dead_code 警告
+现象: 部分已定义函数/模块未被使用
+影响: 轻微维护负担增加
+建议: 定期清理或添加 #[allow(dead_code)] 并说明原因
 
-### N-004: Deprecated API Usage (11 warnings)
-- **Locations**:
-  - `crates/c_data_process/src/processor.rs:566` - start_loop()
-  - `crates/b_data_source/src/api/data_feeder.rs` - old channel APIs
-- **Priority**: Medium
+=====================================
+架构级问题
+=====================================
 
-## Architecture Concerns
+1. Sandbox 50ms 轮询间隔
+现状: 非真正事件驱动，使用 50ms 轮询替代
+原因: ReplaySource 缺少真实 WebSocket 支持时的 workaround
+影响: CPU 占用略高，延迟受限
+建议: 生产环境替换为真实事件驱动架构
 
-### 1. Lock Contention Risk
-- **Issue**: Multiple tick streams share parking_lot::RwLock
-- **Mitigation**: Hot paths lock-free, lock only for account/order operations
+2. 平台路径处理差异
+问题路径: E:/shm/backup/ vs /dev/shm/backup/
+影响: 跨平台运行时可能产生路径不兼容
+建议: 使用跨平台路径抽象 (std::path::Path) 或条件编译
 
-### 2. Kline Update Race Condition
-- **Location**: `KlinePersistence` in `b_data_source`
-- **Issue**: Incremental K-line updates may race with persistence
-- **Status**: Needs review
+3. History 预热问题
+问题: 启动时 history_len=0
+解决方案: 添加 preload_klines() 函数
+影响: 消除了启动初期的数据空洞
 
-### 3. Symbol Rules Cache
-- **Issue**: Rules fetched from API on startup, no refresh mechanism
-- **Impact**: Stale trading rules if Binance updates
-- **Resolution**: Add background refresh task
+=====================================
+版本与依赖跟踪
+=====================================
 
-### 4. Memory Backup Integrity
-- **Issue**: In-memory backup on E:/shm/ is volatile
-- **Mitigation**: SQLite persistence as backup (dual-layer)
+1. VersionTracker vs PipelineState
+现象: VersionTracker 使用 AtomicU64，但 PipelineState 未实现 Clone
+说明: 这是有意的设计决策，非缺陷
+注意: 状态传递时需使用 Arc/Rc 包装
 
-### 5. WebSocket Reconnection
-- **Issue**: No explicit reconnection logic
-- **Impact**: Stream interruption on network issues
-- **Resolution**: Add exponential backoff reconnection
+2. Feature Flag 配置
+命令: cargo run --features mock
+行为: 启用 b_data_mock 而非 b_data_source
+注意: 开发者需明确意图，避免生产环境误用
 
-## Security
+=====================================
+未来需关注的潜在风险
+=====================================
 
-- **API Keys**: Stored in environment/config, not hardcoded
-- **No SQL injection**: Parameterized queries via rusqlite
-- **No unsafe code**: `#![forbid(unsafe_code)]` enforced on all lib.rs
+1. rust_decimal 精度风险
+场景: 高频计算场景下的精度问题
+风险: 浮点累积误差可能导致风控判断偏差
+建议: 大额/高频场景增加精度校验
 
-## Performance Considerations
+2. rusqlite 捆绑版本滞后
+现状: 使用 bundled 模式
+风险: SQLite 最新特性不可用
+建议: 定期检查并更新捆绑版本
 
-- **Tick processing**: O(1) incremental updates
-- **Indicator recalculation**: Avoided via incremental EMA
-- **Memory**: RAM disk for high-frequency backup
-- **Disk I/O**: Async SQLite writes, non-blocking
+3. Rust Edition 2024 风险
+现状: 使用最新 edition
+风险: 工具链可能存在未完善之处
+建议: 关注 rustc 稳定版本更新，谨慎追新
 
-## Test Coverage Gaps
+=====================================
+历史记录
+=====================================
 
-| Module    | Interfaces | Tested | Coverage |
-|-----------|------------|--------|----------|
-| a_common  | 15+       | 15+    | 100%     |
-| b_data_source | 20+   | 15+    | 75%      |
-| b_data_mock | 15+      | 2      | 13%      |
-| c_data_process | 10+  | 10+    | 100%     |
-| d_checktable | 8+      | 8      | 100%     |
-| e_risk_monitor | 15+ | 15+    | 100%     |
-| f_engine  | 10+       | 0      | 0%       |
-| g_test    | -         | 0      | 0%       |
+2026-03-30: 初始记录，整理已知问题清单
