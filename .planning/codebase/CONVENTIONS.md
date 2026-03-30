@@ -1,204 +1,200 @@
-RUST QUANTITATIVE TRADING SYSTEM - CODE CONVENTIONS
+RUST 量化交易系统 - 代码规范
 
 ================================================================================
-CORE SAFETY AND TYPE ENFORCEMENT
+核心安全与类型强制
 ================================================================================
 
-#![forbid(unsafe_code)] is enforced across all crates.
+#![forbid(unsafe_code)] 在所有 crate 中强制执行。
 
-All crates must compile with this attribute. No exceptions. If you need unsafe
-code for performance, you must first prove the safe alternative is insufficient.
-
-================================================================================
-FINANCIAL CALCULATIONS - DECIMAL MANDATORY
-================================================================================
-
-rust_decimal::Decimal is mandatory for all financial calculations.
-
-This includes but is not limited to:
-- Money amounts (balance, equity, PnL)
-- Prices (entry, exit, mark price)
-- Quantities (position size, order volume)
-- Rates (interest, margin, fees)
-- Any calculation involving currency or assets
-
-NO f64 or f32 for any financial value. The precision requirements in trading
-systems demand decimal arithmetic. Floating point errors are unacceptable.
+所有 crate 必须编译时带有此属性。无例外。如果你确实需要使用 unsafe 代码
+来提升性能，必须首先证明安全的替代方案是不够的。
 
 ================================================================================
-TIMESTAMPS - UTC DATETIME REQUIRED
+金融计算 - 必须使用 Decimal
 ================================================================================
 
-DateTime<Utc> is required for all timestamps across the system.
+所有金融计算必须使用 rust_decimal::Decimal。
 
-All market data timestamps, order timestamps, trade timestamps must use
-DateTime<Utc> from the chrono crate with Utc timezone.
+包括但不限于：
+- 货币金额（余额、权益、盈亏）
+- 价格（入场、出场、标记价格）
+- 数量（仓位大小、订单量）
+- 费率（利息、保证金、手续费）
+- 任何涉及货币或资产的计算
 
-NO bare i64 timestamps. If you receive a timestamp from an exchange as i64,
-convert to DateTime<Utc> immediately at the boundary layer.
-
-================================================================================
-LOCK STRATEGY AND CONCURRENCY MODEL
-================================================================================
-
-Lock Type: parking_lot::RwLock
-
-This is the standard lock type across the codebase. Do not use std::sync::Mutex
-or tokio::sync::Mutex unless you have a specific reason.
-
-HOT PATH (Lock-Free Design):
-- Tick processing
-- Indicator calculation
-- Strategy signal generation
-
-These paths must be lock-free. Use atomic operations, ring buffers, or
-message passing. If you need shared state in the hot path, consider:
-- crossbeam-channel for mpsc between threads
-- std::sync::atomic for simple flags/counters
-- Arc<[T]> with interior mutability patterns
-
-COLD PATH (RwLock Allowed):
-- Account state
-- Position management
-- Portfolio-level calculations
-
-These can use parking_lot::RwLock for shared read access.
-
-LOCK ORDER TO PREVENT DEADLOCKS:
-1. PositionManager (first acquired)
-2. AccountPool (second acquired)
-
-Always acquire locks in this order. Never reverse it. If you need both locks,
-acquire PositionManager first, then AccountPool. Release in reverse order.
+禁止使用 f64 或 f32 处理任何金融值。交易系统的精度要求需要十进制运算。
+浮点误差是不可接受的。
 
 ================================================================================
-INCREMENTAL INDICATOR CALCULATIONS
+时间戳 - 必须使用 UTC 日期时间
 ================================================================================
 
-O(1) incremental calculations are required for real-time indicators.
+整个系统所有时间戳必须使用 DateTime<Utc>。
 
-EMA (Exponential Moving Average) formula:
+所有市场数据时间戳、订单时间戳、成交时间戳必须使用 chrono crate 的 DateTime<Utc>
+并带有 Utc 时区。
+
+禁止使用裸 i64 时间戳。如果从交易所收到的时间戳是 i64，必须在边界层立即
+转换为 DateTime<Utc>。
+
+================================================================================
+锁策略与并发模型
+================================================================================
+
+锁类型：parking_lot::RwLock
+
+这是代码库中的标准锁类型。除非有特定原因，否则不要使用 std::sync::Mutex
+或 tokio::sync::Mutex。
+
+热路径（无锁设计）：
+- Tick 处理
+- 指标计算
+- 策略信号生成
+
+这些路径必须无锁。使用原子操作、环形缓冲区或消息传递。如果热路径需要共享状态，考虑：
+- crossbeam-channel 用于线程间 mpsc
+- std::sync::atomic 用于简单标志/计数器
+- Arc<[T]> 配合内部可变性模式
+
+冷路径（允许使用 RwLock）：
+- 账户状态
+- 仓位管理
+- 组合级别计算
+
+这些可以使用 parking_lot::RwLock 进行共享读访问。
+
+锁顺序防止死锁：
+1. PositionManager（首先获取）
+2. AccountPool（其次获取）
+
+始终按此顺序获取锁。禁止反序。如果需要同时获取两个锁，先获取 PositionManager，
+再获取 AccountPool。按反序释放。
+
+================================================================================
+增量指标计算
+================================================================================
+
+实时指标需要 O(1) 增量计算。
+
+EMA（指数移动平均）公式：
 EMA_new = price * (2 / (period + 1)) + prev_EMA * (1 - 2 / (period + 1))
 
-This allows constant-time update per new price tick.
+这允许每个新价格 tick 进行常数时间更新。
 
-For other indicators, maintain running state and update incrementally.
-Avoid recalculating from scratch on each new data point.
-
-================================================================================
-ERROR HANDLING
-================================================================================
-
-Use thiserror for error types. Define errors as enums with thiserror::Error derive.
-
-Explicit Result vs Option:
-- Use Result<T, E> when errors are expected and should be handled
-- Use Option<T> only when something is genuinely optional (not present)
-
-NO unwrap() or expect() in production hot path code.
-- These panic on None/Err and will crash the trading system
-- If you must handle a None, use unwrap_or, unwrap_or_else, or match
-
-Production hot path examples that are FORBIDDEN:
-- data.unwrap()  // crashes if None
-- result.expect("should have data")  // crashes if Err
-
-Acceptable in tests or initialization code where you control the data.
+对于其他指标，保持运行状态并增量更新。避免在每个新数据点从头重新计算。
 
 ================================================================================
-NAMING CONVENTIONS
+错误处理
 ================================================================================
 
-Modules and functions: snake_case
+使用 thiserror 定义错误类型。将错误定义为带有 thiserror::Error 派生的枚举。
+
+Result 与 Option 的明确区分：
+- 当错误是预期的且需要处理时使用 Result<T, E>
+- 仅当某些内容确实是可选的（不存在）时使用 Option<T>
+
+生产热路径代码中禁止使用 unwrap() 或 expect()。
+- 这些在 None/Err 时会 panic，并导致交易系统崩溃
+- 如果必须处理 None，使用 unwrap_or、unwrap_or_else 或 match
+
+生产热路径中禁止的示例：
+- data.unwrap()  // 如果为 None 则崩溃
+- result.expect("should have data")  // 如果为 Err 则崩溃
+
+在测试或初始化代码中（数据由你控制）可以接受。
+
+================================================================================
+命名规范
+================================================================================
+
+模块和函数：snake_case
 - get_current_price()
 - calculate_ema()
 - process_tick()
 
-Types, enums, structs: CamelCase
+类型、枚举、结构体：CamelCase
 - struct MarketData
 - enum OrderStatus
 - struct PriceLevel
 
-Constants: SCREAMING_SNAKE_CASE
+常量：SCREAMING_SNAKE_CASE
 - const MAX_POSITION_SIZE: u64
 - const DEFAULT_TIMEOUT_MS: u64
 
 ================================================================================
-ASYNC RULES
+异步规则
 ================================================================================
 
-All async fn must have Send + 'static bounds when they interact with shared state.
+所有与共享状态交互的 async fn 必须有 Send + 'static 约束。
 
-Example:
+示例：
 async fn process_order(order: Order) -> Result<(), Error>
 where
     Self: Send + 'static,
 {
-    // implementation
+    // 实现
 }
 
-ZERO tokio::spawn in hot path.
-- tokio::spawn creates new tasks with overhead
-- In hot path (tick processing), spawning tasks is too expensive
-- Use synchronous channel send or atomic operations instead
+热路径中禁止使用 tokio::spawn。
+- tokio::spawn 创建新任务有开销
+- 在热路径（tick 处理）中，生成任务开销太大
+- 改用同步 channel send 或原子操作
 
-For cold path (order execution, account updates), tokio::spawn is acceptable
-if you need并发 concurrency.
+对于冷路径（订单执行、账户更新），如果需要并发，可以使用 tokio::spawn。
 
 ================================================================================
-DOCUMENTATION
+文档规范
 ================================================================================
 
-All pub (public) items must have /// doc comments.
+所有 pub（公开）项必须有 /// 文档注释。
 
-Required format:
-/// Calculates the exponential moving average for a given period.
+必需格式：
+/// 计算给定周期的指数移动平均。
 ///
-/// EMA is calculated as: EMA_new = price * (2 / (period + 1)) + prev * (1 - 2 / (period + 1))
+/// EMA 计算公式：EMA_new = price * (2 / (period + 1)) + prev * (1 - 2 / (period + 1))
 ///
-/// # Arguments
-/// * `price` - The current price value
-/// * `period` - The EMA period (typically 12, 26, etc.)
+/// # 参数
+/// * `price` - 当前价格值
+/// * `period` - EMA 周期（通常为 12、26 等）
 ///
-/// # Example
+/// # 示例
 /// let ema = calculate_ema(100.0, 26, Some(previous_ema));
 ///
-/// # Panics
-/// None - this function does not panic.
+/// # Panic
+/// 无 - 此函数不会 panic。
 pub fn calculate_ema(price: Decimal, period: u32, prev: Option<Decimal>) -> Decimal
 
-Private items (pub(crate), private) do not require doc comments but should
-have regular comments for complex logic.
+私有项（pub(crate)、private）不需要文档注释，但复杂逻辑应有常规注释。
 
 ================================================================================
-CARGO DEPENDENCY MANAGEMENT
+Cargo 依赖管理
 ================================================================================
 
-Version constraints use caret (^) format.
+版本约束使用脱字符（^）格式。
 
-Example:
+示例：
 rust_decimal = "^1.33"
 chrono = "^0.4"
 thiserror = "^1.0"
 
-NO wildcard versions:
-WRONG: rust_decimal = "*"
-RIGHT: rust_decimal = "^1.33"
+禁止使用通配符版本：
+错误：rust_decimal = "*"
+正确：rust_decimal = "^1.33"
 
-Wildcards make builds non-reproducible and can introduce breaking changes.
+通配符会使构建不可重现，并可能引入破坏性变更。
 
 ================================================================================
-BREAKING CHANGES
+破坏性变更
 ================================================================================
 
-When modifying core types or traits that are used across multiple crates:
-1. Document the breaking change
-2. Update the version number following SemVer
-3. Add entry to CHANGELOG.md under Changed section
+修改跨多个 crate 使用的核心类型或 trait 时：
+1. 记录破坏性变更
+2. 按照 SemVer 更新版本号
+3. 在 CHANGELOG.md 的 Changed 部分添加条目
 
-Core types include:
+核心类型包括：
 - MarketData
 - Order
 - Position
 - Account
-- Any shared trait definitions
+- 任何共享 trait 定义

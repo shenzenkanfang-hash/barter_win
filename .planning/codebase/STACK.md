@@ -1,52 +1,52 @@
-STACK
+技术栈
 ===
 
-Language
+编程语言
 ---
-Rust (edition 2024)
+Rust（2024 版本）
 
-Async Runtime
+异步运行时
 ---
-tokio version 1 with features = ["full"]
+tokio 版本 1，功能特性 ["full"]
 
-Financial Precision
+金融精度
 ---
-rust_decimal version 1.36 with features = ["maths"]
+rust_decimal 版本 1.36，功能特性 ["maths"]
 
-Concurrency
+并发原语
 ---
-parking_lot version 0.12
+parking_lot 版本 0.12
 
-Error Handling
+错误处理
 ---
-thiserror version 2.0
+thiserror 版本 2.0
 
-Serialization
+序列化
 ---
-serde version 1.0 with derive feature
+serde 版本 1.0，含 derive 功能
 
-Time
+时间处理
 ---
-chrono version 0.4 with serde features
+chrono 版本 0.4，含 serde 功能
 
-Database
+数据库
 ---
-rusqlite version 0.32 with features = ["bundled"]
+rusqlite 版本 0.32，功能特性 ["bundled"]
 
-Workspace Configuration
+工作区配置
 ---
-Resolver version "3"
+Resolver 版本 "3"
 
-Feature Flags
+功能标志
 ---
-mock feature for sandbox mode
+mock 功能用于沙箱模式
 
-Platform Paths
+平台路径
 ---
-Windows: E:/shm/backup/
-Linux: /dev/shm/backup/
+Windows：E:/shm/backup/
+Linux：/dev/shm/backup/
 
-Cargo Workspace Members
+Cargo 工作区成员
 ---
 a_common
 b_data_source

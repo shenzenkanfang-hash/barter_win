@@ -1,11 +1,11 @@
-INTEGRATIONS
+集成
 ===
 
 Binance REST API
 ---
 a_common::api::BinanceApiGateway
 
-Endpoints:
+端点:
 - fetch_symbol_rules
 - fetch_account_info
 - fetch_position_risk
@@ -15,25 +15,25 @@ Binance WebSocket
 ---
 a_common::ws::BinanceWsConnector
 
-Streams:
+数据流:
 - @trade
 - @kline_1m
 - @depth
 
-Rate Limiting
+限流
 ---
-REQUEST_WEIGHT limit
-ORDERS limit
-Via RateLimiter component
+REQUEST_WEIGHT 限制
+ORDERS 限制
+通过 RateLimiter 组件实现
 
-WebSocket Reconnection
+WebSocket 重连
 ---
-Exponential backoff reconnection strategy
+指数退避重连策略
 
-External Dependencies
+外部依赖
 ---
-No external database (SQLite only, bundled)
+无外部数据库（仅 SQLite，内置）
 
-No external auth providers
+无外部认证提供商
 
-No cloud services
+无云服务

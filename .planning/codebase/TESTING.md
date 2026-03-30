@@ -1,104 +1,104 @@
-RUST QUANTITATIVE TRADING SYSTEM - TESTING GUIDE
+RUST 量化交易系统 - 测试指南
 
 ================================================================================
-TEST CRATE STATUS
+测试 crate 状态
 ================================================================================
 
-The g_test crate is currently DISABLED.
+g_test crate 当前为 DISABLED（禁用）状态。
 
-Reason: The crate has 544 compilation errors that need to be resolved.
-The crate is temporarily excluded from the build until the errors are fixed.
+原因：该 crate 存在 544 个编译错误需要修复。
+该 crate 暂时从构建中排除，直至错误修复完成。
 
-Do not attempt to build or test g_test at this time.
-
-================================================================================
-TEST LOCATIONS
-================================================================================
-
-Unit Tests:
-- Place #[test] functions in the same file as the code they test
-- Convention: at the bottom of crate/src/module.rs files
-- Example: crate/src/indicators/src/lib.rs has #[cfg(test)] module at bottom
-
-Integration Tests:
-- Location: crates/*/tests/ directory
-- Example: crates/b_data_source/tests/ for data source integration tests
-- Example: crates/f_engine/tests/ for execution engine tests
-
-Test modules are compiled separately and only run with cargo test.
+请勿尝试在当前阶段构建或测试 g_test。
 
 ================================================================================
-TEST UTILITIES
+测试位置
 ================================================================================
 
-ReplaySource - Historical Data Playback
-Location: b_data_mock/replay_source.rs
+单元测试:
+- #[test] 函数放置在与被测代码相同的文件中
+- 规范：位于 crate/src/module.rs 文件底部
+- 示例：crate/src/indicators/src/lib.rs 底部有 #[cfg(test)] 模块
 
-Purpose: Plays back historical market data from CSV files for testing.
+集成测试:
+- 位置：crates/*/tests/ 目录
+- 示例：crates/b_data_source/tests/ 用于数据源集成测试
+- 示例：crates/f_engine/tests/ 用于执行引擎测试
 
-Usage pattern:
-1. Load CSV file with historical ticks/klines
-2. Create ReplaySource with config (speed, start_time, etc.)
-3. Call next() to get next historical data point
-4. Simulates real-time delivery of historical data
+测试模块独立编译，仅在运行 cargo test 时执行。
 
-Example:
+================================================================================
+测试工具
+================================================================================
+
+ReplaySource - 历史数据回放
+位置：b_data_mock/replay_source.rs
+
+用途：从 CSV 文件回放历史市场数据用于测试。
+
+使用模式：
+1. 加载包含历史 tick/k线 的 CSV 文件
+2. 使用配置创建 ReplaySource（速度、开始时间等）
+3. 调用 next() 获取下一个历史数据点
+4. 模拟历史数据的实时传递
+
+示例：
 let replay = ReplaySource::from_csv("test_data/btc_usdt_1m.csv");
-replay.set_speed(1.0);  // 1x playback speed
+replay.set_speed(1.0);  // 1倍回放速度
 while let Some(tick) = replay.next() {
-    // process tick
+    // 处理 tick
 }
 
-MockApiGateway - Sandbox Testing
-Location: b_data_mock/api/mock_gateway.rs
+MockApiGateway - 沙箱测试
+位置：b_data_mock/api/mock_gateway.rs
 
-Purpose: Mocks exchange API responses for sandbox testing without real connections.
+用途：模拟交易所 API 响应，用于无需真实连接的沙箱测试。
 
-Supports:
-- Mock order placement and cancellation
-- Mock market data subscription
-- Mock account balance queries
-- Simulated network latency and failures
+支持：
+- 模拟订单下单和取消
+- 模拟市场数据订阅
+- 模拟账户余额查询
+- 模拟网络延迟和故障
 
-Example:
+示例：
 let gateway = MockApiGateway::new();
-gateway.mock_order_response(OrderType::Limit, true);  // Always succeed
+gateway.mock_order_response(OrderType::Limit, true);  // 始终成功
 gateway.mock_fill_response(vec![Fill::partial(100, 50.0)]);
 
-MockAccount - Account Simulation
-Location: Typically in b_data_mock or test utils
+MockAccount - 账户模拟
+位置：通常在 b_data_mock 或测试工具中
 
-Purpose: Simulates account state for testing without real exchange connection.
+用途：模拟账户状态，无需真实交易所连接即可进行测试。
 
-MockConfig - Configuration Simulation
-Purpose: Provides test configurations that override production defaults.
+MockConfig - 配置模拟
+用途：提供覆盖生产默认值的测试配置。
 
-Use MockConfig when you need to:
-- Set fake API keys
-- Configure test-specific timeouts
-- Override exchange endpoints to localhost
+使用 MockConfig 的场景：
+- 设置伪造的 API 密钥
+- 配置测试特定的超时时间
+- 将交易所端点覆盖为本地主机
 
 ================================================================================
-PLATFORM GUARDS
+平台守卫
 ================================================================================
 
-Some tests are platform-specific. Use conditional compilation:
+某些测试是平台特定的，使用条件编译：
 
-Windows-specific tests:
+Windows 特定测试：
 #[cfg(windows)]
 #[test]
 fn test_windows_path_handling() {
-    // Windows path handling test
+    // Windows 路径处理测试
 }
 
-Linux-specific tests:
+Linux 特定测试：
 #[cfg(target_os = "linux")]
 #[test]
 fn test_linux_socket_handling() {
-    // Linux socket test
+    // Linux 套接字测试
 }
 
-Common guards available:
+常用守卫：
 #[cfg(windows)]
 #[cfg(target_os = "linux")]
 #[cfg(target_os = "macos")]
@@ -106,16 +106,16 @@ Common guards available:
 #[cfg(unix)]
 
 ================================================================================
-TEST PATTERNS
+测试模式
 ================================================================================
 
-MarketDataStoreImpl Test Helper:
+MarketDataStoreImpl 测试辅助函数：
 
-A common pattern for creating test instances with temporary directories:
+用于创建带临时目录的测试实例的常用模式：
 
 impl MarketDataStoreImpl {
-    /// Creates a new instance for testing with a temporary directory.
-    /// Automatically cleans up the temp directory when dropped.
+    /// 创建用于测试的临时目录新实例。
+    /// 丢弃时自动清理临时目录。
     pub fn new_test() -> (Self, TempDir) {
         let temp_dir = TempDir::new("market_data_test").unwrap();
         let path = temp_dir.path().to_path_buf();
@@ -124,7 +124,7 @@ impl MarketDataStoreImpl {
     }
 }
 
-Usage:
+用法：
 #[test]
 fn test_store_and_retrieve() {
     let (store, _temp_dir) = MarketDataStoreImpl::new_test();
@@ -134,112 +134,109 @@ fn test_store_and_retrieve() {
 }
 
 ================================================================================
-TEST FRAMEWORK
+测试框架
 ================================================================================
 
-No formal test framework is used beyond cargo test.
+除 cargo test 外，不使用正式的测试框架。
 
-Standard Rust testing:
-- #[test] for test functions
-- #[cfg(test)] for test modules
-- #[should_panic] for expected panics
-- #[ignore] for tests that should not run in normal cargo test
+标准 Rust 测试：
+- #[test] 用于测试函数
+- #[cfg(test)] 用于测试模块
+- #[should_panic] 用于预期 panic
+- #[ignore] 用于在正常 cargo test 中不运行的测试
 
-No external test frameworks like rstest, proptest, etc. are currently used.
-If you need property-based testing, discuss with the team first.
+当前未使用外部测试框架如 rstest、proptest 等。
+如需属性测试，请先与团队讨论。
 
-Run all tests:
+运行所有测试：
 cargo test
 
-Run tests for specific crate:
+运行特定 crate 的测试：
 cargo test -p b_data_source
 
-Run tests with output:
+运行并输出：
 RUST_BACKTRACE=1 cargo test -- --nocapture
 
 ================================================================================
-PIPELINE STORE FOR OBSERVABILITY TESTING
+用于可观测性测试的 PIPELINE STORE
 ================================================================================
 
-PipelineStore provides observability testing capabilities.
+PipelineStore 提供可观测性测试能力。
 
-Location: Likely in c_data_process or a similar pipeline-related crate.
+位置：可能在 c_data_process 或类似的管道相关 crate 中。
 
-Features:
-- trace_id tracking through the pipeline
-- version tracking for components
-- timing/metrics collection
+功能：
+- 通过管道的 trace_id 追踪
+- 组件的版本追踪
+- 时间/指标收集
 
-Purpose: Verify that observability infrastructure correctly propagates
-context through the data processing pipeline.
+用途：验证可观测性基础设施正确地在数据处理管道中传播上下文。
 
-Example usage:
+示例用法：
 let store = PipelineStore::new_test();
 let trace_id = store.insert_trace("tick_processing".to_string());
-// Process through pipeline
+// 通过管道处理
 let completed = store.get_trace(trace_id).unwrap();
 assert!(completed.stages.len() > 0);
 
-trace_id: Unique identifier for a single pipeline execution, useful for
-correlating logs and metrics across components.
+trace_id：单个管道执行的唯一标识符，用于跨组件关联日志和指标。
 
-version tracking: Records which version of each component processed the data,
-useful for debugging version mismatches.
+版本追踪：记录处理数据的每个组件的版本，用于调试版本不匹配问题。
 
 ================================================================================
-RUNNING TESTS
+运行测试
 ================================================================================
 
-Basic test run:
+基本测试运行：
 cargo test
 
-Run with output capture disabled (see println):
+禁用输出捕获运行（查看 println）：
 cargo test -- --nocapture
 
-Run specific test:
+运行特定测试：
 cargo test test_order_execution
 
-Run tests in release mode (may catch different bugs):
+以发布模式运行测试（可能发现不同 bug）：
 cargo test --release
 
-Run with all features:
+运行所有特性测试：
 cargo test --all-features
 
-Check test coverage (requires tarpaulin):
+检查测试覆盖率（需要 tarpaulin）：
 cargo tarpaulin --verbose
 
 ================================================================================
-MANUAL TESTING
+手动测试
 ================================================================================
 
-For manual testing of the trading system:
+交易系统手动测试：
 
-1. Use b_data_mock to generate simulated market data
-2. Connect to a sandbox exchange if available
-3. Use paper trading mode to verify behavior without real funds
+1. 使用 b_data_mock 生成模拟市场数据
+2. 连接到沙箱交易所（如果有）
+3. 使用模拟交易模式验证行为，无需真实资金
 
-Manual testing checklist:
-- [ ] System starts without panics
-- [ ] Market data flows through pipeline
-- [ ] Orders can be created and tracked
-- [ ] Positions update correctly on fills
-- [ ] Risk limits are enforced
-- [ ] Logs contain trace_id for debugging
+手动测试清单：
+- [ ] 系统启动无 panic
+- [ ] 市场数据流经管道
+- [ ] 订单可创建和追踪
+- [ ] 成交后持仓正确更新
+- [ ] 风险限额被执行
+- [ ] 日志包含 trace_id 用于调试
 
 ================================================================================
-TEST DATA
+测试数据
 ================================================================================
 
-Test data files are typically stored in:
-- crates/*/test_data/ directories
-- Or at the repository root in test_data/
+测试数据文件通常存储在：
+- crates/*/test_data/ 目录
+- 或仓库根目录的 test_data/
 
-CSV format for market data:
+市场数据的 CSV 格式：
 timestamp,symbol,open,high,low,close,volume
 2024-01-01T00:00:00Z,BTCUSDT,50000.0,50100.0,49900.0,50050.0,100.5
 
-Ensure test data:
-- Has realistic price ranges
-- Contains no NaN or infinity values
-- Uses proper DateTime<Utc> timestamps
-- Has no gaps that would trigger sequence warnings
+确保测试数据：
+- 具有真实的价格范围
+- 不包含 NaN 或无穷值
+- 使用正确的 DateTime<Utc> 时间戳
+- 没有会触发序列警告的缺口
