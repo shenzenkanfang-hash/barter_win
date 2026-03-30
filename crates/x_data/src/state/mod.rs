@@ -4,6 +4,7 @@
 
 pub mod traits;
 pub mod component;
+pub mod center;
 
 pub use traits::{
     StateViewer,
@@ -16,3 +17,5 @@ pub use component::{
     ComponentStatus,
     ComponentState,
 };
+
+pub use center::StateCenter;
