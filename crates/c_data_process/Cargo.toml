@@ -17,3 +17,4 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
 fnv = { workspace = true }
+async-trait = { workspace = true }
