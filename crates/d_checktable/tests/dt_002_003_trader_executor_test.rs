@@ -20,7 +20,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use d_checktable::h_15m::{
     Trader, TraderConfig, Executor, ExecutorConfig, OrderType,
-    QuantityCalculatorConfig,
+    QuantityCalculatorConfig, ThresholdConfig,
 };
 
 fn create_test_trader_config() -> TraderConfig {
@@ -32,6 +32,7 @@ fn create_test_trader_config() -> TraderConfig {
         db_path: ":memory:".to_string(),
         order_interval_ms: 100,
         lot_size: dec!(0.001),
+        thresholds: ThresholdConfig::default(),
     }
 }
 

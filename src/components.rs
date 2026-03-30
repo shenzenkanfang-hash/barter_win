@@ -28,6 +28,7 @@ pub struct SystemComponents {
     pub risk_checker: Arc<RiskPreChecker>,
     pub order_checker: Arc<OrderCheck>,
     pub gateway: Arc<MockApiGateway>,
+    #[allow(dead_code)]
     pub pipeline_store: Arc<PipelineStore>,
     pub trade_lock: Arc<TradeLock>,
 }
@@ -44,7 +45,7 @@ pub fn init_heartbeat() {
 
 pub async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Error>> {
     tracing::info!("Loading: {}", DATA_FILE);
-    let mut replay_source = ReplaySource::from_csv(DATA_FILE).await?;
+    let replay_source = ReplaySource::from_csv(DATA_FILE).await?;
     tracing::info!("[b] Loaded {} K-lines", replay_source.len());
 
     let store: Arc<MarketDataStoreImpl> = Arc::new(MarketDataStoreImpl::new());
