@@ -237,3 +237,30 @@ cargo clippy
 |------|------|------|
 | 2026-03-30 | v1.0 | 初始路线图，基于 v3.1 设计规格 |
 | 2026-03-30 | v1.1 | m1.0 里程碑全部完成（Phase 1-6） |
+| 2026-03-30 | v1.2 | 添加 Phase 7（日志驱动的系统状态研判） |
+
+---
+
+## Phase 7: 日志驱动的系统状态研判
+
+**目标**: 设计并实现纯日志驱动的系统状态研判方案
+**策略**: 保留 StateCenter（复活检测），详细运行状态改为 JSON Lines 日志
+**依赖**: Phase 1-6（全部完成）
+**预计工作量**: 2天
+
+### Goal
+扩展 CheckpointLogger，输出结构化 JSON Lines 日志，替代 StateCenter 的详细状态输出。通过日志推断系统运行状态。
+
+### Plans
+- [ ] 扩展 CheckpointLogger trait，新增事件类型（component.started/data.received/indicator.computed/strategy.signal/risk.check/trade.lock/order.lifecycle/error.*）
+- [ ] 实现 JSON Lines Writer（tracing buffered non-blocking，<1ms 单条写入）
+- [ ] 扩展 TracingCheckpointLogger 输出 JSON Lines 格式
+- [ ] 各组件日志插桩（strategy_service.rs、risk_service.rs、actors.rs）
+- [ ] a_common::heartbeat 的 heartbeat_report.json 降级/废弃
+- [ ] AI 研判工具（给定行情→期望事件序列→偏差报告）
+
+### Verification
+```
+cargo check --workspace
+cargo test
+```
