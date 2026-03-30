@@ -22,3 +22,6 @@ pub use strategy_service::{
     StrategyService, StrategyServiceError, StrategyServiceRegistry,
     StrategyInfo, StrategyHealth, StrategyType, StrategySnapshot,
 };
+
+// H15mStrategyService（策略协程自治实现）
+pub use h_15m::{H15mStrategyService, H15mStrategyServiceConfig};
