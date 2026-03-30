@@ -17,6 +17,9 @@ serde_json = { workspace = true }
 # 错误处理
 thiserror = { workspace = true }
 
+# 异步 trait
+async-trait = { workspace = true }
+
 # 同步原语
 parking_lot = { workspace = true }
 
