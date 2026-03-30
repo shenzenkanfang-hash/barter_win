@@ -8,9 +8,24 @@ Cargo.lock
 
 # Python
 autogen/
+venv/
+
+# Litho doc cache
+.litho/
+
+# MCP
+.mcp.json
 
 # SQLite database files
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Generated outputs
+data/outputs/
+logs/
+heartbeat_report.json
+
+# Factory/settings
+.factory/
