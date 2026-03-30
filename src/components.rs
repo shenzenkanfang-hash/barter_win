@@ -21,6 +21,7 @@ use rust_decimal::Decimal;
 use crate::tick_context::{DB_PATH, DATA_FILE, INITIAL_BALANCE, SYMBOL};
 use crate::utils::{convert_store_indicator_to_market_indicators, StoreRef};
 
+#[derive(Clone)]
 pub struct SystemComponents {
     pub kline_stream: Arc<tokio::sync::Mutex<Kline1mStream>>,
     pub signal_processor: Arc<SignalProcessor>,
