@@ -139,7 +139,7 @@ impl StateCenterTrait for StateCenterImpl {
     fn set_error(&self, component_id: &str, error: String) -> Option<()> {
         let mut components = self.components.write();
         if let Some(state) = components.get_mut(component_id) {
-            state.status = ComponentStatus::Stopped;
+            state.status = ComponentStatus::Stale;
             state.error_msg = Some(error);
             Some(())
         } else {
@@ -312,7 +312,7 @@ mod tests {
         center.set_error("component1", "test error message".to_string()).unwrap();
 
         let state = center.get_state("component1").unwrap();
-        assert_eq!(state.status, ComponentStatus::Stopped);
+        assert_eq!(state.status, ComponentStatus::Stale);
         assert_eq!(state.error_msg, Some("test error message".to_string()));
     }
 
