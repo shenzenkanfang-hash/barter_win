@@ -10,8 +10,12 @@
 //! - 无 DataSourceActor（数据层不发事件）
 //! - 无 PipelineBus.raw_data_tx（原始数据不走 Bus）
 //! - StrategyActor 直接调用 kline_stream.next_message()
+//!
+//! # Send 约束
+//! - Kline1mStream 含非 Send 类型（ThreadRng），mutex guard 必须在 await 前释放
+//! - 使用独立 block { let _guard = lock.await; data = fn(); } 确保 guard 在 await 前 drop
+//! - Stop signal 使用 broadcast::Receiver（Send-safe）而非 watch::Receiver（非 Send）
 
-use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use rust_decimal::Decimal;
 
@@ -19,7 +23,7 @@ use crate::event_bus::{
     PipelineBusHandle, PipelineBusReceiver, StrategySignalEvent, StrategyDecision,
     OrderEvent, OrderSide, OrderStatus,
 };
-use crate::components::SystemComponents;
+use crate::components::{SystemComponents, DataLayer};
 use crate::tick_context::{SYMBOL, INITIAL_BALANCE};
 use crate::utils::parse_raw_kline;
 
@@ -33,10 +37,16 @@ const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 /// 2. 调用 signal_processor.min_update()
 /// 3. 调用 trader.execute_once_wal()（带 TradeLock）
 /// 4. 通过 PipelineBus.strategy_tx 发送信号
+///
+/// # Send 边界说明
+/// - `data_layer`（含 Kline1mStream，非 Send）仅在独立 block 内使用，guard 在 await 前 drop
+/// - `components`（SystemComponents，Send-safe）跨 await 点捕获
+/// - Stop signal 使用 broadcast::Receiver（Send-safe）
 pub async fn run_strategy_actor(
+    data_layer: DataLayer,
     components: SystemComponents,
     bus_handle: PipelineBusHandle,
-    mut stop_rx: tokio::sync::mpsc::Receiver<()>,
+    mut stop_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     tracing::info!("[Actor:strategy] started");
 
@@ -47,7 +57,7 @@ pub async fn run_strategy_actor(
         tokio::select! {
             biased;
 
-            // 停止信号
+            // 停止信号（broadcast recv 返回 Err 表示 channel 关闭）
             _ = stop_rx.recv() => {
                 tracing::info!("[Actor:strategy] stop signal received");
                 break;
@@ -59,9 +69,11 @@ pub async fn run_strategy_actor(
             }
 
             // 主动从数据层拉取数据（50ms 间隔，actor 自驱动节奏控制）
+            // 注意：mutex guard 必须在 await 前释放（Kline1mStream 含非 Send RNG）
             _ = sleep(Duration::from_millis(50)) => {
                 let kline_data = {
-                    let mut stream = components.kline_stream.lock().await;
+                    // guard 在此 block 结束时立即释放，不跨越 await
+                    let mut stream = data_layer.kline_stream.lock().await;
                     stream.next_message()
                 };
 
@@ -113,7 +125,7 @@ pub async fn run_strategy_actor(
                                 qty: None,
                                 reason: format!("lock_conflict: {}", e),
                             };
-                            let _ = bus_handle.send_strategy_signal(signal).await;
+                            let _ = bus_handle.send_strategy_signal(signal);
                             continue;
                         }
                     };
@@ -147,7 +159,7 @@ pub async fn run_strategy_actor(
                     reason,
                 };
 
-                if bus_handle.send_strategy_signal(signal).await.is_err() {
+                if bus_handle.send_strategy_signal(signal).is_err() {
                     tracing::warn!("[Actor:strategy] strategy_tx channel closed");
                     break;
                 }
@@ -173,11 +185,14 @@ pub async fn run_strategy_actor(
 /// 2. pre_check() 风控检查
 /// 3. place_order() 下单
 /// 4. 通过 PipelineBus.order_tx 发送订单结果
+///
+/// # Send 边界说明
+/// - Stop signal 使用 broadcast::Receiver（Send-safe）
 pub async fn run_risk_actor(
     receiver: PipelineBusReceiver,
     bus_handle: PipelineBusHandle,
     components: SystemComponents,
-    mut stop_rx: tokio::sync::mpsc::Receiver<()>,
+    mut stop_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     tracing::info!("[Actor:risk] started");
 
@@ -188,12 +203,13 @@ pub async fn run_risk_actor(
         tokio::select! {
             biased;
 
+            // 停止信号（broadcast recv 返回 Err 表示 channel 关闭）
             _ = stop_rx.recv() => {
                 tracing::info!("[Actor:risk] stop signal");
                 break;
             }
 
-            Some(signal) = strategy_rx.recv() => {
+            Ok(signal) = strategy_rx.recv() => {
                 // ===== Stage E: 风控检查 =====
                 let Some(qty) = signal.qty else {
                     continue; // Skip/Error 无下单数量

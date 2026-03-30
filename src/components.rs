@@ -21,9 +21,11 @@ use rust_decimal::Decimal;
 use crate::tick_context::{DB_PATH, DATA_FILE, INITIAL_BALANCE, SYMBOL};
 use crate::utils::{convert_store_indicator_to_market_indicators, StoreRef};
 
+/// SystemComponents - Send-safe 系统组件（排除 Kline1mStream）
+///
+/// Kline1mStream 含非 Send RNG（ThreadRng），单独提取为 DataLayer。
 #[derive(Clone)]
 pub struct SystemComponents {
-    pub kline_stream: Arc<tokio::sync::Mutex<Kline1mStream>>,
     pub signal_processor: Arc<SignalProcessor>,
     pub trader: Arc<Trader>,
     pub risk_checker: Arc<RiskPreChecker>,
@@ -32,6 +34,15 @@ pub struct SystemComponents {
     #[allow(dead_code)]
     pub pipeline_store: Arc<PipelineStore>,
     pub trade_lock: Arc<TradeLock>,
+}
+
+/// DataLayer - Kline1mStream 数据层（非 Send，驱动专有）
+///
+/// Kline1mStream 含 rand::ThreadRng（Rc<UnsafeCell<...>>），非 Send。
+/// 仅在驱动协程内使用，不跨越 await。
+#[derive(Clone)]
+pub struct DataLayer {
+    pub kline_stream: Arc<tokio::sync::Mutex<Kline1mStream>>,
 }
 
 pub fn init_heartbeat() {
@@ -44,7 +55,11 @@ pub fn init_heartbeat() {
     tracing::info!("Heartbeat monitor ready");
 }
 
-pub async fn create_components() -> Result<SystemComponents, Box<dyn std::error::Error>> {
+/// 创建所有系统组件（返回 Send-safe SystemComponents + 非 Send DataLayer）
+///
+/// # 返回
+/// - `Ok((SystemComponents, DataLayer))` - Send-safe 组件 + 数据层
+pub async fn create_components() -> Result<(SystemComponents, DataLayer), Box<dyn std::error::Error>> {
     tracing::info!("Loading: {}", DATA_FILE);
     let replay_source = ReplaySource::from_csv(DATA_FILE).await?;
     tracing::info!("[b] Loaded {} K-lines", replay_source.len());
@@ -78,7 +93,7 @@ pub async fn create_components() -> Result<SystemComponents, Box<dyn std::error:
     signal_processor.register_symbol(SYMBOL);
     tracing::info!("[c] SignalProcessor created with pipeline_store + market_store");
 
-    let trader = create_trader(shared_store, pipeline_store.clone())?;
+    let trader = create_trader(shared_store.clone(), pipeline_store.clone())?;
     tracing::info!("[d] Trader created");
 
     let mut risk_checker = RiskPreChecker::new(Decimal::try_from(0.15).unwrap(), Decimal::try_from(100.0).unwrap());
@@ -91,8 +106,7 @@ pub async fn create_components() -> Result<SystemComponents, Box<dyn std::error:
     let trade_lock = Arc::new(TradeLock::new());
     tracing::info!("[e] TradeLock created");
 
-    Ok(SystemComponents {
-        kline_stream,
+    let components = SystemComponents {
         signal_processor,
         trader,
         risk_checker,
@@ -100,7 +114,11 @@ pub async fn create_components() -> Result<SystemComponents, Box<dyn std::error:
         gateway,
         pipeline_store,
         trade_lock,
-    })
+    };
+
+    let data_layer = DataLayer { kline_stream };
+
+    Ok((components, data_layer))
 }
 
 fn create_trader(

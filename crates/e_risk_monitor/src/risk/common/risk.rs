@@ -1,9 +1,9 @@
 use a_common::EngineError;
 use a_common::heartbeat::Token as HeartbeatToken;
-use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tokio::sync::RwLock as TokioRwLock;
 
 /// 心跳报到测试点 ID
 const HEARTBEAT_POINT_RISK_PRE_CHECKER: &str = "ER-001";
@@ -17,14 +17,19 @@ const HEARTBEAT_POINT_RISK_PRE_CHECKER: &str = "ER-001";
 /// 4. 波动率模式是否允许交易
 ///
 /// v3.0: 心跳报到集成
+///
+/// # Send 安全说明
+/// 使用 `tokio::sync::RwLock` 保存 `Option<HeartbeatToken>` 而非 `parking_lot::RwLock`，
+/// 因为 `parking_lot::RwLockReadGuard` 不是 `Send`，
+/// 而 `tokio::sync::RwLock` 的 guard 是 `Send`（可在任务间传递）。
 #[derive(Debug, Clone)]
 pub struct RiskPreChecker {
     max_position_ratio: Decimal,
     min_reserve_balance: Decimal,
     registered_symbols: HashSet<String>,
     volatility_mode: VolatilityMode,
-    /// v3.0: 心跳 Token
-    heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
+    /// v3.0: 心跳 Token（使用 tokio::sync::RwLock 保证 Send-safe）
+    heartbeat_token: Arc<TokioRwLock<Option<HeartbeatToken>>>,
 }
 
 /// 波动率模式
@@ -52,19 +57,22 @@ impl RiskPreChecker {
             min_reserve_balance,
             registered_symbols: HashSet::new(),
             volatility_mode: VolatilityMode::Normal,
-            heartbeat_token: Arc::new(RwLock::new(None)),
+            heartbeat_token: Arc::new(TokioRwLock::new(None)),
         }
     }
 
-    /// v3.0: 设置心跳 Token
+    /// v3.0: 设置心跳 Token（同步版，用于初始化）
     pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
-        let mut guard = self.heartbeat_token.write();
+        // tokio::sync::RwLock 也实现了 poll_write 同步模式（parking 底层）
+        // 使用 blocking_lock 获取写锁
+        let mut guard = self.heartbeat_token.blocking_write();
         *guard = Some(token);
     }
 
-    /// v3.0: 获取当前心跳 Token
+    /// v3.0: 获取当前心跳 Token（同步版）
     pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
-        self.heartbeat_token.read().clone()
+        let guard = self.heartbeat_token.blocking_read();
+        guard.clone()
     }
 
     /// v3.0: 心跳报到（内部方法）

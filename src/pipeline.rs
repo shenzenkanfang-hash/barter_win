@@ -1,259 +1,84 @@
-//! 业务流水线（按 b→f→d→c→e 顺序）
+//! 事件驱动流水线
+//!
+//! # 架构（已纠正）
+//! - 数据层被动：Kline1mStream::next_message()（不主动发事件）
+//! - StrategyActor 主动驱动：自己的循环，从数据层拉取
+//! - RiskActor 被动消费：等待 PipelineBus 信号
+//! - PipelineBus 只传跨协程信号（strategy/order）
+//!
+//! # 关键变化
+//! - 消除 `tokio::time::sleep(50)` 的 serial polling loop
+//! - 改为 StrategyActor 自循环（主动拉取）+ RiskActor（被动等待）
 
-use rust_decimal::Decimal;
-use tokio::time::{interval, Duration};
+use tokio::sync::broadcast;
 
-use crate::components::SystemComponents;
-use crate::tick_context::{
-    BDataResult, CDataResult, DCheckResult, ERiskResult, FEngineResult,
-    StageError, TickContext, SYMBOL, INITIAL_BALANCE,
-};
-use crate::utils::parse_raw_kline;
+use crate::components::{SystemComponents, DataLayer};
+use crate::event_bus::{PipelineBus, PipelineBusHandle};
+use crate::actors::{run_strategy_actor, run_risk_actor};
 
-pub async fn run_pipeline(components: SystemComponents) -> Result<(), Box<dyn std::error::Error>> {
-    let mut heartbeat_tick = interval(Duration::from_millis(1000));
-    let mut loop_count = 0u64;
-    let mut tick_count = 0u64;
+/// 事件驱动流水线启动函数
+///
+/// # 参数
+/// - components: 所有共享组件（由 main.rs create_components 构造）
+/// - bus: PipelineBus（strategy signal channel）
+///
+/// # 行为
+/// 1. Spawn StrategyActor（主动驱动：拉取数据 → 处理 → 发信号）
+/// 2. Spawn RiskActor（被动消费：等信号 → 风控 → 下单）
+/// 3. 等待任一 actor 结束
+/// 4. 广播停止信号
+pub async fn run_pipeline(
+    components: SystemComponents,
+    data_layer: DataLayer,
+    bus: (PipelineBusHandle, PipelineBus),
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (bus_handle, bus_receiver) = bus;
 
-    tracing::info!("Pipeline started");
+    tracing::info!("Event-driven pipeline starting");
 
-    loop {
-        tokio::select! {
-            _ = heartbeat_tick.tick() => {
-                tracing::trace!("[HB] alive #{}", loop_count);
+    // 创建 broadcast channel（Send-safe stop signal，所有 actor 共用一个 sender）
+    // 使用 broadcast 而非 watch：broadcast::Receiver 是 Send-safe（watch::Receiver 持
+    // 有 std::sync::RwLockReadGuard，非 Send，导致 tokio::spawn 时编译失败）
+    let (stop_tx, _) = broadcast::channel::<()>(1);
+
+    // Spawn StrategyActor（主动驱动方）
+    // data_layer 单独传入（Kline1mStream 非 Send，仅在 actor 内局部使用）
+    let strat_stop_rx = stop_tx.subscribe();
+    let strat_handle = tokio::spawn(run_strategy_actor(
+        data_layer,
+        components.clone(),
+        bus_handle.clone(),
+        strat_stop_rx,
+    ));
+
+    // Spawn RiskActor（被动消费者）
+    let risk_stop_rx = stop_tx.subscribe();
+    let risk_handle = tokio::spawn(run_risk_actor(
+        bus_receiver.receiver,
+        bus_handle,
+        components,
+        risk_stop_rx,
+    ));
+
+    // 等待任一 actor 结束
+    tokio::select! {
+        r = strat_handle => {
+            match r {
+                Ok(()) => tracing::info!("[Pipeline] StrategyActor finished normally"),
+                Err(e) => tracing::error!("[Pipeline] StrategyActor panicked: {}", e),
             }
-
-            _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                loop_count += 1;
-
-                let kline_data = {
-                    let mut stream = components.kline_stream.lock().await;
-                    stream.next_message()
-                };
-
-                let Some(data) = kline_data else {
-                    tracing::info!("Data exhausted at loop {}", loop_count);
-                    break;
-                };
-
-                let kline = match parse_raw_kline(&data) {
-                    Ok(k) => k,
-                    Err(e) => {
-                        tracing::warn!("[b] Parse error: {}", e);
-                        continue;
-                    }
-                };
-
-                let mut ctx = TickContext::new(tick_count + 1, kline);
-
-                stage_b_data(&mut ctx, tick_count + 1);
-                stage_f_engine(&components, &mut ctx);
-                let d_result = stage_d_check(&components, &mut ctx).await;
-                ctx.visited.push("c");
-                stage_e_risk(&components, &mut ctx, loop_count, &d_result);
-
-                tick_count += 1;
-
-                if ctx.errors.is_empty() {
-                    tracing::debug!(
-                        "[Tick#{}] b→f→d→c→e complete={} decision={}",
-                        ctx.tick_id,
-                        ctx.is_complete(),
-                        ctx.d_check.as_ref().map(|d| d.decision.as_str()).unwrap_or("-")
-                    );
-                } else {
-                    tracing::warn!("[Tick#{}] errors={:?}", ctx.tick_id, ctx.errors);
-                }
-
-                if tick_count % 100 == 0 {
-                    tracing::info!(
-                        "[Progress#{}] ticks={} {}",
-                        loop_count,
-                        tick_count,
-                        serde_json::to_string(&ctx.to_report()).unwrap_or_default()
-                    );
-                }
-
-                if loop_count >= 1000 {
-                    tracing::info!("Max iterations reached");
-                    break;
-                }
+        }
+        r = risk_handle => {
+            match r {
+                Ok(()) => tracing::info!("[Pipeline] RiskActor finished normally"),
+                Err(e) => tracing::error!("[Pipeline] RiskActor panicked: {}", e),
             }
         }
     }
 
-    tracing::info!("Pipeline done: {} loops, {} ticks", loop_count, tick_count);
+    // 广播停止信号（优雅退出）：send() 触发所有 broadcast receiver 退出
+    let _ = stop_tx.send(());
+
+    tracing::info!("Event-driven pipeline stopped");
     Ok(())
-}
-
-fn stage_b_data(ctx: &mut TickContext, kline_id: u64) {
-    let valid = ctx.kline.close > Decimal::ZERO;
-    ctx.b_data = Some(BDataResult {
-        kline_id,
-        valid,
-    });
-    ctx.visited.push("b");
-
-    if !valid {
-        ctx.errors.push(StageError {
-            stage: "b".into(),
-            code: "INVALID_PRICE".into(),
-            detail: format!("close={} <= 0", ctx.kline.close),
-        });
-    }
-}
-
-fn stage_f_engine(components: &SystemComponents, ctx: &mut TickContext) {
-    components.gateway.update_price(SYMBOL, ctx.kline.close);
-    ctx.f_engine = Some(FEngineResult {
-        price_updated: true,
-        account_synced: true,
-    });
-    ctx.visited.push("f");
-}
-
-async fn stage_d_check(components: &SystemComponents, ctx: &mut TickContext) -> DCheckResult {
-    let c_result = {
-        let r = components.signal_processor.min_update(
-            SYMBOL,
-            ctx.kline.high,
-            ctx.kline.low,
-            ctx.kline.close,
-            ctx.kline.volume,
-        );
-
-        CDataResult {
-            zscore_14: None,
-            tr_base: None,
-            pos_norm: None,
-            signal: r.is_ok(),
-        }
-    };
-    ctx.c_data = Some(c_result);
-    ctx.visited.push("c");
-
-    // 使用 TradeLock 确保同时只有一个策略在执行交易
-    let guard = match components.trade_lock.acquire("h_15m_strategy") {
-        Ok(g) => g,
-        Err(e) => {
-            tracing::warn!("[d] TradeLock conflict: {}", e);
-            return DCheckResult {
-                decision: "skip".into(),
-                qty: None,
-                reason: format!("lock_conflict: {}", e),
-            };
-        }
-    };
-
-    let trade_result = components.trader.execute_once_wal().await;
-
-    drop(guard); // 显式释放锁（在 guard 超出作用域前）
-
-    match &trade_result {
-        Ok(d_checktable::h_15m::ExecutionResult::Executed { qty, .. }) => {
-            let result = DCheckResult {
-                decision: "long_entry".into(),
-                qty: Some(*qty),
-                reason: "signal_triggered".into(),
-            };
-            ctx.d_check = Some(result.clone());
-            ctx.visited.push("d");
-            result
-        }
-        Ok(d_checktable::h_15m::ExecutionResult::Skipped(reason)) => {
-            let result = DCheckResult {
-                decision: "skip".into(),
-                qty: None,
-                reason: reason.to_string(),
-            };
-            ctx.d_check = Some(result.clone());
-            ctx.visited.push("d");
-            result
-        }
-        Ok(d_checktable::h_15m::ExecutionResult::Failed(e)) => {
-            ctx.errors.push(StageError {
-                stage: "d".into(),
-                code: "TRADE_FAILED".into(),
-                detail: e.to_string(),
-            });
-            let result = DCheckResult {
-                decision: "error".into(),
-                qty: None,
-                reason: e.to_string(),
-            };
-            ctx.d_check = Some(result.clone());
-            ctx.visited.push("d");
-            result
-        }
-        Err(e) => {
-            ctx.errors.push(StageError {
-                stage: "d".into(),
-                code: "TRADE_ERROR".into(),
-                detail: e.to_string(),
-            });
-            let result = DCheckResult {
-                decision: "error".into(),
-                qty: None,
-                reason: e.to_string(),
-            };
-            ctx.d_check = Some(result.clone());
-            ctx.visited.push("d");
-            result
-        }
-    }
-}
-
-fn stage_e_risk(
-    components: &SystemComponents,
-    ctx: &mut TickContext,
-    loop_id: u64,
-    d_result: &DCheckResult,
-) {
-    let Some(qty) = d_result.qty else {
-        ctx.visited.push("e");
-        return;
-    };
-
-    let balance_passed = components
-        .risk_checker
-        .pre_check(
-            SYMBOL,
-            INITIAL_BALANCE,
-            Decimal::try_from(100).unwrap(),
-            INITIAL_BALANCE,
-        )
-        .is_ok();
-
-    let order_check_result = components.order_checker.pre_check(
-        &format!("order_{}", loop_id),
-        SYMBOL,
-        "h_15m_strategy",
-        Decimal::try_from(100).unwrap(),
-        INITIAL_BALANCE,
-        Decimal::try_from(0).unwrap(),
-    );
-    let order_passed = order_check_result.passed;
-
-    ctx.e_risk = Some(ERiskResult {
-        balance_passed,
-        order_passed,
-    });
-    ctx.visited.push("e");
-
-    if balance_passed && order_passed {
-        if let Ok(order) = components.gateway.place_order(SYMBOL, b_data_mock::api::mock_account::Side::Buy, qty, None) {
-            tracing::info!(
-                "[Tick#{}] [e] Filled: price={} qty={}",
-                ctx.tick_id,
-                order.filled_price,
-                order.filled_qty
-            );
-        }
-    } else {
-        ctx.errors.push(StageError {
-            stage: "e".into(),
-            code: "RISK_REJECTED".into(),
-            detail: format!("balance={} order={}", balance_passed, order_passed),
-        });
-    }
 }

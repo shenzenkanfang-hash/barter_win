@@ -34,7 +34,7 @@ impl HeartbeatReporter {
             entry.check_stale(seq, self.config.stale_threshold);
         }
         drop(entries);
-        let started_at = std::time::Instant::now();
+        let started_at = tokio::time::Instant::now();
         Token::new(seq, started_at)
     }
 

@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
-use parking_lot::RwLock;
 use chrono::Utc;
+use tokio::sync::RwLock as TokioRwLock;
 
 use a_common::heartbeat::Token as HeartbeatToken;
 use b_data_source::store::PipelineStage;
@@ -58,8 +58,8 @@ pub struct Kline1mStream {
     current_sub: Option<crate::ws::kline_generator::SimulatedKline>,
     /// K线生成器
     kline_generator: Option<crate::ws::kline_generator::KlineStreamGenerator>,
-    /// v3.0: 心跳 Token
-    heartbeat_token: Arc<RwLock<Option<HeartbeatToken>>>,
+    /// v3.0: 心跳 Token（使用 tokio::sync::RwLock 保证 Send-safe）
+    heartbeat_token: Arc<TokioRwLock<Option<HeartbeatToken>>>,
     /// v4.0: 流水线观测表（可选，不配置则不记录）
     pipeline_store: Option<Arc<b_data_source::store::PipelineStore>>,
 }
@@ -80,7 +80,7 @@ impl Kline1mStream {
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
-            heartbeat_token: Arc::new(RwLock::new(None)),
+            heartbeat_token: Arc::new(TokioRwLock::new(None)),
             pipeline_store: None,
         }
     }
@@ -108,7 +108,7 @@ impl Kline1mStream {
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
-            heartbeat_token: Arc::new(RwLock::new(None)),
+            heartbeat_token: Arc::new(TokioRwLock::new(None)),
             pipeline_store: None,
         }
     }
@@ -128,20 +128,21 @@ impl Kline1mStream {
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: Some(crate::ws::kline_generator::KlineStreamGenerator::new(symbol, kline_iter)),
-            heartbeat_token: Arc::new(RwLock::new(None)),
+            heartbeat_token: Arc::new(TokioRwLock::new(None)),
             pipeline_store: Some(pipeline_store),
         }
     }
 
-    /// v3.0: 设置心跳 Token
+    /// v3.0: 设置心跳 Token（同步版，用于初始化）
     pub fn set_heartbeat_token(&self, token: HeartbeatToken) {
-        let mut guard = self.heartbeat_token.write();
+        let mut guard = self.heartbeat_token.blocking_write();
         *guard = Some(token);
     }
 
-    /// v3.0: 获取当前心跳 Token
+    /// v3.0: 获取当前心跳 Token（同步版）
     pub fn get_heartbeat_token(&self) -> Option<HeartbeatToken> {
-        self.heartbeat_token.read().clone()
+        let guard = self.heartbeat_token.blocking_read();
+        guard.clone()
     }
 
     /// 获取下一个 K线数据（从子K线生成）
@@ -278,7 +279,7 @@ impl Default for Kline1mStream {
             synthesizers: HashMap::new(),
             current_sub: None,
             kline_generator: None,
-            heartbeat_token: Arc::new(RwLock::new(None)),
+            heartbeat_token: Arc::new(TokioRwLock::new(None)),
             pipeline_store: None,
         }
     }
