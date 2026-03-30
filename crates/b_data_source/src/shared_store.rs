@@ -132,22 +132,29 @@ where
 
     /// 检查指定 key 是否为最新（版本号 >= 指定版本）
     fn is_current(&self, key: &K, min_version: u64) -> bool;
+
+    /// 增量读取：获取指定 key 从 min_seq（包含）开始的所有版本数据
+    ///
+    /// 用于增量同步场景（如 SharedStore 序列号机制），允许按版本号断点续传。
+    /// 返回按版本号升序排列的所有条目。
+    fn get_since(&self, key: &K, min_seq: u64) -> Vec<VersionedData<V>>;
 }
 
 /// SharedStoreImpl - SharedStore 默认实现
 ///
 /// 使用 HashMap 存储数据，支持线程安全访问。
+/// 每个 key 存储 Vec<VersionedData> 以支持增量读取（get_since）。
 #[derive(Debug)]
 pub struct SharedStoreImpl<K, V>
 where
     K: Eq + Hash + Clone + Send + Sync,
     V: Clone + Send + Sync,
 {
-    /// 数据存储
-    data: RwLock<HashMap<K, VersionedData<V>>>,
+    /// 数据存储（每个 key 保存所有历史版本，支持 get_since 增量读取）
+    data: RwLock<HashMap<K, Vec<VersionedData<V>>>>,
     /// 全局版本号
     global_version: AtomicU64,
-    /// 各 key 的版本号
+    /// 各 key 的版本号（当前最新版本号）
     key_versions: RwLock<HashMap<K, u64>>,
 }
 
@@ -181,7 +188,9 @@ where
     V: Clone + Send + Sync,
 {
     fn get(&self, key: &K) -> Option<VersionedData<V>> {
-        self.data.read().get(key).cloned()
+        // 返回最新版本（Vec 的最后一个元素）
+        let data = self.data.read();
+        data.get(key).and_then(|versions| versions.last().cloned())
     }
 
     fn version(&self, key: &K) -> u64 {
@@ -197,8 +206,10 @@ where
         let mut key_versions = self.key_versions.write();
 
         let new_version = key_versions.get(&key).copied().unwrap_or(0) + 1;
+        let entry = VersionedData::new(value, new_version, timestamp_ms);
 
-        data.insert(key.clone(), VersionedData::new(value, new_version, timestamp_ms));
+        // append 到历史列表（而不是替换）
+        data.entry(key.clone()).or_insert_with(Vec::new).push(entry);
         key_versions.insert(key, new_version);
 
         // 全局版本号：每次写入操作递增
@@ -209,18 +220,17 @@ where
         let mut data = self.data.write();
         let mut key_versions = self.key_versions.write();
 
-        // 先获取现有数据（克隆一份）
-        let existing_data = data.get(key).cloned();
+        // 获取现有数据的最新版本（克隆一份）
+        let latest_version = data.get(key).and_then(|versions| versions.last().cloned());
 
-        if let Some(existing) = existing_data {
-            // 软删除：保留数据但标记版本
-            let delete_version = existing.version + 1;
-            data.insert(key.clone(), VersionedData::new(
-                existing.data,
-                delete_version,
-                timestamp_ms,
-            ));
+        if let Some(latest) = latest_version {
+            // 软删除：追加一条带标记的版本（版本号 + 1）
+            let delete_version = latest.version + 1;
+            let entry = VersionedData::new(latest.data, delete_version, timestamp_ms);
+            data.entry(key.clone()).or_insert_with(Vec::new).push(entry);
             key_versions.insert(key.clone(), delete_version);
+            // 全局版本递增
+            self.global_version.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -238,6 +248,18 @@ where
 
     fn is_current(&self, key: &K, min_version: u64) -> bool {
         self.version(key) >= min_version
+    }
+
+    fn get_since(&self, key: &K, min_seq: u64) -> Vec<VersionedData<V>> {
+        let data = self.data.read();
+        match data.get(key) {
+            Some(versions) => versions
+                .iter()
+                .filter(|entry| entry.version >= min_seq)
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        }
     }
 }
 
@@ -316,5 +338,80 @@ mod tests {
         // 删除后版本仍存在
         assert!(store.contains(&"a".to_string()));
         assert!(store.version(&"a".to_string()) > 1);
+    }
+
+    #[test]
+    fn test_get_since_basic() {
+        let store: Arc<SharedStoreImpl<String, i32>> = create_shared_store();
+
+        // 写入 3 个版本
+        store.write("a".to_string(), 10, 1000);
+        store.write("a".to_string(), 20, 2000);
+        store.write("a".to_string(), 30, 3000);
+
+        // 从版本 1 开始：返回所有 3 个
+        let all = store.get_since(&"a".to_string(), 1);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].data, 10);
+        assert_eq!(all[1].data, 20);
+        assert_eq!(all[2].data, 30);
+        assert_eq!(all[0].version, 1);
+        assert_eq!(all[1].version, 2);
+        assert_eq!(all[2].version, 3);
+    }
+
+    #[test]
+    fn test_get_since_from_middle() {
+        let store: Arc<SharedStoreImpl<String, i32>> = create_shared_store();
+
+        store.write("a".to_string(), 10, 1000);
+        store.write("a".to_string(), 20, 2000);
+        store.write("a".to_string(), 30, 3000);
+
+        // 从版本 2 开始：返回 2, 3（跳过版本 1）
+        let from_v2 = store.get_since(&"a".to_string(), 2);
+        assert_eq!(from_v2.len(), 2);
+        assert_eq!(from_v2[0].data, 20);
+        assert_eq!(from_v2[1].data, 30);
+    }
+
+    #[test]
+    fn test_get_since_from_beyond_latest() {
+        let store: Arc<SharedStoreImpl<String, i32>> = create_shared_store();
+
+        store.write("a".to_string(), 10, 1000);
+        store.write("a".to_string(), 20, 2000);
+
+        // 从版本 99 开始：没有匹配，返回空 Vec
+        let empty = store.get_since(&"a".to_string(), 99);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_get_since_nonexistent_key() {
+        let store: Arc<SharedStoreImpl<String, i32>> = create_shared_store();
+
+        let empty = store.get_since(&"nonexistent".to_string(), 1);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_get_since_after_delete() {
+        let store: Arc<SharedStoreImpl<String, i32>> = create_shared_store();
+
+        store.write("a".to_string(), 10, 1000);
+        store.write("a".to_string(), 20, 2000);
+        let before_delete_version = store.version(&"a".to_string());
+        store.delete(&"a".to_string(), 3000);
+        let after_delete_version = store.version(&"a".to_string());
+
+        // 删除追加了一个新版本（软删除）
+        assert!(after_delete_version > before_delete_version);
+
+        // 从版本 2 开始：返回 v2 和删除条目
+        let from_v2 = store.get_since(&"a".to_string(), 2);
+        assert_eq!(from_v2.len(), 2);
+        assert_eq!(from_v2[0].version, 2);
+        assert_eq!(from_v2[1].version, 3); // 删除版本
     }
 }
