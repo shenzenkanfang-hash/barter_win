@@ -7,6 +7,7 @@
 
 pub mod check_table;
 pub mod types;
+pub mod strategy_service;  // 策略服务统一接口
 
 // 周期策略模块
 pub mod h_15m;         // 高频15分钟策略检查
@@ -15,3 +16,9 @@ pub mod h_volatility_trader;  // 高波动率自动交易器
 
 pub use check_table::{CheckTable, CheckEntry};
 pub use types::{CheckChainContext, CheckSignal, CheckChainResult};
+
+// 策略服务类型
+pub use strategy_service::{
+    StrategyService, StrategyServiceError, StrategyServiceRegistry,
+    StrategyInfo, StrategyHealth, StrategyType, StrategySnapshot,
+};
