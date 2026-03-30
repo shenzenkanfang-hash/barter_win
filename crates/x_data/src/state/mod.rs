@@ -21,5 +21,4 @@ pub use component::{
 pub use center::{
     StateCenter,
     StateCenterImpl,
-    StateCenterTrait,
 };
