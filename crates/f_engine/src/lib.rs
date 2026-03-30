@@ -16,15 +16,15 @@
 //! ```
 
 pub mod core;
+pub mod engine_manager;  // 协程生命周期管理器
 pub mod event;          // 事件驱动模块
 pub mod interfaces;
 #[allow(deprecated)]
 pub mod strategy;       // 包含废弃代码，保留用于兼容性
 pub mod types;
 
-// Re-exports - 事件驱动引擎（推荐）
-pub use event::{EventEngine, EventBus, EventBusHandle, EngineConfig, EngineState};
-pub use event::event_bus::DEFAULT_CHANNEL_BUFFER;
+// Re-exports - 协程管理器
+pub use engine_manager::{EngineManager, EngineManagerConfig, EngineError};
 
 // Re-exports - 核心引擎
 pub use core::EventDrivenEngine;
