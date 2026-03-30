@@ -4,26 +4,9 @@
 //! - 数据层被动（只暴露 pull/pop 接口，不发事件）
 //! - 消费者主动（自己决定什么时候取数据）
 //! - PipelineBus 只传递：策略信号 + 订单结果
-//!
-//! # 事件流
-//! ```
-//! StrategyActor
-//!   │ execute_once_wal() → 数据层（被动接口）
-//!   │ min_update()       → 指标处理器（被动接口）
-//!   │ send_strategy_signal()
-//!   ▼
-//! PipelineBus.strategy_tx
-//!   │ StrategySignalEvent
-//!   ▼
-//! RiskActor
-//!   │ pre_check() + place_order()
-//!   │ send_order()
-//!   ▼
-//! PipelineBus.order_tx
-//! ```
 
-use tokio::sync::{mpsc, broadcast};
 use rust_decimal::Decimal;
+use tokio::sync::{broadcast, mpsc};
 
 // ============================================================================
 // 事件类型（仅跨协程信号，不含原始数据）
@@ -139,6 +122,7 @@ impl PipelineBusHandle {
     /// 通道状态
     ///
     /// broadcast::Sender 没有 capacity()，用 len() 近似
+    #[allow(dead_code)]
     pub fn channel_status(&self) -> ChannelStatus {
         ChannelStatus {
             strategy_remaining: self.strategy_tx.len(),
@@ -148,6 +132,7 @@ impl PipelineBusHandle {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ChannelStatus {
     pub strategy_remaining: usize,
     pub order_remaining: usize,
@@ -160,8 +145,6 @@ pub struct ChannelStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- StrategySignalEvent ---
 
     #[test]
     fn test_strategy_signal_event_clone() {
@@ -194,8 +177,6 @@ mod tests {
         assert!(debug_str.contains("Skip"));
     }
 
-    // --- StrategyDecision ---
-
     #[test]
     fn test_strategy_decision_variants() {
         assert_eq!(StrategyDecision::LongEntry, StrategyDecision::LongEntry);
@@ -217,8 +198,6 @@ mod tests {
         let d2 = d; // Copy
         assert_eq!(d, d2);
     }
-
-    // --- OrderEvent ---
 
     #[test]
     fn test_order_event_clone() {
@@ -251,16 +230,12 @@ mod tests {
         assert!(debug_str.contains("Rejected"));
     }
 
-    // --- OrderSide ---
-
     #[test]
     fn test_order_side_variants() {
         assert_eq!(OrderSide::Buy, OrderSide::Buy);
         assert_eq!(OrderSide::Sell, OrderSide::Sell);
         assert_ne!(OrderSide::Buy, OrderSide::Sell);
     }
-
-    // --- OrderStatus ---
 
     #[test]
     fn test_order_status_variants() {
@@ -270,18 +245,13 @@ mod tests {
         assert_eq!(OrderStatus::Cancelled, OrderStatus::Cancelled);
     }
 
-    // --- PipelineBus ---
-
     #[test]
     fn test_pipeline_bus_new() {
         let (handle, bus) = PipelineBus::new(16, 32);
-        // handle 应可 clone
         let handle2 = handle.clone();
-        // strategy_tx.len() 和 order_tx.capacity() 均返回 usize
         let status = handle2.channel_status();
         assert_eq!(status.strategy_remaining, 0);
-        assert_eq!(status.order_remaining, 32); // 匹配 new(16, 32) 的第二个参数
-        // bus.receiver 存在
+        assert_eq!(status.order_remaining, 32);
         let _ = bus.receiver;
     }
 
@@ -289,18 +259,14 @@ mod tests {
     fn test_pipeline_bus_handle_clone() {
         let (handle, _bus) = PipelineBus::new(8, 8);
         let handle2 = handle.clone();
-        // Clone 后两个 handle 都指向同一个 channel
         drop(handle);
-        // handle2 仍然可用
         let status = handle2.channel_status();
         assert_eq!(status.strategy_remaining, 0);
     }
 
     #[tokio::test]
     async fn test_send_strategy_signal_no_receiver() {
-        // broadcast channel 的最后一个 receiver 被 drop 后，send 返回 Err(Lag(0))
         let (handle, bus) = PipelineBus::new(1, 1);
-        // 先 drop receiver
         drop(bus);
         let event = StrategySignalEvent {
             tick_id: 1,
@@ -310,13 +276,11 @@ mod tests {
             reason: "test".into(),
         };
         let result = handle.send_strategy_signal(event);
-        // 无订阅者时 send 返回 Err(Lag)
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_send_strategy_signal_with_receiver() {
-        // 接收者在同一时刻被持有，可以正常通信
         let (handle, bus) = PipelineBus::new(8, 8);
         let event = StrategySignalEvent {
             tick_id: 7,
@@ -325,12 +289,10 @@ mod tests {
             qty: Some(Decimal::try_from(0.1).unwrap()),
             reason: "test_with_receiver".into(),
         };
-        // 先发送
         let result = handle.send_strategy_signal(event);
-        assert!(result.is_ok()); // 有订阅者，返回订阅者数量
+        assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1);
 
-        // 再接收
         let mut rx = bus.receiver.strategy_rx;
         let received = rx.recv().await;
         assert!(received.is_ok());
@@ -341,9 +303,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_strategy_signal_multiple_receivers() {
-        // 测试 broadcast 支持多个订阅者
         let (handle, bus) = PipelineBus::new(8, 8);
-        let sub_rx = handle.strategy_tx.subscribe(); // 第二个订阅者
+        let sub_rx = handle.strategy_tx.subscribe();
 
         let event = StrategySignalEvent {
             tick_id: 99,
@@ -355,9 +316,8 @@ mod tests {
 
         let result = handle.send_strategy_signal(event);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 2); // 两个订阅者
+        assert_eq!(result.unwrap(), 2);
 
-        // 两个 receiver 都能收到
         let mut rx1 = bus.receiver.strategy_rx;
         let mut rx2 = sub_rx;
 
@@ -369,7 +329,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_order_no_receiver() {
-        // mpsc channel 无接收者时 send 失败（receiver 在 PipelineBus 内被 drop）
         let (handle, _bus) = PipelineBus::new(8, 8);
         let event = OrderEvent {
             order_id: "test_order".into(),
@@ -380,7 +339,6 @@ mod tests {
             status: OrderStatus::Filled,
         };
         let result = handle.send_order(event).await;
-        // PipelineBus::new 中 order_rx 被 drop，channel 关闭，send 失败
         assert!(result.is_err());
     }
 
@@ -388,8 +346,8 @@ mod tests {
     fn test_channel_status() {
         let (handle, _bus) = PipelineBus::new(8, 8);
         let status = handle.channel_status();
-        assert_eq!(status.strategy_remaining, 0); // 空 channel
-        assert_eq!(status.order_remaining, 8); // 匹配 new(8, 8) 的第二个参数   // 容量 8
+        assert_eq!(status.strategy_remaining, 0);
+        assert_eq!(status.order_remaining, 8);
     }
 
     #[test]
@@ -404,11 +362,8 @@ mod tests {
         };
         let _ = handle.send_strategy_signal(event);
         let status = handle.channel_status();
-        // broadcast::len() 返回 channel 中消息数量
         assert_eq!(status.strategy_remaining, 1);
     }
-
-    // --- ChannelStatus ---
 
     #[test]
     fn test_channel_status_clone() {

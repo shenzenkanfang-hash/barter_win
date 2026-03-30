@@ -19,7 +19,7 @@
 use tokio::time::{sleep, Duration, Instant};
 use rust_decimal::Decimal;
 
-use crate::event_bus::{
+use a_common::event_bus::{
     PipelineBusHandle, PipelineBusReceiver, StrategySignalEvent, StrategyDecision,
     OrderEvent, OrderSide, OrderStatus,
 };

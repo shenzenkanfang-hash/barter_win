@@ -19,8 +19,9 @@ pub mod backup;
 pub mod exchange;
 pub mod volatility;
 pub mod heartbeat;
+pub mod event_bus;  // PipelineBus 跨协程信号总线
 
-// Re-exports - Volatility
+// Re-exports - PipelineBus
 pub use volatility::{VolatilityCalc, VolatilityStats, VolatilityState, VolatilityRank, VolatilityEntry, KLineInput};
 
 // Re-exports - API
@@ -71,8 +72,12 @@ pub use exchange::{
     ExchangeAccount, ExchangePosition, OrderResult, PositionDirection, RejectReason,
 };
 
-// Re-export OrderStatus from models::types
-pub use models::types::OrderStatus;
-
 // Re-exports - Heartbeat
 pub use heartbeat::{Clock, Config, Entry, Mode, Points, Reporter, Summary, Token};
+
+// Re-exports - PipelineBus
+pub use event_bus::{
+    StrategySignalEvent, StrategyDecision,
+    OrderEvent, OrderSide, OrderStatus,
+    PipelineBus, PipelineBusHandle, PipelineBusReceiver, ChannelStatus,
+};
