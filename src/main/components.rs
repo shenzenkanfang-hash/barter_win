@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use a_common::heartbeat::{self as hb, Config as HbConfig};
 use a_common::logs::ComponentHealthLogger;
+use a_common::sysmon::{self as sysmon, default_config};
 use b_data_mock::{
     api::{MockApiGateway, MockConfig},
     replay_source::ReplaySource,
@@ -59,6 +60,14 @@ pub fn init_heartbeat() {
         max_file_size_mb: 100,
     });
     tracing::info!("Heartbeat monitor ready");
+
+    // 初始化系统心跳监控（tmpfs）
+    let config = default_config();
+    if let Err(e) = sysmon::init(config.clone()) {
+        tracing::warn!("[sysmon] failed to initialize: {}", e);
+    } else {
+        tracing::info!("[sysmon] heartbeat writer initialized at {:?}", config.path);
+    }
 }
 
 /// 创建所有系统组件（返回 Send-safe SystemComponents + 非 Send DataLayer）

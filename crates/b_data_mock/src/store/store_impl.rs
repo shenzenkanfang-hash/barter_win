@@ -150,6 +150,15 @@ impl MarketDataStore for MarketDataStoreImpl {
     fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
         tracing::trace!(symbol = %symbol, "store: write_indicator");
         self.indicators.write().insert(symbol.to_uppercase(), indicator);
+
+        // 心跳上报：指标计算完成
+        if let Some(writer) = a_common::sysmon::global() {
+            let metrics = serde_json::json!({
+                "symbols": 1,
+                "latency_ms": 0
+            });
+            writer.beat_ok(a_common::sysmon::ModuleId::Indicator, metrics);
+        }
     }
 
     fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {
@@ -252,6 +261,15 @@ impl BMarketDataStore for MarketDataStoreImpl {
     fn write_indicator(&self, symbol: &str, indicator: serde_json::Value) {
         tracing::trace!(symbol = %symbol, "store(b): write_indicator");
         self.indicators.write().insert(symbol.to_uppercase(), indicator);
+
+        // 心跳上报：指标计算完成
+        if let Some(writer) = a_common::sysmon::global() {
+            let metrics = serde_json::json!({
+                "symbols": 1,
+                "latency_ms": 0
+            });
+            writer.beat_ok(a_common::sysmon::ModuleId::Indicator, metrics);
+        }
     }
 
     fn get_indicator(&self, symbol: &str) -> Option<serde_json::Value> {

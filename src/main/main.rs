@@ -11,6 +11,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use a_common::event_bus::{PipelineBus, PipelineBusHandle};
 use a_common::logs::{JsonLinesWriter, JsonLinesLayer};
+use a_common::sysmon::{HeartbeatReader, default_config, render};
 use crate::actors::{run_strategy_actor, run_risk_actor};
 use crate::components::{create_components, init_heartbeat, print_heartbeat_report, DataLayer, SystemComponents};
 use crate::utils::{DATA_FILE, SYMBOL};
@@ -108,10 +109,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. 创建 PipelineBus
     let bus = PipelineBus::new(128, 128);
 
-    // 5. 启动自驱动流水线
+    // 5. 启动汇聚中心（与流水线并行运行）
+    let reader = HeartbeatReader::new(default_config());
+    let monitor_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            let overview = reader.read_all();
+            render(&overview);
+        }
+    });
+
+    // 6. 启动自驱动流水线
     run_pipeline(components, data_layer, bus).await?;
 
-    // 6. 打印心跳报告
+    // 7. 停止汇聚中心
+    monitor_handle.abort();
+
+    // 8. 打印心跳报告
     print_heartbeat_report().await;
 
     Ok(())

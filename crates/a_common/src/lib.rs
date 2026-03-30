@@ -20,6 +20,7 @@ pub mod exchange;
 pub mod volatility;
 pub mod heartbeat;
 pub mod event_bus;  // PipelineBus 跨协程信号总线
+pub mod sysmon;     // 系统心跳监控（tmpfs + JSON）
 
 // Re-exports - PipelineBus
 pub use volatility::{VolatilityCalc, VolatilityStats, VolatilityState, VolatilityRank, VolatilityEntry, KLineInput};
