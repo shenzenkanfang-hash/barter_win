@@ -23,10 +23,12 @@ pub use shared::{account_pool::{AccountInfo, AccountMargin, AccountPool, Circuit
 pub use x_data::state::{StateViewer, StateManager, UnifiedStateView, SystemSnapshot};
 
 // Re-exports - RiskService trait and types
+#[allow(deprecated)]
 pub use risk_service::{
     RiskService, RiskServiceError, RiskServiceAdapter,
     PreCheckRequest, PreCheckResult, RiskSide, RiskLevel,
-    ReCheckRequest, ReCheckResult,
+    FinalCheckRequest, FinalCheckResult,
+    ReCheckRequest, ReCheckResult, // deprecated aliases
     RiskSnapshot,
     MockRiskService,
 };

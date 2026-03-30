@@ -102,11 +102,15 @@ impl Default for RiskLevel {
     }
 }
 
-// ==================== Stage 2: ReCheck 请求/结果 ====================
+// ==================== Stage 2: FinalCheck 请求/结果 ====================
+
+/// 第二阶段复核请求（FinalCheck）
+#[deprecated(since = "0.2.0", note = "Use FinalCheckRequest instead")]
+pub type ReCheckRequest = FinalCheckRequest;
 
 /// 第二阶段复核请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReCheckRequest {
+pub struct FinalCheckRequest {
     /// 订单ID
     pub order_id: String,
     /// 成交ID
@@ -133,9 +137,13 @@ pub struct ReCheckRequest {
     pub total_equity: Decimal,
 }
 
+/// 第二阶段复核结果（FinalCheck）
+#[deprecated(since = "0.2.0", note = "Use FinalCheckResult instead")]
+pub type ReCheckResult = FinalCheckResult;
+
 /// 第二阶段复核结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReCheckResult {
+pub struct FinalCheckResult {
     /// 是否通过
     pub passed: bool,
     /// 警告信息
@@ -219,13 +227,17 @@ pub trait RiskService: Send + Sync {
 
     // ==================== Stage 2: ReCheck ====================
 
-    /// 成交后风控复核
+    /// 成交后风控复核（FinalCheck）
     ///
     /// 在订单成交后调用，检查：
     /// - 持仓是否超限
     /// - 名义价值是否合理
     /// - 是否需要触发告警
-    async fn re_check(&self, request: ReCheckRequest) -> Result<ReCheckResult, RiskServiceError>;
+    async fn final_check(&self, request: FinalCheckRequest) -> Result<FinalCheckResult, RiskServiceError>;
+
+    /// 成交后风控复核（别名，兼容旧代码）
+    #[deprecated(since = "0.2.0", note = "Use final_check instead")]
+    async fn re_check(&self, request: FinalCheckRequest) -> Result<FinalCheckResult, RiskServiceError>;
 
     /// 确认保证金（从冻结转为占用）
     ///
@@ -279,7 +291,12 @@ impl RiskService for RiskServiceAdapter {
         self.inner.unfreeze(order_id).await
     }
 
-    async fn re_check(&self, request: ReCheckRequest) -> Result<ReCheckResult, RiskServiceError> {
+    async fn final_check(&self, request: FinalCheckRequest) -> Result<FinalCheckResult, RiskServiceError> {
+        self.inner.final_check(request).await
+    }
+
+    #[allow(deprecated)]
+    async fn re_check(&self, request: FinalCheckRequest) -> Result<FinalCheckResult, RiskServiceError> {
         self.inner.re_check(request).await
     }
 
@@ -359,22 +376,27 @@ impl RiskService for MockRiskService {
         Ok(Decimal::ZERO)
     }
 
-    async fn re_check(&self, _request: ReCheckRequest) -> Result<ReCheckResult, RiskServiceError> {
+    async fn final_check(&self, _request: FinalCheckRequest) -> Result<FinalCheckResult, RiskServiceError> {
         if self.re_check_pass {
-            Ok(ReCheckResult {
+            Ok(FinalCheckResult {
                 passed: true,
                 warnings: vec![],
                 alert_flagged: false,
                 checked_at: Utc::now(),
             })
         } else {
-            Ok(ReCheckResult {
+            Ok(FinalCheckResult {
                 passed: false,
                 warnings: vec!["Mock rejection".to_string()],
                 alert_flagged: true,
                 checked_at: Utc::now(),
             })
         }
+    }
+
+    #[allow(deprecated)]
+    async fn re_check(&self, _request: FinalCheckRequest) -> Result<FinalCheckResult, RiskServiceError> {
+        self.final_check(_request).await
     }
 
     async fn confirm(&self, _order_id: &str, _fill_value: Decimal) -> Result<(), RiskServiceError> {
@@ -439,10 +461,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mock_risk_service_re_check_pass() {
+    async fn test_mock_risk_service_final_check_pass() {
         let service = MockRiskService::new().with_re_check_pass(true);
 
-        let request = ReCheckRequest {
+        let request = FinalCheckRequest {
             order_id: "order_1".to_string(),
             fill_id: "fill_1".to_string(),
             symbol: "BTCUSDT".to_string(),
@@ -457,16 +479,16 @@ mod tests {
             total_equity: dec!(10000),
         };
 
-        let result = service.re_check(request).await.unwrap();
+        let result = service.final_check(request).await.unwrap();
         assert!(result.passed);
         assert!(!result.alert_flagged);
     }
 
     #[tokio::test]
-    async fn test_mock_risk_service_re_check_with_warning() {
+    async fn test_mock_risk_service_final_check_with_warning() {
         let service = MockRiskService::new().with_re_check_pass(false);
 
-        let request = ReCheckRequest {
+        let request = FinalCheckRequest {
             order_id: "order_1".to_string(),
             fill_id: "fill_1".to_string(),
             symbol: "BTCUSDT".to_string(),
@@ -481,10 +503,33 @@ mod tests {
             total_equity: dec!(10000),
         };
 
-        let result = service.re_check(request).await.unwrap();
+        let result = service.final_check(request).await.unwrap();
         assert!(!result.passed);
         assert!(result.alert_flagged);
         assert!(!result.warnings.is_empty());
+    }
+
+    #[allow(deprecated)]
+    #[tokio::test]
+    async fn test_mock_risk_service_re_check_alias() {
+        // 验证 re_check 别名仍然可用
+        let service = MockRiskService::new().with_re_check_pass(true);
+        let request = ReCheckRequest {
+            order_id: "order_1".to_string(),
+            fill_id: "fill_1".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            strategy_id: "trend".to_string(),
+            side: RiskSide::Long,
+            filled_qty: dec!(0.1),
+            fill_price: dec!(10000),
+            fill_value: dec!(1000),
+            fill_time: Utc::now(),
+            current_position_qty: dec!(0.1),
+            available_balance: dec!(9000),
+            total_equity: dec!(10000),
+        };
+        let result = service.re_check(request).await.unwrap();
+        assert!(result.passed);
     }
 
     #[tokio::test]
@@ -548,8 +593,8 @@ mod tests {
     }
 
     #[test]
-    fn test_re_check_request_fields() {
-        let request = ReCheckRequest {
+    fn test_final_check_request_fields() {
+        let request = FinalCheckRequest {
             order_id: "test_order".to_string(),
             fill_id: "test_fill".to_string(),
             symbol: "BTCUSDT".to_string(),
@@ -617,8 +662,8 @@ mod tests {
     }
 
     #[test]
-    fn test_re_check_result_with_warnings() {
-        let result = ReCheckResult {
+    fn test_final_check_result_with_warnings() {
+        let result = FinalCheckResult {
             passed: true,
             warnings: vec![
                 "position approaching limit".to_string(),
@@ -634,8 +679,8 @@ mod tests {
     }
 
     #[test]
-    fn test_re_check_result_clean() {
-        let result = ReCheckResult {
+    fn test_final_check_result_clean() {
+        let result = FinalCheckResult {
             passed: true,
             warnings: vec![],
             alert_flagged: false,

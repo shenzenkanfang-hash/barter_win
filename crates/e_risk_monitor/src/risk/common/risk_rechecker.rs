@@ -32,11 +32,11 @@ impl RiskReChecker {
         }
     }
 
-    /// 锁内复核检查
+    /// 锁内复核检查（FinalCheck）
     ///
     /// 在全局锁保护下再次核对订单的风控条件。
     /// 如果不通过，锁会被释放，订单被拒绝。
-    pub fn re_check(
+    pub fn final_check(
         &self,
         available_balance: Decimal,
         order_value: Decimal,
@@ -154,9 +154,9 @@ mod tests {
     /// E3.2 RiskReChecker 测试 - 锁内复核检查
 
     #[test]
-    fn test_risk_re_checker_basic() {
+    fn test_risk_final_checker_basic() {
         let checker = RiskReChecker::new();
-        let result = checker.re_check(
+        let result = checker.final_check(
             dec!(10000),    // available_balance
             dec!(1000),     // order_value
             dec!(50000),    // current_price
@@ -167,9 +167,9 @@ mod tests {
     }
 
     #[test]
-    fn test_risk_re_checker_insufficient_fund() {
+    fn test_risk_final_checker_insufficient_fund() {
         let checker = RiskReChecker::new();
-        let result = checker.re_check(
+        let result = checker.final_check(
             dec!(500),      // available_balance
             dec!(1000),     // order_value
             dec!(50000),    // current_price
@@ -180,10 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn test_risk_re_checker_price_deviation() {
+    fn test_risk_final_checker_price_deviation() {
         let checker = RiskReChecker::new();
         // 价格偏离超过 10%
-        let result = checker.re_check(
+        let result = checker.final_check(
             dec!(10000),
             dec!(1000),
             dec!(55000),    // current_price 偏离 reference_price 11%
@@ -207,10 +207,10 @@ mod tests {
     }
 
     #[test]
-    fn test_risk_re_checker_extreme_volatility_mode() {
+    fn test_risk_final_checker_extreme_volatility_mode() {
         let checker = RiskReChecker::new();
         // 极端波动模式：禁止所有交易
-        let result = checker.re_check(
+        let result = checker.final_check(
             dec!(10000),
             dec!(1000),
             dec!(50000),
@@ -223,10 +223,10 @@ mod tests {
     }
 
     #[test]
-    fn test_risk_re_checker_high_volatility_mode_rejected() {
+    fn test_risk_final_checker_high_volatility_mode_rejected() {
         let checker = RiskReChecker::new();
         // 高波动模式：订单比例超过 40%
-        let result = checker.re_check(
+        let result = checker.final_check(
             dec!(10000),
             dec!(5000),     // order_value / available_balance = 50% > 40%
             dec!(50000),
@@ -239,10 +239,10 @@ mod tests {
     }
 
     #[test]
-    fn test_risk_re_checker_high_volatility_mode_pass() {
+    fn test_risk_final_checker_high_volatility_mode_pass() {
         let checker = RiskReChecker::new();
         // 高波动模式：订单比例 30% < 40% -> 通过
-        let result = checker.re_check(
+        let result = checker.final_check(
             dec!(10000),
             dec!(3000),
             dec!(50000),
@@ -317,10 +317,10 @@ mod tests {
     }
 
     #[test]
-    fn test_risk_re_checker_zero_reference_price() {
+    fn test_risk_final_checker_zero_reference_price() {
         let checker = RiskReChecker::new();
         // 参考价为0时不检查价格偏离 -> 通过
-        let result = checker.re_check(
+        let result = checker.final_check(
             dec!(10000),
             dec!(1000),
             dec!(50000),

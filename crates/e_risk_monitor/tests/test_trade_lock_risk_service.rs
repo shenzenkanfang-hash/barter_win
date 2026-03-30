@@ -3,11 +3,11 @@
 //! Tests the interaction between TradeLock and RiskService:
 //! 1. TradeLock + RiskService PreCheck integration
 //! 2. TradeLock blocking concurrent strategy execution
-//! 3. Full flow: acquire lock → pre_check → re_check → release lock
+//! 3. Full flow: acquire lock → pre_check → final_check → release lock
 
 use e_risk_monitor::{
     LockError, MockRiskService, PreCheckRequest, PreCheckResult,
-    ReCheckRequest, ReCheckResult, RiskLevel, RiskService, RiskSide,
+    FinalCheckRequest, FinalCheckResult, RiskLevel, RiskService, RiskSide,
     RiskSnapshot, TradeLock,
 };
 use rust_decimal::Decimal;
@@ -30,9 +30,9 @@ fn create_pre_check_request(order_id: &str, strategy_id: &str) -> PreCheckReques
     }
 }
 
-/// Helper: create a standard ReCheckRequest
-fn create_re_check_request(order_id: &str, strategy_id: &str) -> ReCheckRequest {
-    ReCheckRequest {
+/// Helper: create a standard FinalCheckRequest
+fn create_final_check_request(order_id: &str, strategy_id: &str) -> FinalCheckRequest {
+    FinalCheckRequest {
         order_id: order_id.to_string(),
         fill_id: "fill_1".to_string(),
         symbol: "BTCUSDT".to_string(),
@@ -154,11 +154,11 @@ async fn test_same_strategy_can_reacquire() {
 }
 
 // ============================================================================
-// Test 3: Full Flow - acquire lock → pre_check → re_check → release lock
+// Test 3: Full Flow - acquire lock → pre_check → final_check → release lock
 // ============================================================================
 
 #[tokio::test]
-async fn test_full_flow_lock_precheck_reccheck_release() {
+async fn test_full_flow_lock_precheck_finalcheck_release() {
     let trade_lock = TradeLock::new_arc();
     let risk_service = Arc::new(MockRiskService::new()
         .with_pre_check_pass(true)
@@ -175,11 +175,11 @@ async fn test_full_flow_lock_precheck_reccheck_release() {
     let pre_result = risk_service.pre_check(pre_request).await.expect("PreCheck failed");
     assert!(pre_result.passed, "PreCheck should pass");
 
-    // Step 3: Simulate order execution and ReCheck
-    let re_request = create_re_check_request("order_1", strategy_id);
-    let re_result = risk_service.re_check(re_request).await.expect("ReCheck failed");
-    assert!(re_result.passed, "ReCheck should pass");
-    assert!(!re_result.alert_flagged);
+    // Step 3: Simulate order execution and FinalCheck
+    let final_request = create_final_check_request("order_1", strategy_id);
+    let final_result = risk_service.final_check(final_request).await.expect("FinalCheck failed");
+    assert!(final_result.passed, "FinalCheck should pass");
+    assert!(!final_result.alert_flagged);
 
     // Step 4: Release lock
     assert!(trade_lock.is_held());
@@ -204,18 +204,18 @@ async fn test_full_flow_with_precheck_rejection() {
     let pre_result = risk_service.pre_check(pre_request).await.expect("PreCheck failed");
     assert!(!pre_result.passed, "PreCheck should reject");
 
-    // Step 3: No ReCheck needed since pre-check failed
+    // Step 3: No FinalCheck needed since pre-check failed
     // Step 4: Release lock
     drop(guard);
     assert!(!trade_lock.is_held());
 }
 
 #[tokio::test]
-async fn test_full_flow_with_reccheck_warning() {
+async fn test_full_flow_with_finalcheck_warning() {
     let trade_lock = TradeLock::new_arc();
     let risk_service = Arc::new(MockRiskService::new()
         .with_pre_check_pass(true)
-        .with_re_check_pass(false)); // ReCheck will generate warning
+        .with_re_check_pass(false)); // FinalCheck will generate warning
 
     let strategy_id = "strategy_1";
 
@@ -227,12 +227,12 @@ async fn test_full_flow_with_reccheck_warning() {
     let pre_result = risk_service.pre_check(pre_request).await.expect("PreCheck failed");
     assert!(pre_result.passed);
 
-    // ReCheck generates warning
-    let re_request = create_re_check_request("order_1", strategy_id);
-    let re_result = risk_service.re_check(re_request).await.expect("ReCheck failed");
-    assert!(!re_result.passed, "ReCheck should fail");
-    assert!(re_result.alert_flagged, "Should be flagged for alert");
-    assert!(!re_result.warnings.is_empty(), "Should have warnings");
+    // FinalCheck generates warning
+    let final_request = create_final_check_request("order_1", strategy_id);
+    let final_result = risk_service.final_check(final_request).await.expect("FinalCheck failed");
+    assert!(!final_result.passed, "FinalCheck should fail");
+    assert!(final_result.alert_flagged, "Should be flagged for alert");
+    assert!(!final_result.warnings.is_empty(), "Should have warnings");
 
     // Lock still released
     drop(guard);
