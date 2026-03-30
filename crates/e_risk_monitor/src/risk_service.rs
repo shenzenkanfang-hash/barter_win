@@ -526,4 +526,196 @@ mod tests {
         assert!(snapshot.available);
         assert_eq!(snapshot.total_pre_checks, 0);
     }
+
+    #[test]
+    fn test_pre_check_request_fields() {
+        let request = PreCheckRequest {
+            order_id: "test_order".to_string(),
+            symbol: "ETHUSDT".to_string(),
+            strategy_id: "min_trend".to_string(),
+            side: RiskSide::Short,
+            quantity: dec!(0.5),
+            order_value: dec!(2000),
+            available_balance: dec!(50000),
+            current_position_qty: dec!(-0.3),
+            total_equity: dec!(52000),
+        };
+
+        assert_eq!(request.order_id, "test_order");
+        assert_eq!(request.symbol, "ETHUSDT");
+        assert_eq!(request.side, RiskSide::Short);
+        assert_eq!(request.quantity, dec!(0.5));
+    }
+
+    #[test]
+    fn test_re_check_request_fields() {
+        let request = ReCheckRequest {
+            order_id: "test_order".to_string(),
+            fill_id: "test_fill".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            strategy_id: "day_trend".to_string(),
+            side: RiskSide::Long,
+            filled_qty: dec!(0.01),
+            fill_price: dec!(45000),
+            fill_value: dec!(450),
+            fill_time: Utc::now(),
+            current_position_qty: dec!(0.01),
+            available_balance: dec!(9500),
+            total_equity: dec!(10000),
+        };
+
+        assert_eq!(request.order_id, "test_order");
+        assert_eq!(request.fill_id, "test_fill");
+        assert_eq!(request.side, RiskSide::Long);
+        assert_eq!(request.fill_value, dec!(450));
+    }
+
+    #[test]
+    fn test_risk_side_equality() {
+        assert_eq!(RiskSide::Long, RiskSide::Long);
+        assert_eq!(RiskSide::Short, RiskSide::Short);
+        assert_ne!(RiskSide::Long, RiskSide::Short);
+    }
+
+    #[test]
+    fn test_risk_level_all_variants() {
+        assert_eq!(RiskLevel::Low, RiskLevel::Low);
+        assert_eq!(RiskLevel::Medium, RiskLevel::Medium);
+        assert_eq!(RiskLevel::High, RiskLevel::High);
+        assert_eq!(RiskLevel::Rejected, RiskLevel::Rejected);
+    }
+
+    #[test]
+    fn test_risk_service_error_variants() {
+        let errors = vec![
+            RiskServiceError::Rejected("test".to_string()),
+            RiskServiceError::Unavailable("unavailable".to_string()),
+            RiskServiceError::InvalidArgument("invalid".to_string()),
+            RiskServiceError::SystemError("system".to_string()),
+        ];
+
+        assert!(matches!(errors[0], RiskServiceError::Rejected(_)));
+        assert!(matches!(errors[1], RiskServiceError::Unavailable(_)));
+        assert!(matches!(errors[2], RiskServiceError::InvalidArgument(_)));
+        assert!(matches!(errors[3], RiskServiceError::SystemError(_)));
+    }
+
+    #[test]
+    fn test_pre_check_result_rejected() {
+        let result = PreCheckResult {
+            passed: false,
+            frozen_amount: dec!(0),
+            reject_reason: Some("insufficient margin".to_string()),
+            risk_level: RiskLevel::Rejected,
+            checked_at: Utc::now(),
+        };
+
+        assert!(!result.passed);
+        assert_eq!(result.risk_level, RiskLevel::Rejected);
+        assert!(result.reject_reason.is_some());
+        assert_eq!(result.reject_reason.unwrap(), "insufficient margin");
+    }
+
+    #[test]
+    fn test_re_check_result_with_warnings() {
+        let result = ReCheckResult {
+            passed: true,
+            warnings: vec![
+                "position approaching limit".to_string(),
+                "high volatility detected".to_string(),
+            ],
+            alert_flagged: true,
+            checked_at: Utc::now(),
+        };
+
+        assert!(result.passed);
+        assert!(result.alert_flagged);
+        assert_eq!(result.warnings.len(), 2);
+    }
+
+    #[test]
+    fn test_re_check_result_clean() {
+        let result = ReCheckResult {
+            passed: true,
+            warnings: vec![],
+            alert_flagged: false,
+            checked_at: Utc::now(),
+        };
+
+        assert!(result.passed);
+        assert!(!result.alert_flagged);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_mock_risk_service_freeze_unfreeze() {
+        let service = MockRiskService::new();
+
+        // freeze
+        let freeze_result = service.freeze("order_1", dec!(100)).await;
+        assert!(freeze_result.is_ok());
+
+        // unfreeze
+        let unfreeze_result = service.unfreeze("order_1").await;
+        assert!(unfreeze_result.is_ok());
+        assert_eq!(unfreeze_result.unwrap(), dec!(0)); // Mock returns 0
+    }
+
+    #[tokio::test]
+    async fn test_mock_risk_service_confirm() {
+        let service = MockRiskService::new();
+
+        let result = service.confirm("order_1", dec!(100)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_mock_risk_service_snapshot() {
+        let service = MockRiskService::new();
+
+        let snapshot = service.snapshot().await.unwrap();
+        assert!(snapshot.available);
+        // MockRiskService 使用默认 snapshot，默认 service_name 为 "RiskService"
+        assert_eq!(snapshot.service_name, "RiskService");
+    }
+
+    #[tokio::test]
+    async fn test_mock_risk_service_reset_stats() {
+        let service = MockRiskService::new();
+
+        let result = service.reset_stats().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_mock_risk_service_name() {
+        let service = MockRiskService::new();
+        assert_eq!(service.name(), "MockRiskService");
+    }
+
+    #[test]
+    fn test_risk_service_adapter() {
+        let inner = Arc::new(MockRiskService::new());
+        let adapter = RiskServiceAdapter::new(inner.clone());
+
+        assert_eq!(adapter.name(), "MockRiskService");
+    }
+
+    #[test]
+    fn test_risk_snapshot_fields() {
+        let snapshot = RiskSnapshot {
+            service_name: "TestService".to_string(),
+            available: true,
+            pre_check_pass_rate: 0.95,
+            re_check_reject_rate: 0.02,
+            total_pre_checks: 100,
+            total_re_checks: 50,
+            last_check_at: Some(Utc::now()),
+        };
+
+        assert_eq!(snapshot.service_name, "TestService");
+        assert!(snapshot.available);
+        assert_eq!(snapshot.total_pre_checks, 100);
+        assert_eq!(snapshot.total_re_checks, 50);
+    }
 }

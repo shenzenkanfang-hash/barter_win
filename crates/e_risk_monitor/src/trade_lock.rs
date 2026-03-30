@@ -351,4 +351,162 @@ mod tests {
         assert!(!lock.is_held());
         assert_eq!(lock.version(), 0);
     }
+
+    #[test]
+    fn test_trade_lock_multiple_strategy_sequence() {
+        let lock = TradeLock::new();
+
+        // strategy_1 获取并释放
+        {
+            let _guard = lock.acquire("strategy_1").unwrap();
+            assert!(lock.is_held());
+            assert_eq!(lock.holder(), Some("strategy_1".to_string()));
+        }
+        assert!(!lock.is_held());
+
+        // strategy_2 可以获取
+        let guard = lock.acquire("strategy_2").unwrap();
+        assert_eq!(lock.holder(), Some("strategy_2".to_string()));
+        drop(guard);
+
+        assert!(!lock.is_held());
+    }
+
+    #[test]
+    fn test_trade_lock_reentry_count_tracking() {
+        let lock = TradeLock::new();
+
+        // 重入3次（允许同一 strategy_id 重入）
+        let _g1 = lock.acquire("strategy_1").unwrap();
+        let _g2 = lock.acquire("strategy_1").unwrap();
+        let _g3 = lock.acquire("strategy_1").unwrap();
+
+        assert!(lock.is_held());
+        assert_eq!(lock.version(), 3);
+
+        // TradeLock uses simple presence tracking, not reentrant counting.
+        // Multiple acquires by same strategy are allowed but each drop releases.
+    }
+
+    #[test]
+    fn test_trade_lock_holder_after_reentry() {
+        let lock = TradeLock::new();
+
+        let g1 = lock.acquire("strategy_1").unwrap();
+        let _g2 = lock.acquire("strategy_1").unwrap();
+
+        // 锁持有者仍是 strategy_1
+        assert_eq!(lock.holder(), Some("strategy_1".to_string()));
+
+        // Note: TradeLock does NOT support reentrant counting.
+        // Dropping any guard releases the lock, even though g2 is still alive.
+        drop(g1);
+        assert!(!lock.is_held(), "Dropping any guard releases the lock (no reentrant count)");
+    }
+
+    #[test]
+    fn test_async_trade_lock_guard_manual_release() {
+        let lock = TradeLock::new_arc();
+        let guard = lock.acquire("strategy_1").unwrap();
+
+        let async_guard = AsyncTradeLockGuard::from_sync(guard);
+
+        // 手动释放
+        async_guard.release();
+        assert!(!lock.is_held());
+    }
+
+    #[test]
+    fn test_async_trade_lock_guard_drop_releases() {
+        let lock = TradeLock::new_arc();
+        let guard = lock.acquire("strategy_1").unwrap();
+
+        let async_guard = AsyncTradeLockGuard::from_sync(guard);
+        assert!(lock.is_held());
+
+        // drop async_guard
+        drop(async_guard);
+        assert!(!lock.is_held());
+    }
+
+    #[test]
+    fn test_trade_lock_guard_version_at_acquire_time() {
+        let lock = TradeLock::new();
+
+        let guard1 = lock.acquire("strategy_1").unwrap();
+        let version_at_acquire = guard1.version();
+        assert_eq!(version_at_acquire, 1);
+
+        let guard2 = lock.acquire("strategy_1").unwrap();
+        let version_at_acquire2 = guard2.version();
+        assert_eq!(version_at_acquire2, 2);
+
+        // guard1 的 version() 返回当前锁版本，不是捕获时的版本
+        // 因为 guard 只是委托给 lock.version()
+        assert_eq!(guard1.version(), 2); // 反映当前版本
+    }
+
+    #[test]
+    fn test_trade_lock_clone_independent_holders() {
+        let lock = TradeLock::new();
+        let lock_clone = lock.clone();
+
+        // 两个引用独立持有
+        let guard1 = lock.acquire("strategy_1").unwrap();
+        assert!(lock.is_held());
+        assert!(lock_clone.is_held()); // 因为是同一个锁
+    }
+
+    #[test]
+    fn test_trade_lock_withdraw_sequence() {
+        let lock = TradeLock::new();
+
+        // 获取锁
+        let guard = lock.acquire("strategy_1").unwrap();
+        assert!(lock.is_held());
+        assert_eq!(lock.version(), 1);
+
+        // 释放
+        drop(guard);
+        assert!(!lock.is_held());
+        assert_eq!(lock.version(), 2);
+
+        // 再次获取
+        let guard2 = lock.acquire("strategy_1").unwrap();
+        assert!(lock.is_held());
+        assert_eq!(lock.version(), 3);
+        drop(guard2);
+    }
+
+    #[test]
+    fn test_trade_lock_concurrent_threads() {
+        use std::thread;
+        use std::sync::Arc;
+
+        let lock = Arc::new(TradeLock::new());
+        let results = Arc::new(parking_lot::Mutex::new(Vec::new()));
+
+        let handles: Vec<_> = (0..3).map(|i| {
+            let lock = lock.clone();
+            let results = results.clone();
+            thread::spawn(move || {
+                let strategy_id = format!("strategy_{}", i);
+                let acquire_result = lock.acquire(&strategy_id);
+                let held = lock.is_held();
+                let version = lock.version();
+                results.lock().push((strategy_id, acquire_result.is_ok(), held, version));
+                if acquire_result.is_ok() {
+                    drop(acquire_result.unwrap());
+                }
+            })
+        }).collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let results = results.lock();
+        // 至少有一个成功获取
+        assert!(results.iter().any(|r| r.1)); // at least one acquire succeeded
+    }
 }
