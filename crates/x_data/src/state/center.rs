@@ -8,26 +8,80 @@ use parking_lot::RwLock;
 #[cfg(test)]
 use chrono::Utc;
 
+use async_trait::async_trait;
 use super::component::{ComponentState, ComponentStatus};
 
-/// StateCenter 轻量级状态中心
+/// StateCenter trait - 轻量级组件状态中心接口
 ///
-/// 用于追踪组件的生命状态，只记录：
-/// - 组件 ID
-/// - 运行状态（Running/Stopped/Stale）
-/// - 最后活跃时间
+/// 定义状态中心的核心操作，用于追踪组件的生命状态。
+/// 只记录：组件 ID、运行状态、最后活跃时间。
 ///
 /// 不承载业务数据，是 pure infrastructure 层。
+#[async_trait]
+pub trait StateCenterTrait: Send + Sync {
+    /// 注册新组件（初始状态为 Running）
+    fn register(&self, component_id: String);
+
+    /// 注册新组件（指定初始状态）
+    fn register_with_status(&self, component_id: String, status: ComponentStatus);
+
+    /// 心跳更新（标记组件为活跃）
+    fn heartbeat(&self, component_id: &str) -> Option<()>;
+
+    /// 停止组件
+    fn stop(&self, component_id: &str) -> Option<()>;
+
+    /// 设置组件错误状态
+    fn set_error(&self, component_id: &str, error: String) -> Option<()>;
+
+    /// 获取组件状态（只读）
+    fn get_state(&self, component_id: &str) -> Option<ComponentState>;
+
+    /// 检查组件是否存在
+    fn contains(&self, component_id: &str) -> bool;
+
+    /// 获取所有组件状态
+    fn get_all_states(&self) -> Vec<ComponentState>;
+
+    /// 获取所有 Running 状态的组件
+    fn get_running_components(&self) -> Vec<ComponentState>;
+
+    /// 获取所有已停止的组件
+    fn get_stopped_components(&self) -> Vec<ComponentState>;
+
+    /// 获取所有超时的组件（基于时间阈值）
+    fn get_stale_components(&self) -> Vec<ComponentState>;
+
+    /// 检查是否有任何超时的组件
+    fn has_stale_components(&self) -> bool;
+
+    /// 获取存活组件数量（Running 且未超时）
+    fn alive_count(&self) -> usize;
+
+    /// 获取总组件数量
+    fn total_count(&self) -> usize;
+
+    /// 移除组件
+    fn unregister(&self, component_id: &str) -> Option<ComponentState>;
+
+    /// 清除所有组件
+    fn clear(&self);
+
+    /// 获取心跳超时阈值
+    fn stale_threshold(&self) -> i64;
+}
+
+/// StateCenterImpl - StateCenter trait 的具体实现
 #[derive(Debug)]
-pub struct StateCenter {
+pub struct StateCenterImpl {
     /// 组件状态表
     components: RwLock<HashMap<String, ComponentState>>,
     /// 心跳超时阈值（秒）
     stale_threshold_secs: i64,
 }
 
-impl StateCenter {
-    /// 创建新的 StateCenter
+impl StateCenterImpl {
+    /// 创建新的 StateCenterImpl
     ///
     /// # Arguments
     /// * `stale_threshold_secs` - 心跳超时阈值，超过此时间未更新则标记为 Stale
@@ -38,31 +92,31 @@ impl StateCenter {
         }
     }
 
-    /// 创建带 Arc 的 StateCenter（用于跨线程共享）
+    /// 创建带 Arc 的 StateCenterImpl（用于跨线程共享）
     pub fn new_arc(stale_threshold_secs: i64) -> Arc<Self> {
         Arc::new(Self::new(stale_threshold_secs))
     }
+}
 
-    /// 注册新组件（初始状态为 Running）
-    pub fn register(&self, component_id: String) {
+#[async_trait]
+impl StateCenterTrait for StateCenterImpl {
+    fn register(&self, component_id: String) {
         let state = ComponentState::new_running(component_id.clone());
         let mut components = self.components.write();
         components.insert(component_id, state);
     }
 
-    /// 注册新组件（指定初始状态）
-    pub fn register_with_status(&self, component_id: String, status: ComponentStatus) {
+    fn register_with_status(&self, component_id: String, status: ComponentStatus) {
         let state = match status {
             ComponentStatus::Running => ComponentState::new_running(component_id.clone()),
             ComponentStatus::Stopped => ComponentState::new_stopped(component_id.clone()),
-            ComponentStatus::Stale => ComponentState::new_running(component_id.clone()), // Stale 初始按 Running 处理
+            ComponentStatus::Stale => ComponentState::new_running(component_id.clone()),
         };
         let mut components = self.components.write();
         components.insert(component_id, state);
     }
 
-    /// 心跳更新（标记组件为活跃）
-    pub fn heartbeat(&self, component_id: &str) -> Option<()> {
+    fn heartbeat(&self, component_id: &str) -> Option<()> {
         let mut components = self.components.write();
         if let Some(state) = components.get_mut(component_id) {
             state.mark_alive();
@@ -72,8 +126,7 @@ impl StateCenter {
         }
     }
 
-    /// 停止组件
-    pub fn stop(&self, component_id: &str) -> Option<()> {
+    fn stop(&self, component_id: &str) -> Option<()> {
         let mut components = self.components.write();
         if let Some(state) = components.get_mut(component_id) {
             state.status = ComponentStatus::Stopped;
@@ -83,8 +136,7 @@ impl StateCenter {
         }
     }
 
-    /// 设置组件错误状态
-    pub fn set_error(&self, component_id: &str, error: String) -> Option<()> {
+    fn set_error(&self, component_id: &str, error: String) -> Option<()> {
         let mut components = self.components.write();
         if let Some(state) = components.get_mut(component_id) {
             state.status = ComponentStatus::Stopped;
@@ -95,26 +147,22 @@ impl StateCenter {
         }
     }
 
-    /// 获取组件状态（只读）
-    pub fn get_state(&self, component_id: &str) -> Option<ComponentState> {
+    fn get_state(&self, component_id: &str) -> Option<ComponentState> {
         let components = self.components.read();
         components.get(component_id).cloned()
     }
 
-    /// 检查组件是否存在
-    pub fn contains(&self, component_id: &str) -> bool {
+    fn contains(&self, component_id: &str) -> bool {
         let components = self.components.read();
         components.contains_key(component_id)
     }
 
-    /// 获取所有组件状态
-    pub fn get_all_states(&self) -> Vec<ComponentState> {
+    fn get_all_states(&self) -> Vec<ComponentState> {
         let components = self.components.read();
         components.values().cloned().collect()
     }
 
-    /// 获取所有 Running 状态的组件
-    pub fn get_running_components(&self) -> Vec<ComponentState> {
+    fn get_running_components(&self) -> Vec<ComponentState> {
         let components = self.components.read();
         components
             .values()
@@ -123,8 +171,7 @@ impl StateCenter {
             .collect()
     }
 
-    /// 获取所有已停止的组件
-    pub fn get_stopped_components(&self) -> Vec<ComponentState> {
+    fn get_stopped_components(&self) -> Vec<ComponentState> {
         let components = self.components.read();
         components
             .values()
@@ -133,8 +180,7 @@ impl StateCenter {
             .collect()
     }
 
-    /// 获取所有超时的组件（基于时间阈值）
-    pub fn get_stale_components(&self) -> Vec<ComponentState> {
+    fn get_stale_components(&self) -> Vec<ComponentState> {
         let components = self.components.read();
         components
             .values()
@@ -143,16 +189,14 @@ impl StateCenter {
             .collect()
     }
 
-    /// 检查是否有任何超时的组件
-    pub fn has_stale_components(&self) -> bool {
+    fn has_stale_components(&self) -> bool {
         let components = self.components.read();
         components
             .values()
             .any(|s| s.is_stale(self.stale_threshold_secs))
     }
 
-    /// 获取存活组件数量（Running 且未超时）
-    pub fn alive_count(&self) -> usize {
+    fn alive_count(&self) -> usize {
         let components = self.components.read();
         components
             .values()
@@ -160,38 +204,31 @@ impl StateCenter {
             .count()
     }
 
-    /// 获取总组件数量
-    pub fn total_count(&self) -> usize {
+    fn total_count(&self) -> usize {
         let components = self.components.read();
         components.len()
     }
 
-    /// 移除组件
-    pub fn unregister(&self, component_id: &str) -> Option<ComponentState> {
+    fn unregister(&self, component_id: &str) -> Option<ComponentState> {
         let mut components = self.components.write();
         components.remove(component_id)
     }
 
-    /// 清除所有组件
-    pub fn clear(&self) {
+    fn clear(&self) {
         let mut components = self.components.write();
         components.clear();
     }
 
-    /// 获取心跳超时阈值
-    pub fn stale_threshold(&self) -> i64 {
+    fn stale_threshold(&self) -> i64 {
         self.stale_threshold_secs
-    }
-
-    /// 更新心跳超时阈值
-    pub fn set_stale_threshold(&mut self, threshold_secs: i64) {
-        self.stale_threshold_secs = threshold_secs;
     }
 }
 
-impl Default for StateCenter {
+/// Type alias for backward compatibility
+pub type StateCenter = StateCenterImpl;
+
+impl Default for StateCenterImpl {
     fn default() -> Self {
-        // 默认 60 秒超时
         Self::new(60)
     }
 }
@@ -200,8 +237,8 @@ impl Default for StateCenter {
 mod tests {
     use super::*;
 
-    fn create_test_center() -> StateCenter {
-        StateCenter::new(60)
+    fn create_test_center() -> StateCenterImpl {
+        StateCenterImpl::new(60)
     }
 
     #[test]
@@ -331,27 +368,24 @@ mod tests {
         let center = create_test_center();
         center.register("component1".to_string());
         center.register("component2".to_string());
-        center.stop("component3"); // 不存在，不会增加总数
+        center.stop("component3");
 
-        // 注意：stop 一个不存在的组件会返回 None
         center.register("component3".to_string());
         center.stop("component3").unwrap();
 
         assert_eq!(center.total_count(), 3);
-        assert_eq!(center.alive_count(), 2); // component1 和 component2 是 Running
+        assert_eq!(center.alive_count(), 2);
     }
 
     #[test]
     fn test_stale_threshold() {
-        let center = StateCenter::new(120);
+        let center = StateCenterImpl::new(120);
         assert_eq!(center.stale_threshold(), 120);
 
         center.register("component1".to_string());
 
-        // 此时不应该 stale（阈值 120 秒）
         assert!(!center.has_stale_components());
 
-        // 使用旧的 last_active 来模拟超时
         let old_time = Utc::now() - chrono::Duration::seconds(180);
         {
             let mut components = center.components.write();
@@ -368,16 +402,15 @@ mod tests {
 
     #[test]
     fn test_default_threshold() {
-        let center = StateCenter::default();
+        let center = StateCenterImpl::default();
         assert_eq!(center.stale_threshold(), 60);
     }
 
     #[test]
     fn test_new_arc() {
-        let center = StateCenter::new_arc(60);
+        let center = StateCenterImpl::new_arc(60);
         center.register("component1".to_string());
 
-        // 验证 Arc 正常工作
         let state = center.get_state("component1").unwrap();
         assert_eq!(state.component_id, "component1");
     }

@@ -28,3 +28,4 @@ pub use market::{Tick, KLine, KlineData, DepthData, OrderBook, OrderBookLevel, O
 pub use trading::{SymbolRulesData, ParsedSymbolRules, OrderRejectReason, OrderResult, OrderRecord, FuturesPosition, FuturesAccount};
 pub use trading::signal::{StrategySignal, TradeCommand, StrategyId, StrategyType, StrategyLevel, PositionRef};
 pub use state::{StateViewer, StateManager, UnifiedStateView, SystemSnapshot};
+pub use state::{StateCenter, StateCenterImpl, StateCenterTrait};

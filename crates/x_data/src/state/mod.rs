@@ -18,4 +18,8 @@ pub use component::{
     ComponentState,
 };
 
-pub use center::StateCenter;
+pub use center::{
+    StateCenter,
+    StateCenterImpl,
+    StateCenterTrait,
+};
