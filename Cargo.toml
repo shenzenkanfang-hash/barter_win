@@ -19,7 +19,7 @@ edition = "2024"
 
 [[bin]]
 name = "trading-system"
-path = "src/main.rs"
+path = "src/main/main.rs"
 
 
 [dependencies]

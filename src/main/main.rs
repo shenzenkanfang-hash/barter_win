@@ -1,10 +1,10 @@
 //! Trading System v7.0 - 指标数据自驱动协程架构
 
-mod components;
-mod pipeline;
-mod utils;
-mod event_bus;  // PipelineBus
 mod actors;     // StrategyActor + RiskActor
+mod components; // SystemComponents 构造器
+mod event_bus;  // PipelineBus
+mod pipeline;   // 流水线编排
+mod utils;       // 工具函数
 
 use std::path::PathBuf;
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
