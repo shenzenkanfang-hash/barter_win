@@ -34,6 +34,7 @@
 |-------|------|------|
 | `component.started` | 组件启动 | 知道组件活了 |
 | `component.stopped` | 组件停止 | 知道组件停了 |
+| `health.summary` | 组件健康摘要（数据/指标层，1小时1次） | 1h间隔状态汇报 |
 | `data.received` | 收到K线数据 | 数据流正常 |
 | `indicator.computed` | 指标计算完成 | 计算链路正常 |
 | `strategy.signal` | 策略产生信号（含决策理由） | 策略在决策 |
@@ -45,16 +46,49 @@
 | `order.filled` | 订单成交 | 交易闭环 |
 | `order.rejected` | 订单拒绝 | 异常定位 |
 | `order.cancelled` | 订单取消 | 人工干预 |
+| `position.opened` | 开仓完整上下文（开发阶段详细） | 复盘训练 |
+| `position.closed` | 平仓完整上下文（开发阶段详细） | 复盘训练 |
 | `error.*` | 各类错误 | 异常定位 |
 | `stale.detected` | 组件 stale 检测 | 复活触发 |
 
 ### 日志字段（精简）
-- `timestamp` — ISO8601 时间戳
+- `timestamp` — ISO8601 时间戳（Mock回测时用K线时间戳，确保可复现）
 - `level` — info/warn/error
-- `component` — 组件名（strategy/risk/data/indicator）
+- `component` — 组件名（data_service/indicator_service/strategy/risk/order）
 - `event` — 事件类型（如上表）
 - `symbol` — 交易对（可选，无则省略）
 - `data` — 自由 JSON 对象（决策理由、数量、价格、错误详情等）
+
+### 分层监控架构（新增核心决策）
+**数据层 + 指标层（1小时间隔健康摘要）：**
+```rust
+pub struct ComponentHealth {
+    pub last_tick_timestamp: i64,      // 最后处理K线时间
+    pub processed_kline_count: u64,   // 已处理K线数
+    pub last_compute_latency_ms: u64, // 上次计算延迟
+    pub error_count: u32,              // 累计错误数
+}
+// 1小时输出一次到日志
+{"timestamp":"2026-03-30T12:00:00Z","level":"INFO","component":"data_service","event":"health.summary","data":{"last_tick":"2026-03-30T11:59:58Z","processed":3600,"latency_ms":2,"errors":0}}
+```
+
+**引擎/策略层（关键操作详细记录）：**
+- `position.opened`: 完整上下文（signal_source: ema_fast/slow/rsi/pine_color/cross_type, thresholds: profit_target/stop_loss, risk_check 各检查项, trade_lock 等待时间, order 参数, position_after）
+- `position.closed`: 平仓完整上下文
+- 风控触发: 检查项明细（哪项失败、阈值、当前值）
+- 锁竞争: 等待时间、队列长度
+
+### Mock回测时间戳对齐
+- 数据/指标层: 用K线时间戳（而非系统时间）作为日志 timestamp
+- 策略/引擎层: 关键操作实时详细记录
+- 目标: 确保确定性回放，可重复执行
+
+### 开发阶段详细模式
+- 开平仓记录完整 signal_source（ema_fast/slow/rsi/pine_color/cross_type）
+- 包含 thresholds（profit_target/stop_loss）
+- 包含 risk_check 各项结果
+- 包含 trade_lock 等待详情
+- 生产模式: 可精简字段
 
 ### 日志格式
 - **格式**: JSON Lines（每行一个 JSON 对象）
